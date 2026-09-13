@@ -94,6 +94,21 @@ export type Routine = {
   enabled: boolean;
 };
 
+export type Invite = {
+  id: string;
+  project_id: string;
+  project_name?: string;
+  email?: string;
+  github_login?: string;
+  role: string;
+  token?: string;
+  path?: string;
+  status: string;
+  invited_by_member_id?: string;
+  accepted_member_id?: string;
+  created_at: string;
+};
+
 export type Notification = {
   id: string;
   project_id: string;

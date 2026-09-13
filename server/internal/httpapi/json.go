@@ -19,6 +19,12 @@ func writeError(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		status = http.StatusNotFound
 	}
+	if errors.Is(err, store.ErrForbidden) {
+		status = http.StatusForbidden
+	}
+	if errors.Is(err, store.ErrConflict) {
+		status = http.StatusConflict
+	}
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 

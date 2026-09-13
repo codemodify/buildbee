@@ -1,6 +1,6 @@
 # v0 status
 
-Honest checklist after the embed-web + Notifications inbox slice. Core Server + web loop is in place. Remaining work is polish, multi-user, and the deferred desktop/IDE/Nostr tracks.
+Honest checklist after Member Invite. v0 core (including multi-user join) is in place. Remaining work is polish and the deferred desktop/IDE/Nostr tracks.
 
 ## Shipped (v0 core)
 
@@ -15,13 +15,13 @@ Honest checklist after the embed-web + Notifications inbox slice. Core Server + 
 - [x] One Server hosts API + UI (`Dockerfile` / `make build` / `BUILDBEE_WEB_DIR`)
 - [x] CLI `buildbee`; compose + Railway
 - [x] CI (memory store, FakeACP, no Docker-in-Docker)
+- [x] Multi-user Member Invite (token link; owner/admin invite; accept binds session / GitHub Identity)
 
 ## Still open (not new subsystems)
 
-- [ ] Multi-user Member invite / join (today: owner adds a Member on the Project; no email/OAuth invite link)
-- [ ] Bind GitHub Identity to an existing Member across Projects
+- [ ] Bind GitHub Identity to an existing Member across Projects automatically (Invite accept does this per Project)
 - [ ] Notification preferences / per-Role mute
-- [ ] Empty-state and error UX beyond the current pages (keep polishing in place)
+- [ ] Empty-state and error UX beyond current pages (keep polishing in place)
 - [ ] Persist Decision assignee (inbox is “all humans” for new Decisions)
 
 ## Deferred (out of v0)

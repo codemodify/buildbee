@@ -8,7 +8,11 @@ import (
 	"github.com/codemodify/buildbee/server/internal/models"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound  = errors.New("not found")
+	ErrForbidden = errors.New("forbidden")
+	ErrConflict  = errors.New("conflict")
+)
 
 // Store persists Project workspace records.
 type Store interface {
@@ -74,4 +78,11 @@ type Store interface {
 	GetNotification(ctx context.Context, id string) (*models.Notification, error)
 	MarkNotificationRead(ctx context.Context, id string) (*models.Notification, error)
 	MarkAllNotificationsRead(ctx context.Context, memberID string) (int, error)
+
+	CreateInvite(ctx context.Context, in models.Invite) (*models.Invite, error)
+	GetInvite(ctx context.Context, id string) (*models.Invite, error)
+	GetInviteByToken(ctx context.Context, token string) (*models.Invite, error)
+	ListInvites(ctx context.Context, projectID string, pendingOnly bool) ([]models.Invite, error)
+	AcceptInvite(ctx context.Context, id, memberID string) (*models.Invite, error)
+	RevokeInvite(ctx context.Context, id string) (*models.Invite, error)
 }

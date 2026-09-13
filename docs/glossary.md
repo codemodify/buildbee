@@ -16,6 +16,7 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | Noun | Meaning |
 | --- | --- |
 | **Member** | A human or Bot that belongs to a Project. |
+| **Invite** | A token link that lets a human join a Project as member or admin. |
 | **Role** | What a Member does in a Project. Humans start as **owner**. Seeded Bots: **Scout** (triage), **Builder** (implement), **Sentry** (review/CI), **Pulse** (Routines/digests). |
 | **Identity** | Who a Member is. Humans will authenticate later (GitHub OAuth). Bots receive server-issued Identities. |
 

@@ -108,6 +108,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/notifications/read-all", s.readAllNotifications)
 	mux.HandleFunc("POST /v1/notifications/{notificationID}/read", s.readNotification)
 
+	mux.HandleFunc("GET /v1/projects/{projectID}/invites", s.listInvites)
+	mux.HandleFunc("POST /v1/projects/{projectID}/invites", s.createInvite)
+	mux.HandleFunc("GET /v1/invites/{token}", s.getInvitePreview)
+	mux.HandleFunc("POST /v1/invites/{token}/accept", s.acceptInvite)
+	mux.HandleFunc("DELETE /v1/invites/{inviteID}", s.revokeInvite)
+
 	web := webui.Handler()
 	return s.auth.RequireMutating(withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/v1") {
@@ -126,7 +132,7 @@ func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications",
+			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications", "invites",
 		},
 	})
 }
@@ -135,7 +141,7 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Member-ID")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

@@ -26,16 +26,25 @@ const (
 	TypeMention      = "mention"
 	TypeMemory       = "memory"
 	TypeNotification = "notification"
+	TypeInvite       = "invite"
 )
 
 // Bot Role values seeded on every new Project.
 const (
 	RoleOwner   = "owner"
+	RoleAdmin   = "admin"
+	RoleMember  = "member"
 	RoleScout   = "scout"
 	RoleBuilder = "builder"
 	RoleSentry  = "sentry"
 	RolePulse   = "pulse"
 )
+
+// CanManageInvites is true for Project owner or admin.
+func CanManageInvites(role string) bool {
+	r := strings.ToLower(strings.TrimSpace(role))
+	return r == RoleOwner || r == RoleAdmin
+}
 
 type Project struct {
 	ID        string    `json:"id"`
@@ -278,6 +287,37 @@ type Routine struct {
 	Enabled     bool       `json:"enabled"`
 	LastRunAt   *time.Time `json:"last_run_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// Invite lets a human join a Project via token link.
+type Invite struct {
+	ID                string     `json:"id"`
+	ProjectID         string     `json:"project_id"`
+	Email             string     `json:"email,omitempty"`
+	GitHubLogin       string     `json:"github_login,omitempty"`
+	Role              string     `json:"role"`
+	Token             string     `json:"token,omitempty"`
+	InvitedByMemberID string     `json:"invited_by_member_id,omitempty"`
+	AcceptedMemberID  string     `json:"accepted_member_id,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	AcceptedAt        *time.Time `json:"accepted_at,omitempty"`
+	RevokedAt         *time.Time `json:"revoked_at,omitempty"`
+}
+
+// Status is pending, accepted, or revoked.
+func (i Invite) Status() string {
+	if i.RevokedAt != nil {
+		return "revoked"
+	}
+	if i.AcceptedAt != nil {
+		return "accepted"
+	}
+	return "pending"
+}
+
+// InvitePath is the hash-route accept link.
+func InvitePath(token string) string {
+	return "#/invite/" + token
 }
 
 // Notification is an unread/read inbox item for a Member.
