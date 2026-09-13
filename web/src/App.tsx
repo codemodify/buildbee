@@ -202,6 +202,7 @@ function ProjectPage({
   const [memberKind, setMemberKind] = useState("human");
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [handoffRole, setHandoffRole] = useState("scout");
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState("");
 
   const activeChannel = useMemo(() => {
@@ -215,13 +216,15 @@ function ProjectPage({
   async function loadProject() {
     const p = await api.getProject(projectId);
     setProject(p);
-    const [m, c, t, d, rts] = await Promise.all([
+    const [m, c, t, d, rts, plist] = await Promise.all([
       api.listMembers(projectId),
       api.listChannels(projectId),
       api.listTasks(projectId),
       api.listDecisions(projectId),
       api.listRoutines(projectId),
+      api.listProjects(),
     ]);
+    setProjects(plist.items);
     setMembers(m.items);
     setChannels(c.items);
     setTasks(t.items);
@@ -316,8 +319,35 @@ function ProjectPage({
             BuildBee
           </a>
           <h1 className="text-xl font-semibold">{project?.name ?? "Project"}</h1>
+          {projects.length > 1 ? (
+            <select
+              className="mt-1 rounded border border-zinc-800 bg-zinc-950 text-xs"
+              value={projectId}
+              onChange={(e) => {
+                window.location.hash = `#/projects/${e.target.value}`;
+              }}
+              aria-label="Switch Project"
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </div>
         <form onSubmit={addMember} className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-1 text-zinc-400">
+            <input
+              type="checkbox"
+              checked={!!project?.auto_run}
+              onChange={(e) => {
+                const on = e.target.checked;
+                void api.updateProject(projectId, { auto_run: on }).then((p) => setProject(p));
+              }}
+            />
+            auto_run
+          </label>
           <span className="text-zinc-500">
             {members.length} Members
           </span>
@@ -443,44 +473,46 @@ function ProjectPage({
                 Add
               </button>
             </form>
-            <ul className="mt-2 space-y-2">
-              {tasks.map((t) => (
-                <li key={t.id} className="rounded border border-zinc-800 px-2 py-1 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span>
-                      <a
-                        href={`#/projects/${projectId}/tasks/${t.id}`}
-                        className="hover:text-amber-300"
-                      >
-                        {t.title}
-                      </a>
-                      {t.issue_url ? (
-                        <a
-                          className="ml-2 text-xs text-amber-500 underline"
-                          href={t.issue_url}
-                        >
-                          #{t.issue_number} Issues
-                        </a>
-                      ) : null}
-                    </span>
-                    <select
-                      className="bg-zinc-950 text-xs"
-                      value={t.status}
-                      onChange={(e) => {
-                        const status = e.target.value;
-                        void api.updateTask(t.id, status).then(async () => {
-                          setTasks((await api.listTasks(projectId)).items);
-                        });
-                      }}
-                    >
-                      <option value="open">open</option>
-                      <option value="in_progress">in_progress</option>
-                      <option value="done">done</option>
-                    </select>
-                  </div>
-                </li>
+            <div className="mt-2 grid grid-cols-3 gap-1">
+              {(["open", "in_progress", "done"] as const).map((col) => (
+                <div key={col} className="rounded border border-zinc-800 bg-zinc-950/50 p-1">
+                  <p className="px-1 text-[10px] uppercase tracking-wide text-zinc-500">{col}</p>
+                  <ul className="mt-1 space-y-1">
+                    {tasks
+                      .filter((t) => t.status === col)
+                      .map((t) => (
+                        <li key={t.id} className="rounded bg-zinc-900 px-1.5 py-1 text-xs">
+                          <a
+                            href={`#/projects/${projectId}/tasks/${t.id}`}
+                            className="block hover:text-amber-300"
+                          >
+                            {t.title}
+                          </a>
+                          {t.issue_url ? (
+                            <a className="text-[10px] text-amber-500 underline" href={t.issue_url}>
+                              #{t.issue_number}
+                            </a>
+                          ) : null}
+                          <select
+                            className="mt-1 w-full bg-zinc-950 text-[10px]"
+                            value={t.status}
+                            onChange={(e) => {
+                              const status = e.target.value;
+                              void api.updateTask(t.id, status).then(async () => {
+                                setTasks((await api.listTasks(projectId)).items);
+                              });
+                            }}
+                          >
+                            <option value="open">open</option>
+                            <option value="in_progress">in_progress</option>
+                            <option value="done">done</option>
+                          </select>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           </section>
 
           <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
@@ -510,7 +542,12 @@ function ProjectPage({
                 <li key={d.id} className="text-sm">
                   <p className="font-medium">{d.prompt}</p>
                   {d.answer ? (
-                    <p className="text-emerald-400">Answer: {d.answer}</p>
+                    <p className="text-emerald-400">
+                      Answer: {d.answer}
+                      {d.reused ? (
+                        <span className="ml-1 text-xs text-zinc-500">(reused memory)</span>
+                      ) : null}
+                    </p>
                   ) : (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {(d.options.length ? d.options : ["yes"]).map((opt) => (

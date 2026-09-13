@@ -1,0 +1,12 @@
+# Copy of deploy/railway.toml so `railway up` from the repo root works.
+# Self-host compose: deploy/compose/docker-compose.yml
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

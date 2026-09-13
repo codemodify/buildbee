@@ -47,6 +47,7 @@ export type Decision = {
   options: string[];
   recommendation: string;
   answer?: string;
+  reused?: boolean;
 };
 
 export type Run = {

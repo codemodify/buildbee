@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Activity Type values recorded on a Project feed.
@@ -23,6 +24,7 @@ const (
 	TypeRoutine  = "routine"
 	TypeIssue    = "issue"
 	TypeMention  = "mention"
+	TypeMemory   = "memory"
 )
 
 // Bot Role values seeded on every new Project.
@@ -129,6 +131,17 @@ func TaskLooksAmbiguous(title, note string) bool {
 	return false
 }
 
+// DecisionFingerprint normalizes a Decision prompt for reuse ("don't ask twice").
+func DecisionFingerprint(prompt string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(prompt)) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsSpace(r) {
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
 // Identity is who a Member is (GitHub OAuth for humans; server-issued for Bots).
 type Identity struct {
 	ID          string `json:"id"`
@@ -184,8 +197,22 @@ type Decision struct {
 	Options        []string   `json:"options"`
 	Recommendation string     `json:"recommendation"`
 	Answer         string     `json:"answer,omitempty"`
+	Reused         bool       `json:"reused,omitempty"`
+	Fingerprint    string     `json:"fingerprint,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	AnsweredAt     *time.Time `json:"answered_at,omitempty"`
+}
+
+// DecisionMemory is a remembered answer so the same question is not asked twice.
+type DecisionMemory struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Fingerprint string    `json:"fingerprint"`
+	Prompt      string    `json:"prompt"`
+	Answer      string    `json:"answer"`
+	DecisionID  string    `json:"decision_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Activity struct {

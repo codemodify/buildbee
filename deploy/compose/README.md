@@ -12,6 +12,8 @@ docker compose -f deploy/compose/docker-compose.yml up --build
 
 Runtime supervisor (`--profile runtime`) listens on `:8090`. Set `BUILDBEE_FAKE_SANDBOX=0` for real Docker.
 
+This compose file is the **self-host source of truth**. Railway uses the repo-root `Dockerfile` and `deploy/README.md` env list (`DATABASE_URL`, `GITHUB_*`, `SESSION_SECRET`).
+
 MinIO (optional Artifact store) uses the `extras` profile:
 
 ```bash

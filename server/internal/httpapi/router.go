@@ -52,6 +52,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/projects", s.listProjects)
 	mux.HandleFunc("POST /v1/projects", s.createProject)
 	mux.HandleFunc("GET /v1/projects/{projectID}", s.getProject)
+	mux.HandleFunc("PATCH /v1/projects/{projectID}", s.updateProject)
 
 	mux.HandleFunc("GET /v1/projects/{projectID}/members", s.listMembers)
 	mux.HandleFunc("POST /v1/projects/{projectID}/members", s.addMember)
@@ -72,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tasks/{taskID}/handoffs", s.createHandoff)
 	mux.HandleFunc("POST /v1/handoffs/{handoffID}/complete", s.completeHandoff)
 
+	mux.HandleFunc("GET /v1/projects/{projectID}/decisions/memories", s.listDecisionMemories)
 	mux.HandleFunc("GET /v1/projects/{projectID}/decisions", s.listDecisions)
 	mux.HandleFunc("POST /v1/projects/{projectID}/decisions", s.createDecision)
 	mux.HandleFunc("POST /v1/decisions/{decisionID}/answer", s.answerDecision)
@@ -111,7 +113,7 @@ func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines", "issues", "routines", "roles",
+			"artifacts", "pipelines", "issues", "routines", "roles", "memories",
 		},
 	})
 }

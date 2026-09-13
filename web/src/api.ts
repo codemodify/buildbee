@@ -21,6 +21,11 @@ export const api = {
     }),
   getProject: (id: string) =>
     request<import("./types").Project>(`/v1/projects/${id}`),
+  updateProject: (id: string, body: { auto_run: boolean }) =>
+    request<import("./types").Project>(`/v1/projects/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   listMembers: (projectId: string) =>
     request<{ items: import("./types").Member[] }>(
       `/v1/projects/${projectId}/members`,
@@ -89,6 +94,10 @@ export const api = {
   listDecisions: (projectId: string) =>
     request<{ items: import("./types").Decision[] }>(
       `/v1/projects/${projectId}/decisions`,
+    ),
+  listDecisionMemories: (projectId: string) =>
+    request<{ items: { fingerprint: string; prompt: string; answer: string }[] }>(
+      `/v1/projects/${projectId}/decisions/memories`,
     ),
   createDecision: (
     projectId: string,

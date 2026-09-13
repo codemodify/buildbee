@@ -21,6 +21,7 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | GET | `/v1/` | Index |
 | GET/POST | `/v1/projects` | List / create Project (seeds owner + Scout/Builder/Sentry/Pulse and `#general`) |
 | GET | `/v1/projects/{id}` | Project + Members + Channels |
+| PATCH | `/v1/projects/{id}` | Update `auto_run` |
 | GET/POST | `/v1/projects/{id}/members` | List / add Member (`kind`: human \| bot) |
 | GET/POST | `/v1/projects/{id}/channels` | List / create Channel |
 | GET/POST | `/v1/channels/{id}/messages` | List / post Message |
@@ -29,7 +30,8 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | GET/PATCH | `/v1/tasks/{id}` | Get / update status |
 | POST | `/v1/tasks/{id}/handoffs` | Create Handoff (`to_role`, `?autorun=1` enqueues a Run for Builder) |
 | POST | `/v1/handoffs/{id}/complete` | Complete Handoff (Scout + ambiguous Task → Decision stub) |
-| GET/POST | `/v1/projects/{id}/decisions` | List / create Decision (options + recommendation) |
+| GET/POST | `/v1/projects/{id}/decisions` | List / create Decision; same fingerprint reuses memory (`?inbox=1` = unanswered) |
+| GET | `/v1/projects/{id}/decisions/memories` | Remembered answers (don’t-ask-twice) |
 | POST | `/v1/decisions/{id}/answer` | Answer a Decision |
 | GET | `/v1/projects/{id}/activity?type=` | Activity feed, filter by Type |
 | POST | `/v1/tasks/{id}/runs` | Create Run |

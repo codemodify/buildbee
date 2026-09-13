@@ -14,7 +14,8 @@ License: [Apache-2.0](LICENSE).
 | [`web/`](web/) | Vite + React UI: Project, Channel, Tasks, Decisions, Runs, Artifacts, Pipelines |
 | [`cli/`](cli/) | `buildbee` CLI (project / task / handoff / run start) |
 | [`runtime/`](runtime/) | Docker **Sandbox** supervisor for **Runs** (`fake-run` fallback) |
-| [`deploy/compose/`](deploy/compose/) | Postgres 16 + Server; optional runtime profile |
+| [`deploy/compose/`](deploy/compose/) | Postgres 16 + Server; optional runtime profile (self-host source of truth) |
+| [`deploy/`](deploy/) | Railway notes + `railway.toml`; root [`Dockerfile`](Dockerfile) builds the Server |
 | [`docs/`](docs/) | Glossary, workflow, ADRs |
 
 Go modules: `github.com/codemodify/buildbee/{server,cli,runtime}` with a root [`go.work`](go.work).
@@ -94,10 +95,45 @@ go run ./cmd/buildbee routine list --project "$PROJECT_ID"
 go run ./cmd/buildbee routine run --id "$ROUTINE_ID"
 ```
 
-## Tests
+## Decision memory
+
+Answered Decisions are fingerprinted (`project_id` + normalized prompt). Asking the same question again auto-applies the prior answer, records Activity `memory`/`reuse`, and does not open a new inbox item (`GET /v1/projects/{id}/decisions?inbox=1`). List memories: `GET /v1/projects/{id}/decisions/memories`.
+
+## Tests / CI
+
+GitHub Actions (`.github/workflows/ci.yml`) on PR/push to `dev`: Go tests, web build, e2e against an in-memory Server (FakeACP, no Docker-in-Docker).
 
 ```bash
+./scripts/ci-local.sh          # same steps as CI
 cd server && go test ./...
 cd runtime && go test ./...
+cd cli && go test ./...
 cd web && npm run build
 ```
+
+## Deploy
+
+Self-host: `deploy/compose`. Railway: root `Dockerfile` + `railway.toml` (see [deploy/README.md](deploy/README.md)). The Server reads `PORT` or `BUILDBEE_ADDR` and applies migrations when `DATABASE_URL` is set.
+
+## Stack status (v0)
+
+Implemented:
+
+- [x] Project workspace REST + Channel chat / WS
+- [x] Task, Handoff, Decision (+ memory / don’t-ask-twice), Activity
+- [x] Bot Roles: Scout / Builder / Sentry / Pulse
+- [x] Run + Artifact + Pipelines webhook; FakeACP / Docker Sandbox
+- [x] GitHub OAuth / dev Identity, Issues→Task, Routines
+- [x] Channel `@bot` mentions; webhook HMAC when secret set
+- [x] Web: Channel, Kanban Task columns, Decisions, Bots, auto_run, Project switcher
+- [x] CLI `buildbee`; compose + Railway Dockerfile
+- [x] GitHub Actions CI (memory store, no DinD)
+
+Deferred:
+
+- [ ] Desktop / tray app
+- [ ] IDE extension
+- [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
+- [ ] Production GitHub App install flow beyond webhook HMAC + PAT
+- [ ] Embedded web in the Server image
+- [ ] Real ACP streaming (start / send / collect only)
