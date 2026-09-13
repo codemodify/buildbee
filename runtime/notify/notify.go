@@ -30,6 +30,18 @@ type Run struct {
 	Detail string `json:"detail"`
 }
 
+type Task struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+func (c *Client) GetTask(taskID string) (*Task, error) {
+	var t Task
+	err := c.do(http.MethodGet, "/v1/tasks/"+taskID, nil, &t)
+	return &t, err
+}
+
 type Artifact struct {
 	ID    string `json:"id"`
 	Kind  string `json:"kind"`

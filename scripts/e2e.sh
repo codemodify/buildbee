@@ -9,8 +9,8 @@ echo "health: $(curl -fsS "$BASE/healthz")"
 
 proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"E2E Hive"}')
 pid=$(printf '%s' "$proj" | json "['id']")
-human=$(printf '%s' "$proj" | json "['members'][0]['id']")
-bot=$(printf '%s' "$proj" | json "['members'][1]['id']")
+human=$(printf '%s' "$proj" | python3 -c "import json,sys; p=json.load(sys.stdin); print(next(m['id'] for m in p['members'] if m['kind']=='human'))")
+bot=$(printf '%s' "$proj" | python3 -c "import json,sys; p=json.load(sys.stdin); print(next(m['id'] for m in p['members'] if m.get('role')=='scout'))")
 chan=$(printf '%s' "$proj" | json "['channels'][0]['id']")
 echo "project=$pid"
 

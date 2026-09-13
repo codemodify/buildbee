@@ -111,7 +111,7 @@ func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines", "issues", "routines",
+			"artifacts", "pipelines", "issues", "routines", "roles",
 		},
 	})
 }

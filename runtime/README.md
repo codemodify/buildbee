@@ -1,6 +1,35 @@
 # Runtime
 
-Go supervisor + Docker **Sandbox** for **Runs**. Module: `github.com/codemodify/buildbee/runtime`
+Go supervisor + Docker **Sandbox** (and optional **ACP** CLI) for **Runs**. Module: `github.com/codemodify/buildbee/runtime`
+
+## ACP Run mode
+
+`--acp` (or POST `/runs` with `"acp": true`) starts a short ACP session instead of a Docker command:
+
+1. Detect an agent binary on `PATH`: `claude`, `codex`, `opencode`, `goose` (or `--agent` / `"agent"`).
+2. Start session → send a prompt derived from Task title/body + Handoff notes → collect stdout.
+3. Store Artifact **`acp.log`** and mark the Run succeeded/failed.
+
+If no binary is present, or `--agent fake`, **FakeACP** writes a plausible log and succeeds (CI/e2e).
+
+| Agent | Binary | Non-interactive invocation |
+| --- | --- | --- |
+| Claude | `claude` | `claude -p "<prompt>"` |
+| Codex | `codex` | `codex exec "<prompt>"` |
+| OpenCode | `opencode` | `opencode run "<prompt>"` |
+| Goose | `goose` | `goose run -t "<prompt>"` |
+| FakeACP | _(none)_ | in-process log |
+
+Env / binaries:
+
+| Name | Purpose |
+| --- | --- |
+| `PATH` | Must include the chosen ACP CLI for a real session |
+| `BUILDBEE_URL` | Server the supervisor notifies (default `http://127.0.0.1:8080`) |
+| `BUILDBEE_RUNTIME_ADDR` | Supervisor listen address (default `:8090`) |
+| `BUILDBEE_FAKE_SANDBOX=1` | Force FakeEngine for the Docker path (not FakeACP) |
+
+Without `--acp`, the supervisor uses Docker if available, else FakeEngine.
 
 ## Sandbox lifecycle
 
@@ -39,6 +68,8 @@ CLI:
 
 ```bash
 buildbee run start --task "$TASK_ID" --fake
+buildbee run start --task "$TASK_ID" --acp --agent fake
+buildbee run start --task "$TASK_ID" --acp --agent claude
 buildbee run start --task "$TASK_ID" --repo-url https://github.com/org/repo.git --cmd "ls"
 ```
 
@@ -55,6 +86,7 @@ Compose: `--profile runtime` (see `deploy/compose`). Default `BUILDBEE_FAKE_SAND
 | Path | Role |
 | --- | --- |
 | `.` | Supervisor |
+| [`acp/`](acp/) | ACP `Session` (start/send/collect), Detect, FakeACP |
 | [`sandbox/`](sandbox/) | `Engine` interface, `DockerEngine`, `FakeEngine` |
 | [`notify/`](notify/) | Server HTTP client |
 | [`cmd/runtime/`](cmd/runtime/) | HTTP supervisor |

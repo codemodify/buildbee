@@ -12,7 +12,7 @@ var ErrNotFound = errors.New("not found")
 
 // Store persists Project workspace records.
 type Store interface {
-	CreateProject(ctx context.Context, name string) (*models.ProjectBundle, error)
+	CreateProject(ctx context.Context, name string, autoRun bool) (*models.ProjectBundle, error)
 	GetProject(ctx context.Context, id string) (*models.ProjectBundle, error)
 	ListProjects(ctx context.Context) ([]models.Project, error)
 

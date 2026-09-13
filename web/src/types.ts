@@ -4,6 +4,7 @@ export type Member = {
   kind: "human" | "bot" | string;
   display_name: string;
   role: string;
+  instructions?: string;
   identity: string;
 };
 
@@ -16,6 +17,7 @@ export type Channel = {
 export type Project = {
   id: string;
   name: string;
+  auto_run?: boolean;
   members?: Member[];
   channels?: Channel[];
 };

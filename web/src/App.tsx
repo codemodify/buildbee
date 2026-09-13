@@ -188,6 +188,7 @@ function ProjectPage({
   const [memberName, setMemberName] = useState("");
   const [memberKind, setMemberKind] = useState("human");
   const [routines, setRoutines] = useState<Routine[]>([]);
+  const [handoffRole, setHandoffRole] = useState("scout");
   const [error, setError] = useState("");
 
   const activeChannel = useMemo(() => {
@@ -196,7 +197,7 @@ function ProjectPage({
   }, [channels, channelId]);
 
   const human = members.find((m) => m.kind === "human");
-  const bot = members.find((m) => m.kind === "bot");
+  const bots = members.filter((m) => m.kind === "bot");
 
   async function loadProject() {
     const p = await api.getProject(projectId);
@@ -252,14 +253,9 @@ function ProjectPage({
   async function addTask(e: FormEvent) {
     e.preventDefault();
     if (!taskTitle.trim()) return;
-    const t = await api.createTask(projectId, taskTitle.trim());
+    await api.createTask(projectId, taskTitle.trim(), handoffRole);
     setTaskTitle("");
-    setTasks((prev) => [t, ...prev]);
-    if (human && bot) {
-      await api.createHandoff(t.id, human.id, bot.id, "please take this");
-      const listed = await api.listTasks(projectId);
-      setTasks(listed.items);
-    }
+    setTasks((await api.listTasks(projectId)).items);
   }
 
   async function addChannel(e: FormEvent) {
@@ -413,13 +409,23 @@ function ProjectPage({
                 Sync Issues
               </button>
             </h2>
-            <form onSubmit={addTask} className="mt-2 flex gap-1">
+            <form onSubmit={addTask} className="mt-2 flex flex-wrap gap-1">
               <input
                 className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
                 value={taskTitle}
                 onChange={(e) => setTaskTitle(e.target.value)}
                 placeholder="New Task"
               />
+              <select
+                className="rounded border border-zinc-800 bg-zinc-950 px-1 text-xs"
+                value={handoffRole}
+                onChange={(e) => setHandoffRole(e.target.value)}
+                aria-label="Handoff Role"
+              >
+                <option value="scout">Handoff → Scout</option>
+                <option value="builder">Handoff → Builder</option>
+                <option value="none">No Handoff</option>
+              </select>
               <button className="rounded bg-amber-400 px-2 text-sm text-zinc-950" type="submit">
                 Add
               </button>
@@ -516,6 +522,23 @@ function ProjectPage({
           </section>
 
           <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <h2 className="text-sm font-medium text-zinc-400">Bots + Roles</h2>
+            <ul className="mt-2 space-y-2">
+              {bots.map((b) => (
+                <li key={b.id} className="text-sm">
+                  <span className="font-medium text-amber-300">{b.display_name}</span>{" "}
+                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs uppercase text-zinc-300">
+                    {b.role}
+                  </span>
+                  {b.instructions ? (
+                    <p className="mt-0.5 text-xs text-zinc-500">{b.instructions}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
             <h2 className="text-sm font-medium text-zinc-400">Routines</h2>
             <ul className="mt-2 space-y-2">
               {routines.map((rt) => (
@@ -547,14 +570,38 @@ function ProjectPage({
 
 function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [toRole, setToRole] = useState("builder");
+  const [note, setNote] = useState("");
+  const [autorun, setAutorun] = useState(false);
   const [error, setError] = useState("");
 
+  async function refresh() {
+    const [d, m] = await Promise.all([
+      api.getTaskDetail(taskId),
+      api.listMembers(projectId),
+    ]);
+    setDetail(d);
+    setMembers(m.items);
+  }
+
   useEffect(() => {
-    void api
-      .getTaskDetail(taskId)
-      .then(setDetail)
-      .catch((e) => setError(String(e)));
-  }, [taskId]);
+    void refresh().catch((e) => setError(String(e)));
+  }, [taskId, projectId]);
+
+  const human = members.find((m) => m.kind === "human");
+  const bots = members.filter((m) => m.kind === "bot");
+
+  async function handoff(e: FormEvent) {
+    e.preventDefault();
+    if (!human) return;
+    await api.createHandoff(taskId, human.id, "", note.trim() || "please take this", {
+      toRole,
+      autorun,
+    });
+    setNote("");
+    await refresh();
+  }
 
   return (
     <main className="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-100">
@@ -572,6 +619,40 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
         </p>
       ) : null}
       {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
+
+      <form onSubmit={handoff} className="mt-6 flex flex-wrap items-end gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+        <label className="text-xs text-zinc-400">
+          Handoff to Role
+          <select
+            className="mt-1 block rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+            value={toRole}
+            onChange={(e) => setToRole(e.target.value)}
+          >
+            {bots.map((b) => (
+              <option key={b.id} value={b.role}>
+                {b.display_name} ({b.role})
+              </option>
+            ))}
+          </select>
+        </label>
+        <input
+          className="min-w-[12rem] flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Handoff notes"
+        />
+        <label className="flex items-center gap-1 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={autorun}
+            onChange={(e) => setAutorun(e.target.checked)}
+          />
+          autorun (Builder)
+        </label>
+        <button type="submit" className="rounded bg-amber-400 px-3 py-1 text-sm text-zinc-950">
+          Handoff
+        </button>
+      </form>
 
       <section className="mt-8">
         <h2 className="text-sm font-medium text-zinc-400">Runs</h2>

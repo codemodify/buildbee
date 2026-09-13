@@ -41,6 +41,9 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 	mux.HandleFunc("GET /v1/projects/p1/tasks", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
 	})
+	mux.HandleFunc("GET /v1/tasks/t1", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "t1", "title": "Ship"})
+	})
 	mux.HandleFunc("POST /v1/tasks/t1/handoffs", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "h1", "status": "open"})
 	})
@@ -80,6 +83,17 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 	}
 	buf.Reset()
 	if err := run([]string{"run", "start", "--task", "t1", "--fake"}, c); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if err := run([]string{"run", "start", "--task", "t1", "--acp", "--agent", "fake"}, c); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "acp.log") && !strings.Contains(buf.String(), "FakeACP") && !strings.Contains(buf.String(), "acp_agent") {
+		t.Fatalf("acp output: %s", buf.String())
+	}
+	buf.Reset()
+	if err := run([]string{"handoff", "create", "--task", "t1", "--from", "a", "--to-role", "builder", "--autorun"}, c); err != nil {
 		t.Fatal(err)
 	}
 	buf.Reset()

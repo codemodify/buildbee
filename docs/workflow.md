@@ -6,7 +6,8 @@ How humans and Bots cooperate in a BuildBee **Project**. Nouns match [glossary v
 
 A **Project** is the workspace. Members join it with a **Role** and an **Identity**.
 
-- Humans authenticate later via GitHub OAuth.
+- Humans authenticate later via GitHub OAuth (dev auth acts as Member **You**, Role **owner**).
+- New Projects seed four **Bots**: **Scout** (triage), **Builder** (implement), **Sentry** (review/CI), **Pulse** (Routines). Each Bot Member has a Role and a short instructions blurb.
 - **Bots** receive server-issued Identities from the **Server**.
 
 ## 2. Coordinate in a Channel
@@ -15,15 +16,15 @@ Work is discussed in a **Channel**. **Activity** in the Channel is the timeline 
 
 ## 3. Create a Task
 
-A **Member** opens a **Task**. The Task has a **Type**, an owner, and optional links to a **Repo**, **Issues**, or **Pipelines**.
+A **Member** opens a **Task**. By default the Server auto-Handoffs it to **Scout** (`?handoff=scout|builder|none`). The Task has an owner and optional links to a **Repo**, **Issues**, or **Pipelines**.
 
 ## 4. Hand off to a Bot
 
-A human **Handoff** gives the Bot context (the Task, Channel history, and any input **Artifact**). The Server records the Handoff as Activity.
+A **Handoff** targets a Member or a Role (`to_role=builder`). Completing a Scout Handoff on an ambiguous Task (title contains `?`, or notes say unclear/TBD) opens a **Decision** stub. A Handoff to **Builder** can enqueue a **Run** when `?autorun=1` or the Project was created with `auto_run: true` (default off).
 
 ## 5. Execute a Run
 
-The Bot starts a **Run**. The **runtime** supervisor opens a Docker **Sandbox**, talks to the agent over ACP, and streams progress back to the Channel.
+The Bot starts a **Run**. The **runtime** supervisor prefers an ACP CLI (`claude` / `codex` / `opencode` / `goose`) when `--acp` is set; otherwise it opens a Docker **Sandbox** (or FakeEngine). Output is stored as Artifact `acp.log` or `sandbox.log`. Without an ACP binary, **FakeACP** succeeds so e2e/CI stay green.
 
 A Run may produce Artifacts (patches, logs, reports). Those Artifacts stay attached to the Task.
 
@@ -39,5 +40,5 @@ A **Routine** can reopen this loop on a schedule or a trigger (for example, a ne
 
 - GitHub as Repo / Issues / Pipelines
 - Signed Activity (Nostr-inspired; not NIP-01)
-- Full ACP agent protocol
+- Full bidirectional ACP stream (this slice is start / send prompt / collect)
 - Production auth

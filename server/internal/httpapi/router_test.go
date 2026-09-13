@@ -86,41 +86,47 @@ func TestVerticalSlice(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", created.Code, created.Body.String())
 	}
+	type seededMember struct {
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
+		Role string `json:"role"`
+	}
 	var proj struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Members []struct {
-			ID   string `json:"id"`
-			Kind string `json:"kind"`
-		} `json:"members"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Members  []seededMember
 		Channels []struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"channels"`
 	}
 	proj = decode[struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Members []struct {
-			ID   string `json:"id"`
-			Kind string `json:"kind"`
-		} `json:"members"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Members  []seededMember
 		Channels []struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"channels"`
 	}](t, created)
-	if proj.ID == "" || len(proj.Members) < 2 || len(proj.Channels) < 1 {
+	if proj.ID == "" || len(proj.Members) < 5 || len(proj.Channels) < 1 {
 		t.Fatalf("seed: %#v", proj)
 	}
 	var human, bot string
+	roles := map[string]string{}
 	for _, m := range proj.Members {
 		if m.Kind == "human" {
 			human = m.ID
 		}
 		if m.Kind == "bot" {
-			bot = m.ID
+			roles[m.Role] = m.ID
+			if bot == "" {
+				bot = m.ID
+			}
 		}
+	}
+	if roles["scout"] == "" || roles["builder"] == "" || roles["sentry"] == "" || roles["pulse"] == "" {
+		t.Fatalf("expected Scout/Builder/Sentry/Pulse, got %#v", roles)
 	}
 	channelID := proj.Channels[0].ID
 
@@ -279,5 +285,88 @@ func TestOAuthProtectsMutations(t *testing.T) {
 	health := doJSON(t, h, http.MethodGet, "/healthz", nil)
 	if health.Code != http.StatusOK {
 		t.Fatalf("healthz: %d", health.Code)
+	}
+}
+
+func TestBotRolesHandoffAndAutorun(t *testing.T) {
+	h := NewMux()
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]any{"name": "Roles", "auto_run": true})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	var proj struct {
+		ID      string `json:"id"`
+		AutoRun bool   `json:"auto_run"`
+		Members []struct {
+			ID           string `json:"id"`
+			Kind         string `json:"kind"`
+			Role         string `json:"role"`
+			Instructions string `json:"instructions"`
+			DisplayName  string `json:"display_name"`
+		} `json:"members"`
+	}
+	proj = decode[struct {
+		ID      string `json:"id"`
+		AutoRun bool   `json:"auto_run"`
+		Members []struct {
+			ID           string `json:"id"`
+			Kind         string `json:"kind"`
+			Role         string `json:"role"`
+			Instructions string `json:"instructions"`
+			DisplayName  string `json:"display_name"`
+		} `json:"members"`
+	}](t, created)
+	if !proj.AutoRun {
+		t.Fatal("expected auto_run")
+	}
+	var human, scout, builder string
+	for _, m := range proj.Members {
+		switch m.Role {
+		case "owner":
+			human = m.ID
+		case "scout":
+			scout = m.ID
+			if m.Instructions == "" || m.DisplayName != "Scout" {
+				t.Fatalf("scout seed: %#v", m)
+			}
+		case "builder":
+			builder = m.ID
+		}
+	}
+	if human == "" || scout == "" || builder == "" {
+		t.Fatalf("missing roles: %#v", proj.Members)
+	}
+
+	taskRec := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/tasks?handoff=scout", map[string]string{"title": "Scope unclear?"})
+	if taskRec.Code != http.StatusCreated {
+		t.Fatalf("task: %d %s", taskRec.Code, taskRec.Body.String())
+	}
+	task := decode[map[string]any](t, taskRec)
+	if task["handoff"] == nil {
+		t.Fatal("expected auto-Handoff to Scout")
+	}
+	taskID := task["id"].(string)
+	ho := task["handoff"].(map[string]any)
+	done := doJSON(t, h, http.MethodPost, "/v1/handoffs/"+ho["id"].(string)+"/complete", map[string]string{})
+	if done.Code != http.StatusOK {
+		t.Fatalf("complete: %d %s", done.Code, done.Body.String())
+	}
+	doneBody := decode[map[string]any](t, done)
+	if doneBody["decision"] == nil {
+		t.Fatal("expected Scout Decision stub for ambiguous Task")
+	}
+
+	builderHO := doJSON(t, h, http.MethodPost, "/v1/tasks/"+taskID+"/handoffs?autorun=1", map[string]string{
+		"from_member_id": human, "to_role": "builder", "note": "implement",
+	})
+	if builderHO.Code != http.StatusCreated {
+		t.Fatalf("builder handoff: %d %s", builderHO.Code, builderHO.Body.String())
+	}
+	body := decode[map[string]any](t, builderHO)
+	if body["to_member_id"] != builder {
+		t.Fatalf("to_role builder: %#v", body)
+	}
+	if body["run"] == nil {
+		t.Fatal("expected autorun Run for Builder Handoff")
 	}
 }

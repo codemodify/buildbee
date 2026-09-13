@@ -46,12 +46,16 @@ Then:
 ```bash
 cd web && npm install && npm run dev   # http://localhost:5173
 
-./scripts/e2e.sh          # Project → message → Task → Handoff → Decision → Run
-./scripts/e2e-run.sh      # Run → log Artifact → fake Repo PR → Pipelines webhook
-./scripts/e2e-identity.sh # dev auth + fake Issues→Task + Routine fire
+./scripts/e2e.sh            # Project → message → Task → Handoff → Decision → Run
+./scripts/e2e-run.sh        # Run → log Artifact → fake Repo PR → Pipelines webhook
+./scripts/e2e-identity.sh   # dev auth + fake Issues→Task + Routine fire
+./scripts/e2e-roles-acp.sh  # Scout/Builder/Sentry/Pulse + FakeACP Run (acp.log)
 
 cd cli
 go run ./cmd/buildbee run start --task "$TASK_ID" --fake
+go run ./cmd/buildbee run start --task "$TASK_ID" --acp --agent fake
+# real ACP CLI if `claude` / `codex` / `opencode` / `goose` is on PATH:
+# go run ./cmd/buildbee run start --task "$TASK_ID" --acp --agent claude
 # real Sandbox (needs runtime on :8090 and Docker):
 # go run ./cmd/buildbee run start --task "$TASK_ID" --repo-url https://github.com/org/repo.git --cmd "echo hi"
 ```
@@ -71,7 +75,7 @@ Open a Task in the web UI to see **Runs**, **Artifacts** (including PR URLs), an
 - **Dev auth** (default): `GITHUB_CLIENT_ID` unset. Mutating `/v1` is open. Session Identity is Member **You**. The web shows a banner.
 - **GitHub OAuth**: set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT` (default `http://127.0.0.1:8080/v1/auth/callback`), optional `SESSION_SECRET` and `BUILDBEE_FRONTEND_URL`. Then `GET /v1/auth/github` and the web “Sign in with GitHub” button. Mutating `/v1` requires the session cookie. `/healthz`, reads, `/v1/auth/*`, and webhooks stay open.
 
-Bots still get server-issued Identities.
+Bots still get server-issued Identities. New Projects seed **Scout**, **Builder**, **Sentry**, and **Pulse** (Role + instructions on each Bot Member). Task create auto-Handoffs to Scout unless `?handoff=none`. Handoff to Builder with `?autorun=1` (or Project `auto_run`) enqueues a Run. Completing a Scout Handoff on an ambiguous Task opens a Decision stub.
 
 ## Issues
 
