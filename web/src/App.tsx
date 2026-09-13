@@ -203,6 +203,9 @@ function ProjectPage({
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [handoffRole, setHandoffRole] = useState("scout");
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [activity, setActivity] = useState<
+    { id: string; type: string; payload: Record<string, unknown>; created_at: string }[]
+  >([]);
   const [error, setError] = useState("");
 
   const activeChannel = useMemo(() => {
@@ -216,15 +219,17 @@ function ProjectPage({
   async function loadProject() {
     const p = await api.getProject(projectId);
     setProject(p);
-    const [m, c, t, d, rts, plist] = await Promise.all([
+    const [m, c, t, d, rts, plist, act] = await Promise.all([
       api.listMembers(projectId),
       api.listChannels(projectId),
       api.listTasks(projectId),
       api.listDecisions(projectId),
       api.listRoutines(projectId),
       api.listProjects(),
+      api.listActivity(projectId),
     ]);
     setProjects(plist.items);
+    setActivity(act.items.slice(0, 12));
     setMembers(m.items);
     setChannels(c.items);
     setTasks(t.items);
@@ -585,6 +590,21 @@ function ProjectPage({
                   ) : null}
                 </li>
               ))}
+            </ul>
+          </section>
+
+          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <h2 className="text-sm font-medium text-zinc-400">Activity</h2>
+            <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-xs text-zinc-400">
+              {activity.map((a) => (
+                <li key={a.id}>
+                  <span className="text-amber-300">{a.type}</span>{" "}
+                  {a.payload?.action ? String(a.payload.action) : ""}{" "}
+                  {a.payload?.title ? String(a.payload.title) : ""}
+                  {a.payload?.name ? String(a.payload.name) : ""}
+                </li>
+              ))}
+              {activity.length === 0 ? <li>No Activity yet</li> : null}
             </ul>
           </section>
 

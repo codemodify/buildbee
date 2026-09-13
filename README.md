@@ -125,7 +125,7 @@ Implemented:
 - [x] Run + Artifact + Pipelines webhook; FakeACP / Docker Sandbox
 - [x] GitHub OAuth / dev Identity, Issues→Task, Routines
 - [x] Channel `@bot` mentions; webhook HMAC when secret set
-- [x] Web: Channel, Kanban Task columns, Decisions, Bots, auto_run, Project switcher
+- [x] Web: Channel, Kanban Task columns, Decisions, Bots, auto_run, Project switcher, Activity feed
 - [x] CLI `buildbee`; compose + Railway Dockerfile
 - [x] GitHub Actions CI (memory store, no DinD)
 
