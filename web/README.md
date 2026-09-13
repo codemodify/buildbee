@@ -4,22 +4,22 @@ Vite + React + TypeScript + Tailwind UI for a BuildBee **Project**.
 
 ## Run
 
+Start the Server first (`go run` or Compose), then:
+
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173). The homepage is a placeholder that says **BuildBee**.
+Open [http://localhost:5173](http://localhost:5173).
 
-Vite proxies `/healthz` and `/v1` to the Server on `:8080`. Start the Server first if you want those routes to resolve during `npm run dev`.
+- Create or pick a **Project**
+- Chat in a **Channel** (polls every 2s; Server also has `/v1/channels/{id}/ws`)
+- Add **Tasks** (creates a **Handoff** to the seed Bot)
+- **Decisions** inbox: create and answer
 
-## Build
+Vite proxies `/healthz` and `/v1` (including WebSocket) to `:8080`.
 
 ```bash
 npm run build
-npm run preview
 ```
-
-## Later
-
-This app will host Channel, Task, Decisions, and Activity views. Auth (GitHub OAuth for humans; server-issued Identities for Bots) is not wired yet.

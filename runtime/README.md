@@ -4,7 +4,7 @@ Go supervisor + Docker **Sandbox** for ACP agent **Runs**.
 
 Module: `github.com/codemodify/buildbee/runtime`
 
-This directory is a stub. It documents the lifecycle and reserves package names. It does not start containers or speak ACP yet.
+ACP and Docker Sandboxes are still stubs. The Server already stores **Run** records. This package posts status updates to that API.
 
 ## Sandbox + ACP Run lifecycle
 
@@ -12,28 +12,35 @@ This directory is a stub. It documents the lifecycle and reserves package names.
 Server records a Task Handoff to a Bot
         │
         ▼
-Supervisor.StartRun(runID)
+POST /v1/tasks/{taskID}/runs     → Run pending
         │
-        ▼
-Sandbox created (Docker container, isolated network + volume)
+Supervisor.StartRun (stub)
         │
-        ▼
-ACP session opened to the agent process inside the Sandbox
+Sandbox created (not implemented)
         │
-        ├─ stream Activity (progress, logs) back to the Channel
-        ├─ collect Artifacts (patches, reports)
-        └─ exit status → Run succeeded | failed | canceled
+ACP session (not implemented)
         │
-        ▼
-Sandbox torn down; Server stores the Decision / Artifact links
+PATCH /v1/runs/{runID}           → succeeded | failed | canceled
+        │
+Server appends Activity Type "run"
 ```
 
-| Stage | Noun | Notes |
-| --- | --- | --- |
-| Request | **Task**, **Handoff** | A Member hands work to a Bot. |
-| Isolation | **Sandbox** | One Docker container per **Run**. |
-| Protocol | ACP | Agent I/O inside the Sandbox. Not implemented here. |
-| Output | **Artifact**, **Activity** | Streamed to the Server / Channel. |
+## Post a fake successful Run
+
+With the Server running and a Task ID:
+
+```bash
+go run ./cmd/fake-run --task "$TASK_ID" --server http://127.0.0.1:8080
+```
+
+Or curl:
+
+```bash
+RUN_ID=$(curl -sS -X POST "http://127.0.0.1:8080/v1/tasks/$TASK_ID/runs" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+curl -sS -X PATCH "http://127.0.0.1:8080/v1/runs/$RUN_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"succeeded","detail":"fake success (runtime stub)"}'
+```
 
 ## Packages
 
@@ -42,6 +49,8 @@ Sandbox torn down; Server stores the Decision / Artifact links
 | `.` | `Supervisor` and Run `Status` |
 | [`sandbox/`](sandbox/) | Docker Sandbox spec (stub) |
 | [`acp/`](acp/) | ACP session stub |
+| [`notify/`](notify/) | HTTP client for Run status |
+| [`cmd/fake-run/`](cmd/fake-run/) | CLI that posts fake success |
 
 ```bash
 go test ./...

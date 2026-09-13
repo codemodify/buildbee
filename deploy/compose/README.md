@@ -1,6 +1,6 @@
 # Compose
 
-Local Postgres 16 and the BuildBee **Server** image.
+Postgres 16 and the BuildBee **Server**. The Server retries the database, applies migrations, then serves `/v1`.
 
 ```bash
 # from the repository root
