@@ -33,7 +33,7 @@ Provision a **Postgres** plugin and a service that builds this repo with the roo
 | `GITHUB_WEBHOOK_SECRET` | no | `X-Hub-Signature-256` |
 | `BUILDBEE_FRONTEND_URL` | no | web origin if split from the Server |
 
-The **web** app can stay on Vite locally, or be served as static files behind any host. The Server does not embed the UI.
+One **Server** service hosts API + UI. The root `Dockerfile` builds `web` (`npm ci && npm run build`), copies `web/dist` into the Go image (`go:embed` plus `BUILDBEE_WEB_DIR=/var/buildbee/web`), and serves the SPA for non-API routes. `/v1` and `/healthz` stay on the API. Locally: `make build` / `scripts/build.sh` (embed) or `make run` (`BUILDBEE_WEB_DIR=web/dist`). Vite `base` is `/` and the UI calls relative `/v1`.
 
 ```bash
 # from repo root, after `railway login` / linking a project

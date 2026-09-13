@@ -7,7 +7,7 @@ Postgres 16 and the BuildBee **Server**. The Server retries the database, applie
 docker compose -f deploy/compose/docker-compose.yml up --build
 ```
 
-- Server: `http://localhost:8080/healthz`
+- Server: `http://localhost:8080/healthz` (API `/v1` + embedded web UI on `/`)
 - Postgres: `postgres://buildbee:buildbee@localhost:5432/buildbee`
 
 Runtime supervisor (`--profile runtime`) listens on `:8090`. Set `BUILDBEE_FAKE_SANDBOX=0` for real Docker.

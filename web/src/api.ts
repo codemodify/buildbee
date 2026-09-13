@@ -130,4 +130,23 @@ export const api = {
     request<{ items: { id: string; type: string; payload: Record<string, unknown>; created_at: string }[] }>(
       `/v1/projects/${projectId}/activity${type ? `?type=${encodeURIComponent(type)}` : ""}`,
     ),
+  listNotifications: (memberId: string, unread = false) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set("member_id", memberId);
+    if (unread) q.set("unread", "1");
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return request<{ items: import("./types").Notification[]; unread: number }>(
+      `/v1/notifications${suffix}`,
+    );
+  },
+  readNotification: (id: string) =>
+    request<import("./types").Notification>(`/v1/notifications/${id}/read`, {
+      method: "POST",
+      body: "{}",
+    }),
+  readAllNotifications: (memberId: string) =>
+    request<{ read: number }>(
+      `/v1/notifications/read-all?member_id=${encodeURIComponent(memberId)}`,
+      { method: "POST", body: "{}" },
+    ),
 };

@@ -10,8 +10,8 @@ License: [Apache-2.0](LICENSE).
 
 | Path | What it is |
 | --- | --- |
-| [`server/`](server/) | Go **Server**: Postgres (or memory), REST `/v1`, Channel WebSocket |
-| [`web/`](web/) | Vite + React UI: Project, Channel, Tasks, Decisions, Runs, Artifacts, Pipelines |
+| [`server/`](server/) | Go **Server**: Postgres (or memory), REST `/v1`, Channel WebSocket, optional embedded web UI |
+| [`web/`](web/) | Vite + React UI: Project, Channel, Tasks, Decisions, Runs, Artifacts, Pipelines, Notifications inbox |
 | [`cli/`](cli/) | `buildbee` CLI (project / task / handoff / run start) |
 | [`runtime/`](runtime/) | Docker **Sandbox** supervisor for **Runs** (`fake-run` fallback) |
 | [`deploy/compose/`](deploy/compose/) | Postgres 16 + Server; optional runtime profile (self-host source of truth) |
@@ -39,18 +39,23 @@ docker compose -f deploy/compose/docker-compose.yml --profile runtime up --build
 Without Docker, the Server uses an in-memory Store (lost on restart):
 
 ```bash
+make run                    # builds web, then Server with BUILDBEE_WEB_DIR=web/dist
+# or API only:
 cd server && go run ./cmd/server
 ```
+
+`make build` / `scripts/build.sh` compile a Server binary with the UI embedded (`go:embed` of `web/dist`). The same origin serves `/` (SPA), `/v1`, and `/healthz`.
 
 Then:
 
 ```bash
-cd web && npm install && npm run dev   # http://localhost:5173
+cd web && npm install && npm run dev   # http://localhost:5173 (proxies /v1)
 
 ./scripts/e2e.sh            # Project → message → Task → Handoff → Decision → Run
 ./scripts/e2e-run.sh        # Run → log Artifact → fake Repo PR → Pipelines webhook
 ./scripts/e2e-identity.sh   # dev auth + fake Issues→Task + Routine fire
 ./scripts/e2e-roles-acp.sh  # Scout/Builder/Sentry/Pulse + FakeACP Run (acp.log)
+./scripts/e2e-notifications.sh  # Decision / Handoff / mention / Pipeline → inbox read
 
 cd cli
 go run ./cmd/buildbee run start --task "$TASK_ID" --fake
@@ -113,7 +118,7 @@ cd web && npm run build
 
 ## Deploy
 
-Self-host: `deploy/compose`. Railway: root `Dockerfile` + `railway.toml` (see [deploy/README.md](deploy/README.md)). The Server reads `PORT` or `BUILDBEE_ADDR` and applies migrations when `DATABASE_URL` is set.
+Self-host: `deploy/compose`. Railway: root `Dockerfile` + `railway.toml` (see [deploy/README.md](deploy/README.md)). The Server reads `PORT` or `BUILDBEE_ADDR` and applies migrations when `DATABASE_URL` is set. One Server service hosts API + UI.
 
 ## Stack status (v0)
 
@@ -125,9 +130,12 @@ Implemented:
 - [x] Run + Artifact + Pipelines webhook; FakeACP / Docker Sandbox
 - [x] GitHub OAuth / dev Identity, Issues→Task, Routines
 - [x] Channel `@bot` mentions; webhook HMAC when secret set
-- [x] Web: Channel, Kanban Task columns, Decisions, Bots, auto_run, Project switcher, Activity feed
-- [x] CLI `buildbee`; compose + Railway Dockerfile
+- [x] Web: Channel, Kanban Task columns, Decisions, Bots, auto_run, Project switcher, Activity feed, Notifications inbox
+- [x] Notifications API (`GET /v1/notifications`, mark read / read-all)
+- [x] CLI `buildbee`; compose + Railway Dockerfile (API + embedded UI)
 - [x] GitHub Actions CI (memory store, no DinD)
+
+See [docs/v0-status.md](docs/v0-status.md) for the remaining v0 checklist.
 
 Deferred:
 
@@ -135,5 +143,5 @@ Deferred:
 - [ ] IDE extension
 - [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
 - [ ] Production GitHub App install flow beyond webhook HMAC + PAT
-- [ ] Embedded web in the Server image
+- [ ] Multi-user Member invite / join (beyond Add Member on the Project)
 - [ ] Real ACP streaming (start / send / collect only)

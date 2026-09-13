@@ -30,6 +30,7 @@ fi
 export BUILDBEE_URL="${BUILDBEE_URL:-http://127.0.0.1:8080}"
 ./scripts/e2e.sh
 ./scripts/e2e-roles-acp.sh
+./scripts/e2e-notifications.sh
 if [ "$need_stop" = 1 ] && [ -f /tmp/buildbee-server-ci.pid ]; then
   kill "$(cat /tmp/buildbee-server-ci.pid)" >/dev/null 2>&1 || true
 fi

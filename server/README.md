@@ -49,10 +49,28 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | POST | `/v1/issues/webhook` | GitHub Issues webhook → Task (`GITHUB_WEBHOOK_SECRET` verifies `X-Hub-Signature-256`) |
 | GET/POST | `/v1/projects/{id}/routines` | List / create Routine |
 | POST | `/v1/routines/{id}/run` | Force-fire a Routine |
+| GET | `/v1/notifications` | Inbox (`member_id` or `X-Member-ID`, `?unread=1`) |
+| POST | `/v1/notifications/{id}/read` | Mark one Notification read |
+| POST | `/v1/notifications/read-all` | Mark all read for `member_id` |
 
 Auth is stubbed. Pass `X-Member-ID` or `member_id` when posting messages.
 
+Notifications are created when a Decision opens (not reused), a Handoff targets a Member, a Channel `@bot` mention creates a Task, or a Pipeline records `failure`.
+
+## Web UI
+
+The Server serves the Vite SPA for non-`/v1` / non-`/healthz` routes when `web/dist` is embedded (`go:embed` of `internal/webui/dist`) or `BUILDBEE_WEB_DIR` points at a built `dist`.
+
+```bash
+# from repo root
+make run                 # build web, serve via BUILDBEE_WEB_DIR
+make build               # embed dist, write bin/buildbee-server
+./scripts/build.sh
+```
+
 ## Docker
+
+Prefer the **repo-root** `Dockerfile` (builds web, then Server). Compose uses that context so one service hosts API + UI.
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up --build

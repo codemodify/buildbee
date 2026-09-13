@@ -68,4 +68,10 @@ type Store interface {
 	CreateRoutine(ctx context.Context, in models.Routine) (*models.Routine, error)
 	GetRoutine(ctx context.Context, id string) (*models.Routine, error)
 	UpdateRoutine(ctx context.Context, id string, enabled *bool, lastRun *time.Time) (*models.Routine, error)
+
+	CreateNotification(ctx context.Context, in models.Notification) (*models.Notification, error)
+	ListNotifications(ctx context.Context, memberID string, unreadOnly bool) ([]models.Notification, error)
+	GetNotification(ctx context.Context, id string) (*models.Notification, error)
+	MarkNotificationRead(ctx context.Context, id string) (*models.Notification, error)
+	MarkAllNotificationsRead(ctx context.Context, memberID string) (int, error)
 }

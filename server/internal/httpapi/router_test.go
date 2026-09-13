@@ -404,6 +404,127 @@ func TestDecisionMemoryReuse(t *testing.T) {
 	}
 }
 
+func TestNotificationsInbox(t *testing.T) {
+	h := NewMux()
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Notify Hive"})
+	var proj struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Role string `json:"role"`
+		} `json:"members"`
+		Channels []struct {
+			ID string `json:"id"`
+		} `json:"channels"`
+	}
+	proj = decode[struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Role string `json:"role"`
+		} `json:"members"`
+		Channels []struct {
+			ID string `json:"id"`
+		} `json:"channels"`
+	}](t, created)
+	var human, scout string
+	for _, m := range proj.Members {
+		if m.Kind == "human" {
+			human = m.ID
+		}
+		if m.Role == "scout" {
+			scout = m.ID
+		}
+	}
+
+	dec := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/decisions", map[string]any{
+		"prompt": "Need a Decision?", "options": []string{"yes", "no"}, "recommendation": "yes",
+	})
+	if dec.Code != http.StatusCreated {
+		t.Fatalf("decision: %d %s", dec.Code, dec.Body.String())
+	}
+
+	taskRec := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/tasks?handoff=none", map[string]string{"title": "Owned Task"})
+	task := decode[map[string]any](t, taskRec)
+	taskID := task["id"].(string)
+	doJSON(t, h, http.MethodPost, "/v1/tasks/"+taskID+"/handoffs", map[string]string{
+		"from_member_id": scout, "to_member_id": human, "note": "back to you",
+	})
+
+	msg := doJSON(t, h, http.MethodPost, "/v1/channels/"+proj.Channels[0].ID+"/messages", map[string]string{
+		"body": "@Scout please look", "member_id": human,
+	})
+	if msg.Code != http.StatusCreated {
+		t.Fatalf("mention: %d %s", msg.Code, msg.Body.String())
+	}
+
+	hook := doJSON(t, h, http.MethodPost, "/v1/pipelines/webhook", map[string]any{
+		"task_id": taskID, "name": "ci", "status": "failure",
+	})
+	if hook.Code != http.StatusCreated {
+		t.Fatalf("pipeline: %d %s", hook.Code, hook.Body.String())
+	}
+
+	inbox := doJSON(t, h, http.MethodGet, "/v1/notifications?member_id="+human, nil)
+	if inbox.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", inbox.Code, inbox.Body.String())
+	}
+	listed := decode[struct {
+		Items  []map[string]any `json:"items"`
+		Unread int              `json:"unread"`
+	}](t, inbox)
+	if listed.Unread < 3 || len(listed.Items) < 3 {
+		t.Fatalf("expected decision+handoff+mention+pipeline notifications: %#v", listed)
+	}
+	kinds := map[string]int{}
+	for _, n := range listed.Items {
+		kinds[n["kind"].(string)]++
+	}
+	for _, want := range []string{"decision", "handoff", "mention", "pipeline"} {
+		if kinds[want] < 1 {
+			t.Fatalf("missing kind %s in %#v", want, kinds)
+		}
+	}
+
+	firstID := listed.Items[0]["id"].(string)
+	read := doJSON(t, h, http.MethodPost, "/v1/notifications/"+firstID+"/read", map[string]string{})
+	if read.Code != http.StatusOK {
+		t.Fatalf("read: %d %s", read.Code, read.Body.String())
+	}
+	one := decode[map[string]any](t, read)
+	if one["read_at"] == nil {
+		t.Fatalf("expected read_at: %#v", one)
+	}
+
+	all := doJSON(t, h, http.MethodPost, "/v1/notifications/read-all?member_id="+human, map[string]string{})
+	if all.Code != http.StatusOK {
+		t.Fatalf("read-all: %d %s", all.Code, all.Body.String())
+	}
+	after := doJSON(t, h, http.MethodGet, "/v1/notifications?member_id="+human+"&unread=1", nil)
+	empty := decode[struct {
+		Items  []any `json:"items"`
+		Unread int   `json:"unread"`
+	}](t, after)
+	if empty.Unread != 0 || len(empty.Items) != 0 {
+		t.Fatalf("expected empty unread inbox: %#v", empty)
+	}
+}
+
+func TestMuxKeepsAPIWhenWebMissing(t *testing.T) {
+	h := NewMux()
+	health := doJSON(t, h, http.MethodGet, "/healthz", nil)
+	if health.Code != http.StatusOK {
+		t.Fatalf("healthz: %d", health.Code)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("root without UI: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOAuthProtectsMutations(t *testing.T) {
 	h := NewMuxSecure()
 	rec := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Nope"})
