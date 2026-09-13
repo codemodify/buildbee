@@ -2,6 +2,7 @@
 package models
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -21,6 +22,7 @@ const (
 	TypeRepo     = "repo"
 	TypeRoutine  = "routine"
 	TypeIssue    = "issue"
+	TypeMention  = "mention"
 )
 
 // Bot Role values seeded on every new Project.
@@ -85,6 +87,32 @@ func MemberByRole(members []Member, role string) *Member {
 		}
 	}
 	return nil
+}
+
+var mentionToken = regexp.MustCompile(`(?i)@([a-z0-9_-]+)`)
+
+// MentionedBots returns Bot Members referenced as @Role or @Name in Channel text.
+func MentionedBots(body string, members []Member) []Member {
+	found := mentionToken.FindAllStringSubmatch(body, -1)
+	if len(found) == 0 {
+		return nil
+	}
+	want := map[string]bool{}
+	for _, m := range found {
+		want[strings.ToLower(m[1])] = true
+	}
+	var out []Member
+	seen := map[string]bool{}
+	for _, mem := range members {
+		if mem.Kind != "bot" || seen[mem.ID] {
+			continue
+		}
+		if want[strings.ToLower(mem.Role)] || want[strings.ToLower(mem.DisplayName)] {
+			out = append(out, mem)
+			seen[mem.ID] = true
+		}
+	}
+	return out
 }
 
 // TaskLooksAmbiguous is the thin Scout heuristic for a Decision stub.

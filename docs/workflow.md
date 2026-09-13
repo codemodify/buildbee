@@ -12,7 +12,7 @@ A **Project** is the workspace. Members join it with a **Role** and an **Identit
 
 ## 2. Coordinate in a Channel
 
-Work is discussed in a **Channel**. **Activity** in the Channel is the timeline of what happened: messages, **Handoffs**, **Runs**, and **Decision** records.
+Work is discussed in a **Channel**. **Activity** in the Channel is the timeline of what happened: messages, **Handoffs**, **Runs**, and **Decision** records. `@Scout` / `@Builder` (or `@Role`) mentions create a Task + Handoff to that Bot.
 
 ## 3. Create a Task
 

@@ -70,4 +70,9 @@ names={a['name'] for a in d.get('artifacts',[])}
 assert 'acp.log' in names, names
 print('artifacts', sorted(names))
 "
+chan=$(printf '%s' "$proj" | json "['channels'][0]['id']")
+mention=$(curl -fsS -X POST "$BASE/v1/channels/$chan/messages" -H 'Content-Type: application/json' \
+  -d "{\"body\":\"@Scout please triage from Channel\",\"member_id\":\"$human\"}")
+printf '%s' "$mention" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d.get('mentions') and d.get('tasks'); print('mention', d['mentions'][0]['role'], d['tasks'][0]['id'])"
+
 echo "e2e-roles-acp ok project=$pid task=$tid"

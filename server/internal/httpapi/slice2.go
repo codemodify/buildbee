@@ -126,6 +126,10 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
+	if !verifyGitHubSignature(r, raw) {
+		writeWebhookUnauthorized(w)
+		return
+	}
 	taskID, name, status, ext, artifactID := parsePipelineWebhook(raw)
 	if q := r.URL.Query().Get("task_id"); q != "" && taskID == "" {
 		taskID = q

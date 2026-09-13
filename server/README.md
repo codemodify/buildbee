@@ -44,7 +44,7 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | GET | `/v1/auth/me` | Identity + auth mode (`dev` or OAuth) |
 | GET | `/v1/auth/github` | Start GitHub OAuth (humans) |
 | POST | `/v1/projects/{id}/issues/sync` | Upsert Tasks from GitHub Issues (`fake` without token) |
-| POST | `/v1/issues/webhook` | GitHub Issues webhook → Task |
+| POST | `/v1/issues/webhook` | GitHub Issues webhook → Task (`GITHUB_WEBHOOK_SECRET` verifies `X-Hub-Signature-256`) |
 | GET/POST | `/v1/projects/{id}/routines` | List / create Routine |
 | POST | `/v1/routines/{id}/run` | Force-fire a Routine |
 

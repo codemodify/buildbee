@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -87,6 +89,15 @@ func (s *Server) syncIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) issuesWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if !verifyGitHubSignature(r, raw) {
+		writeWebhookUnauthorized(w)
+		return
+	}
 	var body struct {
 		Action string `json:"action"`
 		Issue  *struct {
@@ -101,7 +112,7 @@ func (s *Server) issuesWebhook(w http.ResponseWriter, r *http.Request) {
 			ProjectID string `json:"project_id"`
 		} `json:"client_payload"`
 	}
-	if err := decodeJSON(r, &body); err != nil || body.Issue == nil {
+	if err := json.Unmarshal(raw, &body); err != nil || body.Issue == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "issue payload required"})
 		return
 	}
