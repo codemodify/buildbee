@@ -41,6 +41,12 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | GET/POST | `/v1/tasks/{id}/pipelines` | List / create Pipeline check |
 | PATCH | `/v1/pipelines/{id}` | Update Pipeline status |
 | POST | `/v1/pipelines/webhook` | Record Pipeline status (simple JSON or GitHub `check_run`) |
+| GET | `/v1/auth/me` | Identity + auth mode (`dev` or OAuth) |
+| GET | `/v1/auth/github` | Start GitHub OAuth (humans) |
+| POST | `/v1/projects/{id}/issues/sync` | Upsert Tasks from GitHub Issues (`fake` without token) |
+| POST | `/v1/issues/webhook` | GitHub Issues webhook → Task |
+| GET/POST | `/v1/projects/{id}/routines` | List / create Routine |
+| POST | `/v1/routines/{id}/run` | Force-fire a Routine |
 
 Auth is stubbed. Pass `X-Member-ID` or `member_id` when posting messages.
 

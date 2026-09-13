@@ -46,8 +46,9 @@ Then:
 ```bash
 cd web && npm install && npm run dev   # http://localhost:5173
 
-./scripts/e2e.sh       # Project → message → Task → Handoff → Decision → Run
-./scripts/e2e-run.sh   # Run → log Artifact → fake Repo PR → Pipelines webhook
+./scripts/e2e.sh          # Project → message → Task → Handoff → Decision → Run
+./scripts/e2e-run.sh      # Run → log Artifact → fake Repo PR → Pipelines webhook
+./scripts/e2e-identity.sh # dev auth + fake Issues→Task + Routine fire
 
 cd cli
 go run ./cmd/buildbee run start --task "$TASK_ID" --fake
@@ -65,9 +66,29 @@ Open a Task in the web UI to see **Runs**, **Artifacts** (including PR URLs), an
 
 `POST /v1/pipelines/webhook` records check status on a Task. Simple JSON `{task_id,name,status,external_url}` or a GitHub Actions-shaped `check_run` object.
 
-## Auth (stub)
+## Identity / Auth
 
-Humans: GitHub OAuth later. Bots: server-issued Identities.
+- **Dev auth** (default): `GITHUB_CLIENT_ID` unset. Mutating `/v1` is open. Session Identity is Member **You**. The web shows a banner.
+- **GitHub OAuth**: set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT` (default `http://127.0.0.1:8080/v1/auth/callback`), optional `SESSION_SECRET` and `BUILDBEE_FRONTEND_URL`. Then `GET /v1/auth/github` and the web “Sign in with GitHub” button. Mutating `/v1` requires the session cookie. `/healthz`, reads, `/v1/auth/*`, and webhooks stay open.
+
+Bots still get server-issued Identities.
+
+## Issues
+
+`POST /v1/projects/{id}/issues/sync` lists open GitHub Issues (`GITHUB_TOKEN`, `GITHUB_REPO` or `{"repo":"owner/name"}`) and upserts **Tasks** with issue number/URL. Without a token, `{"fake":true}` (or missing token) creates two sample Issues→Tasks.
+
+`POST /v1/issues/webhook?project_id=` accepts GitHub `issues` opened/edited JSON.
+
+Web: **Sync Issues** on the Project; Task rows and detail show the linked Issues URL.
+
+## Routines
+
+Each new Project gets a disabled `morning-digest` Routine (daily). `GET/POST /v1/projects/{id}/routines` and `POST /v1/routines/{id}/run` force-fire: Channel digest message + a Task + Activity type `routine`. A Server worker ticks enabled Routines.
+
+```bash
+go run ./cmd/buildbee routine list --project "$PROJECT_ID"
+go run ./cmd/buildbee routine run --id "$ROUTINE_ID"
+```
 
 ## Tests
 

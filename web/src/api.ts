@@ -3,7 +3,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(path, { credentials: "include", ...init, headers });
   const text = await res.text();
   if (!res.ok) {
     throw new Error(text || res.statusText);
@@ -98,4 +98,16 @@ export const api = {
     }),
   getTaskDetail: (taskId: string) =>
     request<import("./types").TaskDetail>(`/v1/tasks/${taskId}/detail`),
+  authMe: () => request<import("./types").AuthMe>("/v1/auth/me"),
+  syncIssues: (projectId: string) =>
+    request<{ items: import("./types").Task[]; fake?: boolean }>(
+      `/v1/projects/${projectId}/issues/sync`,
+      { method: "POST", body: JSON.stringify({ fake: true }) },
+    ),
+  listRoutines: (projectId: string) =>
+    request<{ items: import("./types").Routine[] }>(
+      `/v1/projects/${projectId}/routines`,
+    ),
+  fireRoutine: (id: string) =>
+    request(`/v1/routines/${id}/run`, { method: "POST", body: "{}" }),
 };

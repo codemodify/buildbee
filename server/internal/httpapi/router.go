@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/codemodify/buildbee/server/internal/auth"
 	"github.com/codemodify/buildbee/server/internal/store"
 	"github.com/codemodify/buildbee/server/internal/ws"
 )
@@ -11,18 +12,30 @@ import (
 type Server struct {
 	store store.Store
 	hub   *ws.Hub
+	auth  *auth.Service
 }
 
-func NewServer(st store.Store, hub *ws.Hub) *Server {
+func newSrv(st store.Store, hub *ws.Hub, a *auth.Service) *Server {
 	if hub == nil {
 		hub = ws.NewHub()
 	}
-	return &Server{store: st, hub: hub}
+	if a == nil {
+		a = auth.New(auth.FromEnv())
+	}
+	return &Server{store: st, hub: hub, auth: a}
 }
 
-// NewMux returns a Server with an in-memory Store (tests and no-DB `go run`).
+func NewServer(st store.Store, hub *ws.Hub) *Server {
+	return newSrv(st, hub, auth.New(auth.FromEnv()))
+}
+
+// NewMux returns a Server with an in-memory Store and dev auth (tests / no OAuth).
 func NewMux() http.Handler {
-	return NewServer(store.NewMemory(), ws.NewHub()).Handler()
+	return newSrv(store.NewMemory(), ws.NewHub(), auth.NewDev()).Handler()
+}
+
+func NewMuxSecure() http.Handler {
+	return newSrv(store.NewMemory(), ws.NewHub(), auth.New(auth.Config{ClientID: "test"})).Handler()
 }
 
 func (s *Server) Handler() http.Handler {
@@ -30,6 +43,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", Health)
 	mux.HandleFunc("GET /v1/{$}", s.v1Index)
 	mux.HandleFunc("GET /v1", s.v1Index)
+
+	mux.HandleFunc("GET /v1/auth/me", s.authMe)
+	mux.HandleFunc("GET /v1/auth/github", s.authGitHub)
+	mux.HandleFunc("GET /v1/auth/callback", s.authCallback)
+	mux.HandleFunc("POST /v1/auth/logout", s.authLogout)
 
 	mux.HandleFunc("GET /v1/projects", s.listProjects)
 	mux.HandleFunc("POST /v1/projects", s.createProject)
@@ -75,17 +93,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/pipelines/{pipelineID}", s.updatePipeline)
 	mux.HandleFunc("POST /v1/pipelines/webhook", s.pipelinesWebhook)
 
-	return withCORS(mux)
+	mux.HandleFunc("POST /v1/projects/{projectID}/issues/sync", s.syncIssues)
+	mux.HandleFunc("POST /v1/issues/webhook", s.issuesWebhook)
+
+	mux.HandleFunc("GET /v1/projects/{projectID}/routines", s.listRoutines)
+	mux.HandleFunc("POST /v1/projects/{projectID}/routines", s.createRoutine)
+	mux.HandleFunc("POST /v1/routines/{routineID}/run", s.fireRoutine)
+
+	return s.auth.RequireMutating(withCORS(mux))
 }
 
 func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "buildbee",
 		"api":     "v1",
+		"auth":    map[string]any{"dev": s.auth.Dev()},
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines",
+			"artifacts", "pipelines", "issues", "routines",
 		},
 	})
 }

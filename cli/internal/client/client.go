@@ -139,6 +139,18 @@ func (c *Client) FakeStartRun(taskID, cmd, repoURL string) (map[string]any, erro
 	return map[string]any{"run": run, "artifact": art, "pr": pr, "fake": true}, nil
 }
 
+func (c *Client) ListRoutines(projectID string) (map[string]any, error) {
+	var out map[string]any
+	err := c.do(http.MethodGet, "/v1/projects/"+projectID+"/routines", nil, &out)
+	return out, err
+}
+
+func (c *Client) RunRoutine(id string) (map[string]any, error) {
+	var out map[string]any
+	err := c.do(http.MethodPost, "/v1/routines/"+id+"/run", map[string]string{}, &out)
+	return out, err
+}
+
 func (c *Client) RuntimeStart(runtimeURL, taskID, runID, repoURL, cmd string, fake bool) (map[string]any, error) {
 	rt := &Client{Base: strings.TrimRight(runtimeURL, "/"), HTTP: c.HTTP, Output: c.Output}
 	var out map[string]any

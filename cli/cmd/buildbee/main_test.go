@@ -56,6 +56,12 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 	mux.HandleFunc("POST /v1/tasks/t1/pr", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"artifact": map[string]any{"id": "a2", "kind": "pr"}})
 	})
+	mux.HandleFunc("GET /v1/projects/p1/routines", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"id": "rt1", "name": "morning-digest"}}})
+	})
+	mux.HandleFunc("POST /v1/routines/rt1/run", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "rt1", "name": "morning-digest"})
+	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -74,6 +80,14 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 	}
 	buf.Reset()
 	if err := run([]string{"run", "start", "--task", "t1", "--fake"}, c); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if err := run([]string{"routine", "list", "--project", "p1"}, c); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if err := run([]string{"routine", "run", "--id", "rt1"}, c); err != nil {
 		t.Fatal(err)
 	}
 }

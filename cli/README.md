@@ -10,6 +10,8 @@ go run ./cmd/buildbee project create --name Hive
 go run ./cmd/buildbee task list --project "$PROJECT_ID"
 go run ./cmd/buildbee handoff create --task "$TASK_ID" --from "$HUMAN_ID" --to "$BOT_ID" --note "please take this"
 go run ./cmd/buildbee run start --task "$TASK_ID" --fake
+go run ./cmd/buildbee routine list --project "$PROJECT_ID"
+go run ./cmd/buildbee routine run --id "$ROUTINE_ID"
 go run ./cmd/buildbee run start --task "$TASK_ID" --repo-url https://github.com/org/repo.git --cmd "echo hi"
 ```
 

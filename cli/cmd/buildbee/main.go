@@ -40,6 +40,8 @@ func run(args []string, c *client.Client) error {
 		return runHandoff(args[1:], c)
 	case "run":
 		return runRun(args[1:], c)
+	case "routine":
+		return runRoutine(args[1:], c)
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -142,6 +144,36 @@ func runRun(args []string, c *client.Client) error {
 	return c.PrintJSON(out)
 }
 
+func runRoutine(args []string, c *client.Client) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: buildbee routine list --project ID | routine run --id ID")
+	}
+	switch args[0] {
+	case "list":
+		projectID := flagValue(args[1:], "project")
+		if projectID == "" {
+			return fmt.Errorf("usage: buildbee routine list --project ID")
+		}
+		out, err := c.ListRoutines(projectID)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	case "run":
+		id := flagValue(args[1:], "id")
+		if id == "" {
+			return fmt.Errorf("usage: buildbee routine run --id ID")
+		}
+		out, err := c.RunRoutine(id)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	default:
+		return fmt.Errorf("usage: buildbee routine list --project ID | routine run --id ID")
+	}
+}
+
 func hasFlag(args []string, name string) bool {
 	want := "--" + name
 	for _, a := range args {
@@ -175,6 +207,8 @@ Usage:
   buildbee task list --project ID
   buildbee handoff create --task ID --from ID --to ID [--note TEXT]
   buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake]
+  buildbee routine list --project ID
+  buildbee routine run --id ID
 
 Environment:
   BUILDBEE_URL           Server base URL (default http://127.0.0.1:8080)
