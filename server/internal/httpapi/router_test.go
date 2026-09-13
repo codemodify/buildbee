@@ -347,6 +347,63 @@ func TestWebhookSignatureRequired(t *testing.T) {
 	}
 }
 
+func TestDecisionMemoryReuse(t *testing.T) {
+	h := NewMux()
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Memory Hive"})
+	proj := decode[map[string]any](t, created)
+	pid := proj["id"].(string)
+
+	first := doJSON(t, h, http.MethodPost, "/v1/projects/"+pid+"/decisions", map[string]any{
+		"prompt": "Ship today?", "options": []string{"yes", "no"}, "recommendation": "yes",
+	})
+	if first.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", first.Code, first.Body.String())
+	}
+	d1 := decode[map[string]any](t, first)
+	ans := doJSON(t, h, http.MethodPost, "/v1/decisions/"+d1["id"].(string)+"/answer", map[string]string{"answer": "yes"})
+	if ans.Code != http.StatusOK {
+		t.Fatalf("answer: %d %s", ans.Code, ans.Body.String())
+	}
+
+	again := doJSON(t, h, http.MethodPost, "/v1/projects/"+pid+"/decisions", map[string]any{
+		"prompt": "  SHIP TODAY?!  ", "options": []string{"yes", "no"}, "recommendation": "yes",
+	})
+	if again.Code != http.StatusCreated {
+		t.Fatalf("reuse create: %d %s", again.Code, again.Body.String())
+	}
+	d2 := decode[map[string]any](t, again)
+	if d2["reused"] != true {
+		t.Fatalf("expected reused Decision: %#v", d2)
+	}
+	if d2["answer"] != "yes" {
+		t.Fatalf("expected auto-applied answer, got %#v", d2)
+	}
+
+	inbox := doJSON(t, h, http.MethodGet, "/v1/projects/"+pid+"/decisions?inbox=1", nil)
+	open := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, inbox)
+	if len(open.Items) != 0 {
+		t.Fatalf("inbox should skip reused/answered: %#v", open.Items)
+	}
+
+	mems := doJSON(t, h, http.MethodGet, "/v1/projects/"+pid+"/decisions/memories", nil)
+	listed := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, mems)
+	if len(listed.Items) < 1 || listed.Items[0]["answer"] != "yes" {
+		t.Fatalf("memories: %#v", listed.Items)
+	}
+
+	feed := doJSON(t, h, http.MethodGet, "/v1/projects/"+pid+"/activity?type=memory", nil)
+	acts := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, feed)
+	if len(acts.Items) < 1 {
+		t.Fatal("expected memory reuse Activity")
+	}
+}
+
 func TestOAuthProtectsMutations(t *testing.T) {
 	h := NewMuxSecure()
 	rec := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Nope"})

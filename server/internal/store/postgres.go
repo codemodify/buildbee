@@ -153,6 +153,24 @@ func (p *Postgres) GetProject(ctx context.Context, id string) (*models.ProjectBu
 	return &models.ProjectBundle{Project: proj, Members: members, Channels: channels}, nil
 }
 
+func (p *Postgres) UpdateProject(ctx context.Context, id string, autoRun *bool) (*models.Project, error) {
+	if autoRun != nil {
+		tag, err := p.pool.Exec(ctx, `UPDATE projects SET auto_run=$2 WHERE id=$1`, id, *autoRun)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, ErrNotFound
+		}
+		_ = p.addActivity(ctx, id, models.TypeProject, map[string]any{"id": id, "auto_run": *autoRun, "action": "update"})
+	}
+	bundle, err := p.GetProject(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &bundle.Project, nil
+}
+
 func (p *Postgres) ListProjects(ctx context.Context) ([]models.Project, error) {
 	rows, err := p.pool.Query(ctx, `SELECT id, name, created_at, COALESCE(auto_run, false) FROM projects ORDER BY created_at DESC`)
 	if err != nil {
@@ -481,6 +499,33 @@ func (p *Postgres) CreateDecision(ctx context.Context, projectID, prompt, recomm
 	return &d, nil
 }
 
+func (p *Postgres) CreateReusedDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, answer string) (*models.Decision, error) {
+	if err := p.mustProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	if options == nil {
+		options = []string{}
+	}
+	raw, err := json.Marshal(options)
+	if err != nil {
+		return nil, err
+	}
+	t := time.Now().UTC()
+	d := models.Decision{
+		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
+		Options: options, Recommendation: recommendation, Answer: answer,
+		Reused: true, Fingerprint: models.DecisionFingerprint(prompt),
+		CreatedAt: t, AnsweredAt: &t,
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, answer, answered_at, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.Answer, d.AnsweredAt, d.CreatedAt); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "reuse", "answer": answer, "fingerprint": d.Fingerprint})
+	_ = p.addActivity(ctx, projectID, models.TypeMemory, map[string]any{"fingerprint": d.Fingerprint, "action": "reuse", "answer": answer})
+	return &d, nil
+}
+
 func (p *Postgres) AnswerDecision(ctx context.Context, id, answer string) (*models.Decision, error) {
 	t := time.Now().UTC()
 	tag, err := p.pool.Exec(ctx, `UPDATE decisions SET answer=$2, answered_at=$3 WHERE id=$1`, id, answer, t)
@@ -494,8 +539,57 @@ func (p *Postgres) AnswerDecision(ctx context.Context, id, answer string) (*mode
 	if err != nil {
 		return nil, err
 	}
+	fp := models.DecisionFingerprint(d.Prompt)
+	if err := p.upsertDecisionMemory(ctx, d.ProjectID, fp, d.Prompt, answer, d.ID); err != nil {
+		return nil, err
+	}
 	_ = p.addActivity(ctx, d.ProjectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "answer", "answer": answer})
 	return d, nil
+}
+
+func (p *Postgres) upsertDecisionMemory(ctx context.Context, projectID, fingerprint, prompt, answer, decisionID string) error {
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO decision_memories (id, project_id, fingerprint, prompt, answer, decision_id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,now(),now())
+		ON CONFLICT (project_id, fingerprint) DO UPDATE SET
+			prompt=EXCLUDED.prompt, answer=EXCLUDED.answer, decision_id=EXCLUDED.decision_id, updated_at=now()`,
+		uuid.NewString(), projectID, fingerprint, prompt, answer, decisionID)
+	return err
+}
+
+func (p *Postgres) GetDecisionMemory(ctx context.Context, projectID, fingerprint string) (*models.DecisionMemory, error) {
+	var mem models.DecisionMemory
+	err := p.pool.QueryRow(ctx, `SELECT id, project_id, fingerprint, prompt, answer, COALESCE(decision_id::text,''), created_at, updated_at
+		FROM decision_memories WHERE project_id=$1 AND fingerprint=$2`, projectID, fingerprint).
+		Scan(&mem.ID, &mem.ProjectID, &mem.Fingerprint, &mem.Prompt, &mem.Answer, &mem.DecisionID, &mem.CreatedAt, &mem.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &mem, nil
+}
+
+func (p *Postgres) ListDecisionMemories(ctx context.Context, projectID string) ([]models.DecisionMemory, error) {
+	if err := p.mustProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, fingerprint, prompt, answer, COALESCE(decision_id::text,''), created_at, updated_at
+		FROM decision_memories WHERE project_id=$1 ORDER BY updated_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.DecisionMemory{}
+	for rows.Next() {
+		var mem models.DecisionMemory
+		if err := rows.Scan(&mem.ID, &mem.ProjectID, &mem.Fingerprint, &mem.Prompt, &mem.Answer, &mem.DecisionID, &mem.CreatedAt, &mem.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, mem)
+	}
+	return out, rows.Err()
 }
 
 func (p *Postgres) getDecision(ctx context.Context, id string) (*models.Decision, error) {

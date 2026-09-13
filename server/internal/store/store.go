@@ -15,6 +15,7 @@ type Store interface {
 	CreateProject(ctx context.Context, name string, autoRun bool) (*models.ProjectBundle, error)
 	GetProject(ctx context.Context, id string) (*models.ProjectBundle, error)
 	ListProjects(ctx context.Context) ([]models.Project, error)
+	UpdateProject(ctx context.Context, id string, autoRun *bool) (*models.Project, error)
 
 	ListMembers(ctx context.Context, projectID string) ([]models.Member, error)
 	AddMember(ctx context.Context, m models.Member) (*models.Member, error)
@@ -38,7 +39,10 @@ type Store interface {
 
 	ListDecisions(ctx context.Context, projectID string) ([]models.Decision, error)
 	CreateDecision(ctx context.Context, projectID, prompt, recommendation string, options []string) (*models.Decision, error)
+	CreateReusedDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, answer string) (*models.Decision, error)
 	AnswerDecision(ctx context.Context, id, answer string) (*models.Decision, error)
+	GetDecisionMemory(ctx context.Context, projectID, fingerprint string) (*models.DecisionMemory, error)
+	ListDecisionMemories(ctx context.Context, projectID string) ([]models.DecisionMemory, error)
 
 	ListActivity(ctx context.Context, projectID, typeFilter string) ([]models.Activity, error)
 

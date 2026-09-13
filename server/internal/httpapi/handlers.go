@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -35,6 +36,22 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 	p, err := s.store.GetProject(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		AutoRun *bool `json:"auto_run"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	p, err := s.store.UpdateProject(r.Context(), r.PathValue("projectID"), in.AutoRun)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -397,7 +414,7 @@ func (s *Server) completeHandoff(w http.ResponseWriter, r *http.Request) {
 	if scoutSide {
 		task, err := s.store.GetTask(r.Context(), h.TaskID)
 		if err == nil && (models.TaskLooksAmbiguous(task.Title, h.Note) || r.URL.Query().Get("decision") == "1") {
-			decision, _ = s.store.CreateDecision(r.Context(), task.ProjectID,
+			decision, _ = s.openDecision(r.Context(), task.ProjectID,
 				"Scout: is Task \""+task.Title+"\" ready for Builder?",
 				"handoff to Builder",
 				[]string{"handoff to Builder", "needs more info"},
@@ -417,6 +434,24 @@ func (s *Server) listDecisions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if r.URL.Query().Get("inbox") == "1" {
+		open := items[:0]
+		for _, d := range items {
+			if d.Answer == "" && !d.Reused {
+				open = append(open, d)
+			}
+		}
+		items = open
+	}
+	writeItems(w, items)
+}
+
+func (s *Server) listDecisionMemories(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ListDecisionMemories(r.Context(), r.PathValue("projectID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	writeItems(w, items)
 }
 
@@ -430,12 +465,20 @@ func (s *Server) createDecision(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "prompt is required"})
 		return
 	}
-	d, err := s.store.CreateDecision(r.Context(), r.PathValue("projectID"), strings.TrimSpace(in.Prompt), in.Recommendation, in.Options)
+	d, err := s.openDecision(r.Context(), r.PathValue("projectID"), strings.TrimSpace(in.Prompt), in.Recommendation, in.Options)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, d)
+}
+
+func (s *Server) openDecision(ctx context.Context, projectID, prompt, recommendation string, options []string) (*models.Decision, error) {
+	fp := models.DecisionFingerprint(prompt)
+	if mem, err := s.store.GetDecisionMemory(ctx, projectID, fp); err == nil && mem != nil && mem.Answer != "" {
+		return s.store.CreateReusedDecision(ctx, projectID, prompt, recommendation, options, mem.Answer)
+	}
+	return s.store.CreateDecision(ctx, projectID, prompt, recommendation, options)
 }
 
 func (s *Server) answerDecision(w http.ResponseWriter, r *http.Request) {

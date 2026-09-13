@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/codemodify/buildbee/server/internal/httpapi"
@@ -18,6 +19,11 @@ func main() {
 	addr := ":8080"
 	if v := os.Getenv("BUILDBEE_ADDR"); v != "" {
 		addr = v
+	} else if p := os.Getenv("PORT"); p != "" {
+		if !strings.HasPrefix(p, ":") {
+			p = ":" + p
+		}
+		addr = p
 	}
 
 	ctx := context.Background()

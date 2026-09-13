@@ -26,6 +26,7 @@ type Memory struct {
 	artifacts map[string]models.Artifact
 	pipelines map[string]models.Pipeline
 	routines  map[string]models.Routine
+	memories  map[string]models.DecisionMemory
 }
 
 func NewMemory() *Memory {
@@ -42,6 +43,7 @@ func NewMemory() *Memory {
 		artifacts: map[string]models.Artifact{},
 		pipelines: map[string]models.Pipeline{},
 		routines:  map[string]models.Routine{},
+		memories:  map[string]models.DecisionMemory{},
 	}
 }
 
@@ -91,6 +93,21 @@ func (m *Memory) GetProject(_ context.Context, id string) (*models.ProjectBundle
 		return nil, ErrNotFound
 	}
 	return &models.ProjectBundle{Project: p, Members: m.membersFor(id), Channels: m.channelsFor(id)}, nil
+}
+
+func (m *Memory) UpdateProject(_ context.Context, id string, autoRun *bool) (*models.Project, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.projects[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if autoRun != nil {
+		p.AutoRun = *autoRun
+		m.projects[id] = p
+		m.addActivity(id, models.TypeProject, map[string]any{"id": id, "auto_run": p.AutoRun, "action": "update"})
+	}
+	return &p, nil
 }
 
 func (m *Memory) ListProjects(_ context.Context) ([]models.Project, error) {
@@ -365,8 +382,31 @@ func (m *Memory) CreateDecision(_ context.Context, projectID, prompt, recommenda
 		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
 		Options: options, Recommendation: recommendation, CreatedAt: now(),
 	}
+	d.Fingerprint = models.DecisionFingerprint(prompt)
 	m.decisions[d.ID] = d
 	m.addActivity(projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "create"})
+	return &d, nil
+}
+
+func (m *Memory) CreateReusedDecision(_ context.Context, projectID, prompt, recommendation string, options []string, answer string) (*models.Decision, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[projectID]; !ok {
+		return nil, ErrNotFound
+	}
+	if options == nil {
+		options = []string{}
+	}
+	t := now()
+	d := models.Decision{
+		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
+		Options: options, Recommendation: recommendation, Answer: answer,
+		Reused: true, Fingerprint: models.DecisionFingerprint(prompt),
+		CreatedAt: t, AnsweredAt: &t,
+	}
+	m.decisions[d.ID] = d
+	m.addActivity(projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "reuse", "answer": answer, "fingerprint": d.Fingerprint})
+	m.addActivity(projectID, models.TypeMemory, map[string]any{"fingerprint": d.Fingerprint, "action": "reuse", "answer": answer})
 	return &d, nil
 }
 
@@ -380,9 +420,58 @@ func (m *Memory) AnswerDecision(_ context.Context, id, answer string) (*models.D
 	t := now()
 	d.Answer = answer
 	d.AnsweredAt = &t
+	if d.Fingerprint == "" {
+		d.Fingerprint = models.DecisionFingerprint(d.Prompt)
+	}
 	m.decisions[id] = d
+	m.upsertMemoryLocked(d.ProjectID, d.Fingerprint, d.Prompt, answer, d.ID, t)
 	m.addActivity(d.ProjectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "answer", "answer": answer})
 	return &d, nil
+}
+
+func (m *Memory) upsertMemoryLocked(projectID, fingerprint, prompt, answer, decisionID string, t time.Time) {
+	for id, mem := range m.memories {
+		if mem.ProjectID == projectID && mem.Fingerprint == fingerprint {
+			mem.Answer = answer
+			mem.Prompt = prompt
+			mem.DecisionID = decisionID
+			mem.UpdatedAt = t
+			m.memories[id] = mem
+			return
+		}
+	}
+	id := uuid.NewString()
+	m.memories[id] = models.DecisionMemory{
+		ID: id, ProjectID: projectID, Fingerprint: fingerprint,
+		Prompt: prompt, Answer: answer, DecisionID: decisionID, CreatedAt: t, UpdatedAt: t,
+	}
+}
+
+func (m *Memory) GetDecisionMemory(_ context.Context, projectID, fingerprint string) (*models.DecisionMemory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, mem := range m.memories {
+		if mem.ProjectID == projectID && mem.Fingerprint == fingerprint {
+			return &mem, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *Memory) ListDecisionMemories(_ context.Context, projectID string) ([]models.DecisionMemory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[projectID]; !ok {
+		return nil, ErrNotFound
+	}
+	out := []models.DecisionMemory{}
+	for _, mem := range m.memories {
+		if mem.ProjectID == projectID {
+			out = append(out, mem)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
 }
 
 func (m *Memory) ListActivity(_ context.Context, projectID, typeFilter string) ([]models.Activity, error) {
