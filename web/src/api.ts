@@ -126,4 +126,8 @@ export const api = {
     ),
   fireRoutine: (id: string) =>
     request(`/v1/routines/${id}/run`, { method: "POST", body: "{}" }),
+  listActivity: (projectId: string, type = "") =>
+    request<{ items: { id: string; type: string; payload: Record<string, unknown>; created_at: string }[] }>(
+      `/v1/projects/${projectId}/activity${type ? `?type=${encodeURIComponent(type)}` : ""}`,
+    ),
 };
