@@ -25,6 +25,7 @@ type Memory struct {
 	runs      map[string]models.Run
 	artifacts map[string]models.Artifact
 	pipelines map[string]models.Pipeline
+	routines  map[string]models.Routine
 }
 
 func NewMemory() *Memory {
@@ -40,6 +41,7 @@ func NewMemory() *Memory {
 		runs:      map[string]models.Run{},
 		artifacts: map[string]models.Artifact{},
 		pipelines: map[string]models.Pipeline{},
+		routines:  map[string]models.Routine{},
 	}
 }
 
@@ -75,6 +77,11 @@ func (m *Memory) CreateProject(_ context.Context, name string) (*models.ProjectB
 	m.addActivity(p.ID, models.TypeMember, map[string]any{"id": human.ID, "kind": "human"})
 	m.addActivity(p.ID, models.TypeMember, map[string]any{"id": bot.ID, "kind": "bot"})
 	m.addActivity(p.ID, models.TypeChannel, map[string]any{"id": ch.ID, "name": ch.Name})
+	rid := uuid.NewString()
+	m.routines[rid] = models.Routine{
+		ID: rid, ProjectID: p.ID, BotMemberID: bot.ID,
+		Name: "morning-digest", Schedule: "24h", Enabled: false, CreatedAt: t,
+	}
 	return &models.ProjectBundle{Project: p, Members: []models.Member{human, bot}, Channels: []models.Channel{ch}}, nil
 }
 
@@ -562,4 +569,111 @@ func (m *Memory) UpdatePipeline(_ context.Context, id, status, externalURL strin
 	m.pipelines[id] = p
 	m.addActivity(p.ProjectID, models.TypePipeline, map[string]any{"id": p.ID, "status": status})
 	return &p, nil
+}
+
+func (m *Memory) UpsertIssueTask(_ context.Context, projectID string, number int, title, issueURL string) (*models.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[projectID]; !ok {
+		return nil, ErrNotFound
+	}
+	for id, t := range m.tasks {
+		if t.ProjectID == projectID && t.IssueNumber == number {
+			t.Title = title
+			t.IssueURL = issueURL
+			t.UpdatedAt = now()
+			m.tasks[id] = t
+			m.addActivity(projectID, models.TypeIssue, map[string]any{"task_id": t.ID, "issue_number": number, "action": "update"})
+			return &t, nil
+		}
+	}
+	t := now()
+	task := models.Task{
+		ID: uuid.NewString(), ProjectID: projectID, Title: title, Status: "open",
+		IssueNumber: number, IssueURL: issueURL, CreatedAt: t, UpdatedAt: t,
+	}
+	m.tasks[task.ID] = task
+	m.addActivity(projectID, models.TypeIssue, map[string]any{"task_id": task.ID, "issue_number": number, "action": "create"})
+	return &task, nil
+}
+
+func (m *Memory) AppendActivity(_ context.Context, projectID, typ string, payload map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+	m.addActivity(projectID, typ, payload)
+	return nil
+}
+
+func (m *Memory) ListRoutines(_ context.Context, projectID string) ([]models.Routine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[projectID]; !ok {
+		return nil, ErrNotFound
+	}
+	out := []models.Routine{}
+	for _, r := range m.routines {
+		if r.ProjectID == projectID {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) ListEnabledRoutines(_ context.Context) ([]models.Routine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []models.Routine{}
+	for _, r := range m.routines {
+		if r.Enabled {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) CreateRoutine(_ context.Context, in models.Routine) (*models.Routine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[in.ProjectID]; !ok {
+		return nil, ErrNotFound
+	}
+	in.ID = uuid.NewString()
+	in.CreatedAt = now()
+	if in.Schedule == "" {
+		in.Schedule = "24h"
+	}
+	m.routines[in.ID] = in
+	m.addActivity(in.ProjectID, models.TypeRoutine, map[string]any{"id": in.ID, "name": in.Name, "action": "create"})
+	return &in, nil
+}
+
+func (m *Memory) GetRoutine(_ context.Context, id string) (*models.Routine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.routines[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &r, nil
+}
+
+func (m *Memory) UpdateRoutine(_ context.Context, id string, enabled *bool, lastRun *time.Time) (*models.Routine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.routines[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if enabled != nil {
+		r.Enabled = *enabled
+	}
+	if lastRun != nil {
+		r.LastRunAt = lastRun
+	}
+	m.routines[id] = r
+	return &r, nil
 }

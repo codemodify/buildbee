@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/codemodify/buildbee/server/internal/models"
 )
@@ -54,4 +55,13 @@ type Store interface {
 	ListPipelines(ctx context.Context, taskID string) ([]models.Pipeline, error)
 	UpdatePipeline(ctx context.Context, id, status, externalURL string) (*models.Pipeline, error)
 	GetPipeline(ctx context.Context, id string) (*models.Pipeline, error)
+
+	UpsertIssueTask(ctx context.Context, projectID string, number int, title, issueURL string) (*models.Task, error)
+	AppendActivity(ctx context.Context, projectID, typ string, payload map[string]any) error
+
+	ListRoutines(ctx context.Context, projectID string) ([]models.Routine, error)
+	ListEnabledRoutines(ctx context.Context) ([]models.Routine, error)
+	CreateRoutine(ctx context.Context, in models.Routine) (*models.Routine, error)
+	GetRoutine(ctx context.Context, id string) (*models.Routine, error)
+	UpdateRoutine(ctx context.Context, id string, enabled *bool, lastRun *time.Time) (*models.Routine, error)
 }

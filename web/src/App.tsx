@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "./api";
 import type {
+  AuthMe,
   Channel,
   Decision,
   Member,
   Message,
   Project,
+  Routine,
   Task,
   TaskDetail,
 } from "./types";
@@ -40,12 +42,57 @@ export default function App() {
   }, []);
 
   if (route.page === "task") {
-    return <TaskPage projectId={route.projectId} taskId={route.taskId} />;
+    return (
+      <>
+        <AuthBar />
+        <TaskPage projectId={route.projectId} taskId={route.taskId} />
+      </>
+    );
   }
   if (route.page === "project") {
-    return <ProjectPage projectId={route.projectId} channelId={route.channelId} />;
+    return (
+      <>
+        <AuthBar />
+        <ProjectPage projectId={route.projectId} channelId={route.channelId} />
+      </>
+    );
   }
-  return <HomePage />;
+  return (
+    <>
+      <AuthBar />
+      <HomePage />
+    </>
+  );
+}
+
+function AuthBar() {
+  const [me, setMe] = useState<AuthMe | null>(null);
+  useEffect(() => {
+    void api.authMe().then(setMe).catch(() => setMe(null));
+  }, []);
+  if (!me) return null;
+  if (me.dev) {
+    return (
+      <div className="bg-amber-400/15 px-4 py-2 text-center text-sm text-amber-200">
+        Dev auth: acting as Member {me.identity?.display_name ?? "You"} (set
+        GITHUB_CLIENT_ID to enable GitHub OAuth)
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-end gap-3 bg-zinc-900 px-4 py-2 text-sm">
+      {me.signed_in ? (
+        <span>Signed in as {me.identity?.github_login ?? me.identity?.display_name}</span>
+      ) : (
+        <a
+          href="/v1/auth/github"
+          className="rounded bg-zinc-100 px-3 py-1 font-medium text-zinc-950"
+        >
+          Sign in with GitHub
+        </a>
+      )}
+    </div>
+  );
 }
 
 function HomePage() {
@@ -140,6 +187,7 @@ function ProjectPage({
   const [options, setOptions] = useState("yes, no");
   const [memberName, setMemberName] = useState("");
   const [memberKind, setMemberKind] = useState("human");
+  const [routines, setRoutines] = useState<Routine[]>([]);
   const [error, setError] = useState("");
 
   const activeChannel = useMemo(() => {
@@ -153,16 +201,18 @@ function ProjectPage({
   async function loadProject() {
     const p = await api.getProject(projectId);
     setProject(p);
-    const [m, c, t, d] = await Promise.all([
+    const [m, c, t, d, rts] = await Promise.all([
       api.listMembers(projectId),
       api.listChannels(projectId),
       api.listTasks(projectId),
       api.listDecisions(projectId),
+      api.listRoutines(projectId),
     ]);
     setMembers(m.items);
     setChannels(c.items);
     setTasks(t.items);
     setDecisions(d.items);
+    setRoutines(rts.items);
     return c.items;
   }
 
@@ -349,7 +399,20 @@ function ProjectPage({
 
         <div className="space-y-4">
           <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="text-sm font-medium text-zinc-400">Tasks</h2>
+            <h2 className="flex items-center justify-between text-sm font-medium text-zinc-400">
+              Tasks
+              <button
+                type="button"
+                className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200"
+                onClick={() => {
+                  void api.syncIssues(projectId).then(async () => {
+                    setTasks((await api.listTasks(projectId)).items);
+                  });
+                }}
+              >
+                Sync Issues
+              </button>
+            </h2>
             <form onSubmit={addTask} className="mt-2 flex gap-1">
               <input
                 className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
@@ -365,12 +428,22 @@ function ProjectPage({
               {tasks.map((t) => (
                 <li key={t.id} className="rounded border border-zinc-800 px-2 py-1 text-sm">
                   <div className="flex items-center justify-between gap-2">
-                    <a
-                      href={`#/projects/${projectId}/tasks/${t.id}`}
-                      className="hover:text-amber-300"
-                    >
-                      {t.title}
-                    </a>
+                    <span>
+                      <a
+                        href={`#/projects/${projectId}/tasks/${t.id}`}
+                        className="hover:text-amber-300"
+                      >
+                        {t.title}
+                      </a>
+                      {t.issue_url ? (
+                        <a
+                          className="ml-2 text-xs text-amber-500 underline"
+                          href={t.issue_url}
+                        >
+                          #{t.issue_number} Issues
+                        </a>
+                      ) : null}
+                    </span>
                     <select
                       className="bg-zinc-950 text-xs"
                       value={t.status}
@@ -441,6 +514,31 @@ function ProjectPage({
               ))}
             </ul>
           </section>
+
+          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <h2 className="text-sm font-medium text-zinc-400">Routines</h2>
+            <ul className="mt-2 space-y-2">
+              {routines.map((rt) => (
+                <li key={rt.id} className="flex items-center justify-between text-sm">
+                  <span>
+                    {rt.name}{" "}
+                    <span className="text-zinc-500">{rt.schedule}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="rounded bg-zinc-800 px-2 py-0.5 text-xs"
+                    onClick={() => {
+                      void api.fireRoutine(rt.id).then(async () => {
+                        setTasks((await api.listTasks(projectId)).items);
+                      });
+                    }}
+                  >
+                    Run
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
         </div>
       </div>
     </main>
@@ -465,6 +563,14 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
       </a>
       <h1 className="mt-3 text-2xl font-semibold">{detail?.title ?? "Task"}</h1>
       <p className="text-sm text-zinc-500">status {detail?.status}</p>
+      {detail?.issue_url ? (
+        <p className="mt-1 text-sm">
+          Issues{" "}
+          <a className="text-amber-300 underline" href={detail.issue_url}>
+            #{detail.issue_number} {detail.issue_url}
+          </a>
+        </p>
+      ) : null}
       {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
 
       <section className="mt-8">

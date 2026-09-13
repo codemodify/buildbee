@@ -227,4 +227,57 @@ func TestVerticalSlice(t *testing.T) {
 	if len(td.Artifacts) < 2 || len(td.Pipelines) < 1 || len(td.Runs) < 1 {
 		t.Fatalf("detail incomplete: %#v", td)
 	}
+
+	sync := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/issues/sync", map[string]any{"fake": true})
+	if sync.Code != http.StatusOK {
+		t.Fatalf("issues sync: %d %s", sync.Code, sync.Body.String())
+	}
+	issueHook := doJSON(t, h, http.MethodPost, "/v1/issues/webhook?project_id="+proj.ID, map[string]any{
+		"action": "opened",
+		"issue":  map[string]any{"number": 9, "title": "From webhook", "html_url": "https://github.com/example/buildbee/issues/9"},
+	})
+	if issueHook.Code != http.StatusOK {
+		t.Fatalf("issues webhook: %d %s", issueHook.Code, issueHook.Body.String())
+	}
+
+	rts := doJSON(t, h, http.MethodGet, "/v1/projects/"+proj.ID+"/routines", nil)
+	if rts.Code != http.StatusOK {
+		t.Fatalf("routines: %d %s", rts.Code, rts.Body.String())
+	}
+	var rlist struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	rlist = decode[struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}](t, rts)
+	if len(rlist.Items) < 1 {
+		t.Fatal("expected seeded morning-digest Routine")
+	}
+	fired := doJSON(t, h, http.MethodPost, "/v1/routines/"+rlist.Items[0].ID+"/run", map[string]string{})
+	if fired.Code != http.StatusOK {
+		t.Fatalf("routine run: %d %s", fired.Code, fired.Body.String())
+	}
+
+	me := doJSON(t, h, http.MethodGet, "/v1/auth/me", nil)
+	if me.Code != http.StatusOK {
+		t.Fatalf("auth me: %d", me.Code)
+	}
+}
+
+func TestOAuthProtectsMutations(t *testing.T) {
+	h := NewMuxSecure()
+	rec := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Nope"})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status: got %d want 401 %s", rec.Code, rec.Body.String())
+	}
+	health := doJSON(t, h, http.MethodGet, "/healthz", nil)
+	if health.Code != http.StatusOK {
+		t.Fatalf("healthz: %d", health.Code)
+	}
 }

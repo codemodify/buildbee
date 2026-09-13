@@ -93,6 +93,10 @@ func (p *Postgres) CreateProject(ctx context.Context, name string) (*models.Proj
 	if err := insertActivity(ctx, tx, proj.ID, models.TypeChannel, map[string]any{"id": ch.ID, "name": ch.Name}); err != nil {
 		return nil, err
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO routines (id, project_id, bot_member_id, name, schedule, enabled, created_at)
+		VALUES ($1,$2,$3,'morning-digest','24h',false,$4)`, uuid.NewString(), proj.ID, bot.ID, t); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -169,7 +173,7 @@ func (p *Postgres) ListMembers(ctx context.Context, projectID string) ([]models.
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,'')
 		FROM members WHERE project_id=$1 ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -178,7 +182,7 @@ func (p *Postgres) ListMembers(ctx context.Context, projectID string) ([]models.
 	out := []models.Member{}
 	for rows.Next() {
 		var m models.Member
-		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -210,8 +214,8 @@ func (p *Postgres) AddMember(ctx context.Context, in models.Member) (*models.Mem
 
 func (p *Postgres) GetMember(ctx context.Context, id string) (*models.Member, error) {
 	var m models.Member
-	err := p.pool.QueryRow(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at FROM members WHERE id=$1`, id).
-		Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,'') FROM members WHERE id=$1`, id).
+		Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -302,7 +306,7 @@ func (p *Postgres) ListTasks(ctx context.Context, projectID string) ([]models.Ta
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id, project_id, title, status, COALESCE(assignee_member_id::text, ''), created_at, updated_at
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, title, status, COALESCE(assignee_member_id::text, ''), created_at, updated_at, COALESCE(issue_number,0), COALESCE(issue_url,'')
 		FROM tasks WHERE project_id=$1 ORDER BY created_at DESC`, projectID)
 	if err != nil {
 		return nil, err
@@ -311,7 +315,7 @@ func (p *Postgres) ListTasks(ctx context.Context, projectID string) ([]models.Ta
 	out := []models.Task{}
 	for rows.Next() {
 		var t models.Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Status, &t.AssigneeMemberID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Status, &t.AssigneeMemberID, &t.CreatedAt, &t.UpdatedAt, &t.IssueNumber, &t.IssueURL); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -339,8 +343,8 @@ func (p *Postgres) CreateTask(ctx context.Context, projectID, title, assigneeMem
 
 func (p *Postgres) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	var t models.Task
-	err := p.pool.QueryRow(ctx, `SELECT id, project_id, title, status, COALESCE(assignee_member_id::text, ''), created_at, updated_at FROM tasks WHERE id=$1`, id).
-		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Status, &t.AssigneeMemberID, &t.CreatedAt, &t.UpdatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id, project_id, title, status, COALESCE(assignee_member_id::text, ''), created_at, updated_at, COALESCE(issue_number,0), COALESCE(issue_url,'') FROM tasks WHERE id=$1`, id).
+		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Status, &t.AssigneeMemberID, &t.CreatedAt, &t.UpdatedAt, &t.IssueNumber, &t.IssueURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -750,4 +754,135 @@ func (p *Postgres) UpdatePipeline(ctx context.Context, id, status, externalURL s
 	}
 	_ = p.addActivity(ctx, pl.ProjectID, models.TypePipeline, map[string]any{"id": pl.ID, "status": status})
 	return p.GetPipeline(ctx, id)
+}
+
+func (p *Postgres) UpsertIssueTask(ctx context.Context, projectID string, number int, title, issueURL string) (*models.Task, error) {
+	if err := p.mustProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	var id string
+	err := p.pool.QueryRow(ctx, `SELECT id FROM tasks WHERE project_id=$1 AND issue_number=$2`, projectID, number).Scan(&id)
+	if err == nil {
+		if _, err := p.pool.Exec(ctx, `UPDATE tasks SET title=$2, issue_url=$3, updated_at=$4 WHERE id=$1`, id, title, issueURL, time.Now().UTC()); err != nil {
+			return nil, err
+		}
+		_ = p.addActivity(ctx, projectID, models.TypeIssue, map[string]any{"task_id": id, "issue_number": number, "action": "update"})
+		return p.GetTask(ctx, id)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	t := time.Now().UTC()
+	task := models.Task{
+		ID: uuid.NewString(), ProjectID: projectID, Title: title, Status: "open",
+		IssueNumber: number, IssueURL: issueURL, CreatedAt: t, UpdatedAt: t,
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO tasks (id, project_id, title, status, issue_number, issue_url, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, task.ID, task.ProjectID, task.Title, task.Status, number, issueURL, t, t); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, projectID, models.TypeIssue, map[string]any{"task_id": task.ID, "issue_number": number, "action": "create"})
+	return &task, nil
+}
+
+func (p *Postgres) AppendActivity(ctx context.Context, projectID, typ string, payload map[string]any) error {
+	if err := p.mustProject(ctx, projectID); err != nil {
+		return err
+	}
+	return p.addActivity(ctx, projectID, typ, payload)
+}
+
+func (p *Postgres) ListRoutines(ctx context.Context, projectID string) ([]models.Routine, error) {
+	if err := p.mustProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, COALESCE(bot_member_id::text,''), name, schedule, enabled, last_run_at, created_at FROM routines WHERE project_id=$1 ORDER BY created_at`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Routine{}
+	for rows.Next() {
+		r, err := scanRoutine(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ListEnabledRoutines(ctx context.Context) ([]models.Routine, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, COALESCE(bot_member_id::text,''), name, schedule, enabled, last_run_at, created_at FROM routines WHERE enabled=true`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Routine{}
+	for rows.Next() {
+		r, err := scanRoutine(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) CreateRoutine(ctx context.Context, in models.Routine) (*models.Routine, error) {
+	if err := p.mustProject(ctx, in.ProjectID); err != nil {
+		return nil, err
+	}
+	in.ID = uuid.NewString()
+	in.CreatedAt = time.Now().UTC()
+	if in.Schedule == "" {
+		in.Schedule = "24h"
+	}
+	var bot any
+	if in.BotMemberID != "" {
+		bot = in.BotMemberID
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO routines (id, project_id, bot_member_id, name, schedule, enabled, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, in.ID, in.ProjectID, bot, in.Name, in.Schedule, in.Enabled, in.CreatedAt); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, in.ProjectID, models.TypeRoutine, map[string]any{"id": in.ID, "name": in.Name, "action": "create"})
+	return &in, nil
+}
+
+func (p *Postgres) GetRoutine(ctx context.Context, id string) (*models.Routine, error) {
+	row := p.pool.QueryRow(ctx, `SELECT id, project_id, COALESCE(bot_member_id::text,''), name, schedule, enabled, last_run_at, created_at FROM routines WHERE id=$1`, id)
+	r, err := scanRoutine(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+func (p *Postgres) UpdateRoutine(ctx context.Context, id string, enabled *bool, lastRun *time.Time) (*models.Routine, error) {
+	r, err := p.GetRoutine(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if enabled != nil {
+		r.Enabled = *enabled
+	}
+	if lastRun != nil {
+		r.LastRunAt = lastRun
+	}
+	if _, err := p.pool.Exec(ctx, `UPDATE routines SET enabled=$2, last_run_at=$3 WHERE id=$1`, r.ID, r.Enabled, r.LastRunAt); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func scanRoutine(row scannable) (models.Routine, error) {
+	var r models.Routine
+	var last *time.Time
+	err := row.Scan(&r.ID, &r.ProjectID, &r.BotMemberID, &r.Name, &r.Schedule, &r.Enabled, &last, &r.CreatedAt)
+	r.LastRunAt = last
+	return r, err
 }

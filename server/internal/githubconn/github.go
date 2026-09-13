@@ -39,6 +39,23 @@ func FromEnv() (token, repo string) {
 	return os.Getenv("GITHUB_TOKEN"), os.Getenv("GITHUB_REPO")
 }
 
+type Issue struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	HTMLURL string `json:"html_url"`
+}
+
+func ListOpenIssues(ctx context.Context, token, repo string) ([]Issue, error) {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return nil, fmt.Errorf("GITHUB_REPO must be owner/name")
+	}
+	var issues []Issue
+	err := ghJSON(ctx, &http.Client{Timeout: 20 * time.Second}, token, http.MethodGet,
+		"/repos/"+owner+"/"+name+"/issues?state=open&per_page=50", nil, &issues)
+	return issues, err
+}
+
 // OpenDraftPR creates a branch + file commit + draft PR, or a fake URL.
 func OpenDraftPR(ctx context.Context, opt Options) (*Result, error) {
 	if opt.Token == "" {

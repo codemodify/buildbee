@@ -34,6 +34,8 @@ export type Task = {
   title: string;
   status: string;
   assignee_member_id?: string;
+  issue_number?: number;
+  issue_url?: string;
 };
 
 export type Decision = {
@@ -72,4 +74,19 @@ export type TaskDetail = Task & {
   runs: Run[];
   artifacts: Artifact[];
   pipelines: Pipeline[];
+};
+
+export type AuthMe = {
+  mode: string;
+  oauth: boolean;
+  signed_in: boolean;
+  dev: boolean;
+  identity?: { display_name?: string; github_login?: string };
+};
+
+export type Routine = {
+  id: string;
+  name: string;
+  schedule: string;
+  enabled: boolean;
 };

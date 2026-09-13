@@ -16,6 +16,8 @@ const (
 	TypeArtifact = "artifact"
 	TypePipeline = "pipeline"
 	TypeRepo     = "repo"
+	TypeRoutine  = "routine"
+	TypeIssue    = "issue"
 )
 
 type Project struct {
@@ -38,7 +40,18 @@ type Member struct {
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
 	Identity    string    `json:"identity"`
+	GitHubLogin string    `json:"github_login,omitempty"`
+	GitHubID    string    `json:"github_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// Identity is who a Member is (GitHub OAuth for humans; server-issued for Bots).
+type Identity struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	DisplayName string `json:"display_name"`
+	GitHubLogin string `json:"github_login,omitempty"`
+	GitHubID    string `json:"github_id,omitempty"`
 }
 
 type Channel struct {
@@ -63,6 +76,8 @@ type Task struct {
 	Title            string    `json:"title"`
 	Status           string    `json:"status"`
 	AssigneeMemberID string    `json:"assignee_member_id,omitempty"`
+	IssueNumber      int       `json:"issue_number,omitempty"`
+	IssueURL         string    `json:"issue_url,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -139,4 +154,16 @@ type TaskDetail struct {
 	Runs      []Run      `json:"runs"`
 	Artifacts []Artifact `json:"artifacts"`
 	Pipelines []Pipeline `json:"pipelines"`
+}
+
+// Routine is a repeatable Project workflow (interval schedule).
+type Routine struct {
+	ID          string     `json:"id"`
+	ProjectID   string     `json:"project_id"`
+	BotMemberID string     `json:"bot_member_id,omitempty"`
+	Name        string     `json:"name"`
+	Schedule    string     `json:"schedule"` // duration like 24h, or "daily"
+	Enabled     bool       `json:"enabled"`
+	LastRunAt   *time.Time `json:"last_run_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
