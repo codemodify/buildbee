@@ -10,6 +10,8 @@ docker compose -f deploy/compose/docker-compose.yml up --build
 - Server: `http://localhost:8080/healthz`
 - Postgres: `postgres://buildbee:buildbee@localhost:5432/buildbee`
 
+Runtime supervisor (`--profile runtime`) listens on `:8090`. Set `BUILDBEE_FAKE_SANDBOX=0` for real Docker.
+
 MinIO (optional Artifact store) uses the `extras` profile:
 
 ```bash

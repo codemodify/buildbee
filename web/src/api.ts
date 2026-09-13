@@ -96,4 +96,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ answer }),
     }),
+  getTaskDetail: (taskId: string) =>
+    request<import("./types").TaskDetail>(`/v1/tasks/${taskId}/detail`),
 };

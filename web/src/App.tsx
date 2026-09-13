@@ -1,16 +1,32 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "./api";
-import type { Channel, Decision, Member, Message, Project, Task } from "./types";
+import type {
+  Channel,
+  Decision,
+  Member,
+  Message,
+  Project,
+  Task,
+  TaskDetail,
+} from "./types";
 
 type Route =
   | { page: "home" }
-  | { page: "project"; projectId: string; channelId?: string };
+  | { page: "project"; projectId: string; channelId?: string }
+  | { page: "task"; projectId: string; taskId: string };
 
 function parseHash(): Route {
   const raw = window.location.hash.replace(/^#/, "");
   const parts = raw.split("/").filter(Boolean);
+  if (parts[0] === "projects" && parts[1] && parts[2] === "tasks" && parts[3]) {
+    return { page: "task", projectId: parts[1], taskId: parts[3] };
+  }
   if (parts[0] === "projects" && parts[1]) {
-    return { page: "project", projectId: parts[1], channelId: parts[3] };
+    return {
+      page: "project",
+      projectId: parts[1],
+      channelId: parts[2] === "channels" ? parts[3] : undefined,
+    };
   }
   return { page: "home" };
 }
@@ -23,6 +39,9 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  if (route.page === "task") {
+    return <TaskPage projectId={route.projectId} taskId={route.taskId} />;
+  }
   if (route.page === "project") {
     return <ProjectPage projectId={route.projectId} channelId={route.channelId} />;
   }
@@ -346,7 +365,12 @@ function ProjectPage({
               {tasks.map((t) => (
                 <li key={t.id} className="rounded border border-zinc-800 px-2 py-1 text-sm">
                   <div className="flex items-center justify-between gap-2">
-                    <span>{t.title}</span>
+                    <a
+                      href={`#/projects/${projectId}/tasks/${t.id}`}
+                      className="hover:text-amber-300"
+                    >
+                      {t.title}
+                    </a>
                     <select
                       className="bg-zinc-950 text-xs"
                       value={t.status}
@@ -419,6 +443,86 @@ function ProjectPage({
           </section>
         </div>
       </div>
+    </main>
+  );
+}
+
+function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) {
+  const [detail, setDetail] = useState<TaskDetail | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void api
+      .getTaskDetail(taskId)
+      .then(setDetail)
+      .catch((e) => setError(String(e)));
+  }, [taskId]);
+
+  return (
+    <main className="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-100">
+      <a href={`#/projects/${projectId}`} className="text-sm text-amber-400">
+        ← Project
+      </a>
+      <h1 className="mt-3 text-2xl font-semibold">{detail?.title ?? "Task"}</h1>
+      <p className="text-sm text-zinc-500">status {detail?.status}</p>
+      {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
+
+      <section className="mt-8">
+        <h2 className="text-sm font-medium text-zinc-400">Runs</h2>
+        <ul className="mt-2 space-y-2">
+          {(detail?.runs ?? []).map((r) => (
+            <li key={r.id} className="rounded border border-zinc-800 px-3 py-2 text-sm">
+              <span className="text-amber-300">{r.status}</span> {r.detail}
+            </li>
+          ))}
+          {detail && detail.runs.length === 0 ? (
+            <li className="text-sm text-zinc-500">No Runs yet</li>
+          ) : null}
+        </ul>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-medium text-zinc-400">Artifacts</h2>
+        <ul className="mt-2 space-y-2">
+          {(detail?.artifacts ?? []).map((a) => (
+            <li key={a.id} className="rounded border border-zinc-800 px-3 py-2 text-sm">
+              <span className="text-zinc-400">{a.kind}</span> {a.name}
+              {a.url ? (
+                <>
+                  {" "}
+                  <a className="text-amber-300 underline" href={a.url}>
+                    {a.url}
+                  </a>
+                </>
+              ) : null}
+              {a.body ? (
+                <pre className="mt-2 max-h-40 overflow-auto text-xs text-zinc-400">
+                  {a.body}
+                </pre>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-medium text-zinc-400">Pipelines</h2>
+        <ul className="mt-2 space-y-2">
+          {(detail?.pipelines ?? []).map((p) => (
+            <li key={p.id} className="rounded border border-zinc-800 px-3 py-2 text-sm">
+              <span className="text-amber-300">{p.status}</span> {p.name}
+              {p.external_url ? (
+                <>
+                  {" "}
+                  <a className="text-amber-300 underline" href={p.external_url}>
+                    {p.external_url}
+                  </a>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </section>
     </main>
   );
 }

@@ -44,4 +44,14 @@ type Store interface {
 	CreateRun(ctx context.Context, taskID string) (*models.Run, error)
 	GetRun(ctx context.Context, id string) (*models.Run, error)
 	UpdateRun(ctx context.Context, id, status, detail string) (*models.Run, error)
+	ListRuns(ctx context.Context, taskID string) ([]models.Run, error)
+
+	CreateArtifact(ctx context.Context, in models.Artifact) (*models.Artifact, error)
+	GetArtifact(ctx context.Context, id string) (*models.Artifact, error)
+	ListArtifacts(ctx context.Context, taskID string) ([]models.Artifact, error)
+
+	CreatePipeline(ctx context.Context, in models.Pipeline) (*models.Pipeline, error)
+	ListPipelines(ctx context.Context, taskID string) ([]models.Pipeline, error)
+	UpdatePipeline(ctx context.Context, id, status, externalURL string) (*models.Pipeline, error)
+	GetPipeline(ctx context.Context, id string) (*models.Pipeline, error)
 }

@@ -13,6 +13,9 @@ const (
 	TypeHandoff  = "handoff"
 	TypeDecision = "decision"
 	TypeRun      = "run"
+	TypeArtifact = "artifact"
+	TypePipeline = "pipeline"
+	TypeRepo     = "repo"
 )
 
 type Project struct {
@@ -102,4 +105,38 @@ type Run struct {
 	Detail    string    `json:"detail"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Artifact is a file, log, or Repo link produced by a Task or Run.
+type Artifact struct {
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	TaskID    string    `json:"task_id"`
+	RunID     string    `json:"run_id,omitempty"`
+	Kind      string    `json:"kind"` // log | pr | file | repo
+	Name      string    `json:"name"`
+	Body      string    `json:"body,omitempty"`
+	URL       string    `json:"url,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Pipeline is a check recorded on a Task (or Artifact), e.g. GitHub Actions.
+type Pipeline struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	TaskID      string    `json:"task_id"`
+	ArtifactID  string    `json:"artifact_id,omitempty"`
+	Name        string    `json:"name"`
+	Status      string    `json:"status"` // pending | success | failure
+	ExternalURL string    `json:"external_url,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// TaskDetail is a Task plus related Runs, Artifacts, and Pipelines.
+type TaskDetail struct {
+	Task
+	Runs      []Run      `json:"runs"`
+	Artifacts []Artifact `json:"artifacts"`
+	Pipelines []Pipeline `json:"pipelines"`
 }

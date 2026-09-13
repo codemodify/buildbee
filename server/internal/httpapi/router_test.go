@@ -193,4 +193,38 @@ func TestVerticalSlice(t *testing.T) {
 	if list.Code != http.StatusOK {
 		t.Fatalf("task list: %d", list.Code)
 	}
+
+	art := doJSON(t, h, http.MethodPost, "/v1/tasks/"+taskID+"/artifacts", map[string]string{
+		"kind": "log", "name": "sandbox.log", "body": "ok\n", "run_id": run["id"].(string),
+	})
+	if art.Code != http.StatusCreated {
+		t.Fatalf("artifact: %d %s", art.Code, art.Body.String())
+	}
+	pr := doJSON(t, h, http.MethodPost, "/v1/tasks/"+taskID+"/pr", map[string]any{"fake": true, "run_id": run["id"]})
+	if pr.Code != http.StatusCreated {
+		t.Fatalf("pr: %d %s", pr.Code, pr.Body.String())
+	}
+	hook := doJSON(t, h, http.MethodPost, "/v1/pipelines/webhook", map[string]any{
+		"task_id": taskID, "name": "ci", "status": "success", "external_url": "https://example.test/ci",
+	})
+	if hook.Code != http.StatusCreated {
+		t.Fatalf("webhook: %d %s", hook.Code, hook.Body.String())
+	}
+	detail := doJSON(t, h, http.MethodGet, "/v1/tasks/"+taskID+"/detail", nil)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("detail: %d %s", detail.Code, detail.Body.String())
+	}
+	var td struct {
+		Artifacts []any `json:"artifacts"`
+		Pipelines []any `json:"pipelines"`
+		Runs      []any `json:"runs"`
+	}
+	td = decode[struct {
+		Artifacts []any `json:"artifacts"`
+		Pipelines []any `json:"pipelines"`
+		Runs      []any `json:"runs"`
+	}](t, detail)
+	if len(td.Artifacts) < 2 || len(td.Pipelines) < 1 || len(td.Runs) < 1 {
+		t.Fatalf("detail incomplete: %#v", td)
+	}
 }

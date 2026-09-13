@@ -35,6 +35,24 @@ services:
       postgres:
         condition: service_healthy
 
+  # Sandbox supervisor. Mount the Docker socket to run real containers.
+  #   docker compose -f deploy/compose/docker-compose.yml --profile runtime up --build
+  runtime:
+    profiles: ["runtime"]
+    build:
+      context: ../../runtime
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      BUILDBEE_RUNTIME_ADDR: ":8090"
+      BUILDBEE_URL: http://server:8080
+      BUILDBEE_FAKE_SANDBOX: ${BUILDBEE_FAKE_SANDBOX:-1}
+    depends_on:
+      - server
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
   # Optional later: Artifact object storage. Not required for the Server stub.
   minio:
     profiles: ["extras"]
