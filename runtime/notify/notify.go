@@ -1,6 +1,4 @@
-// Package notify posts Run status updates to the Server.
-// The supervisor will call this after a Sandbox finishes; today it can
-// also fake a successful Run for local demos.
+// Package notify posts Run status, Artifacts, and fake PRs to the Server.
 package notify
 
 import (
@@ -22,7 +20,7 @@ func New(base string) *Client {
 	if base == "" {
 		base = "http://127.0.0.1:8080"
 	}
-	return &Client{Base: strings.TrimRight(base, "/"), HTTP: &http.Client{Timeout: 15 * time.Second}}
+	return &Client{Base: strings.TrimRight(base, "/"), HTTP: &http.Client{Timeout: 30 * time.Second}}
 }
 
 type Run struct {
@@ -32,15 +30,44 @@ type Run struct {
 	Detail string `json:"detail"`
 }
 
+type Artifact struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Name  string `json:"name"`
+	Body  string `json:"body,omitempty"`
+	URL   string `json:"url,omitempty"`
+	RunID string `json:"run_id,omitempty"`
+}
+
 func (c *Client) CreateRun(taskID string) (*Run, error) {
-	return c.do(http.MethodPost, "/v1/tasks/"+taskID+"/runs", nil)
+	var run Run
+	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/runs", nil, &run)
+	return &run, err
 }
 
 func (c *Client) UpdateRun(runID, status, detail string) (*Run, error) {
-	return c.do(http.MethodPatch, "/v1/runs/"+runID, map[string]string{"status": status, "detail": detail})
+	var run Run
+	err := c.do(http.MethodPatch, "/v1/runs/"+runID, map[string]string{"status": status, "detail": detail}, &run)
+	return &run, err
 }
 
-// FakeSuccess creates a Run and marks it succeeded (no Sandbox, no ACP).
+func (c *Client) CreateArtifact(taskID string, a Artifact) (*Artifact, error) {
+	var out Artifact
+	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/artifacts", a, &out)
+	return &out, err
+}
+
+func (c *Client) OpenPR(taskID string, body map[string]any) (*Artifact, error) {
+	var out struct {
+		Artifact Artifact `json:"artifact"`
+	}
+	if err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/pr", body, &out); err != nil {
+		return nil, err
+	}
+	return &out.Artifact, nil
+}
+
+// FakeSuccess creates a Run and marks it succeeded (no Sandbox).
 func (c *Client) FakeSuccess(taskID string) (*Run, error) {
 	run, err := c.CreateRun(taskID)
 	if err != nil {
@@ -49,37 +76,36 @@ func (c *Client) FakeSuccess(taskID string) (*Run, error) {
 	return c.UpdateRun(run.ID, "succeeded", "fake success (runtime stub)")
 }
 
-func (c *Client) do(method, path string, body any) (*Run, error) {
+func (c *Client) do(method, path string, body any, dest any) error {
 	var rdr io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		rdr = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequest(method, c.Base+path, rdr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if res.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s %s: %s", method, path, strings.TrimSpace(string(raw)))
+		return fmt.Errorf("%s %s: %s", method, path, strings.TrimSpace(string(raw)))
 	}
-	var run Run
-	if err := json.Unmarshal(raw, &run); err != nil {
-		return nil, err
+	if dest == nil || len(raw) == 0 {
+		return nil
 	}
-	return &run, nil
+	return json.Unmarshal(raw, dest)
 }

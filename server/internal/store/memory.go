@@ -23,6 +23,8 @@ type Memory struct {
 	decisions map[string]models.Decision
 	activity  map[string]models.Activity
 	runs      map[string]models.Run
+	artifacts map[string]models.Artifact
+	pipelines map[string]models.Pipeline
 }
 
 func NewMemory() *Memory {
@@ -36,6 +38,8 @@ func NewMemory() *Memory {
 		decisions: map[string]models.Decision{},
 		activity:  map[string]models.Activity{},
 		runs:      map[string]models.Run{},
+		artifacts: map[string]models.Artifact{},
+		pipelines: map[string]models.Pipeline{},
 	}
 }
 
@@ -435,4 +439,127 @@ func (m *Memory) UpdateRun(_ context.Context, id, status, detail string) (*model
 	m.runs[id] = r
 	m.addActivity(r.ProjectID, models.TypeRun, map[string]any{"id": r.ID, "status": status})
 	return &r, nil
+}
+
+func (m *Memory) ListRuns(_ context.Context, taskID string) ([]models.Run, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[taskID]; !ok {
+		return nil, ErrNotFound
+	}
+	out := []models.Run{}
+	for _, r := range m.runs {
+		if r.TaskID == taskID {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) CreateArtifact(_ context.Context, in models.Artifact) (*models.Artifact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[in.TaskID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	in.ID = uuid.NewString()
+	in.ProjectID = task.ProjectID
+	in.CreatedAt = now()
+	if in.Kind == "" {
+		in.Kind = "file"
+	}
+	m.artifacts[in.ID] = in
+	m.addActivity(task.ProjectID, models.TypeArtifact, map[string]any{"id": in.ID, "kind": in.Kind, "name": in.Name})
+	return &in, nil
+}
+
+func (m *Memory) GetArtifact(_ context.Context, id string) (*models.Artifact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.artifacts[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &a, nil
+}
+
+func (m *Memory) ListArtifacts(_ context.Context, taskID string) ([]models.Artifact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[taskID]; !ok {
+		return nil, ErrNotFound
+	}
+	out := []models.Artifact{}
+	for _, a := range m.artifacts {
+		if a.TaskID == taskID {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) CreatePipeline(_ context.Context, in models.Pipeline) (*models.Pipeline, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[in.TaskID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	t := now()
+	in.ID = uuid.NewString()
+	in.ProjectID = task.ProjectID
+	if in.Status == "" {
+		in.Status = "pending"
+	}
+	in.CreatedAt = t
+	in.UpdatedAt = t
+	m.pipelines[in.ID] = in
+	m.addActivity(task.ProjectID, models.TypePipeline, map[string]any{"id": in.ID, "name": in.Name, "status": in.Status})
+	return &in, nil
+}
+
+func (m *Memory) ListPipelines(_ context.Context, taskID string) ([]models.Pipeline, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[taskID]; !ok {
+		return nil, ErrNotFound
+	}
+	out := []models.Pipeline{}
+	for _, p := range m.pipelines {
+		if p.TaskID == taskID {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) GetPipeline(_ context.Context, id string) (*models.Pipeline, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.pipelines[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &p, nil
+}
+
+func (m *Memory) UpdatePipeline(_ context.Context, id, status, externalURL string) (*models.Pipeline, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.pipelines[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	p.Status = status
+	if externalURL != "" {
+		p.ExternalURL = externalURL
+	}
+	p.UpdatedAt = now()
+	m.pipelines[id] = p
+	m.addActivity(p.ProjectID, models.TypePipeline, map[string]any{"id": p.ID, "status": status})
+	return &p, nil
 }

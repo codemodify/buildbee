@@ -608,3 +608,146 @@ func (p *Postgres) mustProject(ctx context.Context, id string) error {
 	}
 	return err
 }
+
+func (p *Postgres) ListRuns(ctx context.Context, taskID string) ([]models.Run, error) {
+	if _, err := p.GetTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id, task_id, project_id, status, detail, created_at, updated_at FROM runs WHERE task_id=$1 ORDER BY created_at DESC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Run{}
+	for rows.Next() {
+		var r models.Run
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &r.Status, &r.Detail, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) CreateArtifact(ctx context.Context, in models.Artifact) (*models.Artifact, error) {
+	task, err := p.GetTask(ctx, in.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	in.ID = uuid.NewString()
+	in.ProjectID = task.ProjectID
+	in.CreatedAt = time.Now().UTC()
+	if in.Kind == "" {
+		in.Kind = "file"
+	}
+	var runID any
+	if in.RunID != "" {
+		runID = in.RunID
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO artifacts (id, project_id, task_id, run_id, kind, name, body, url, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, in.ID, in.ProjectID, in.TaskID, runID, in.Kind, in.Name, in.Body, in.URL, in.CreatedAt); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, in.ProjectID, models.TypeArtifact, map[string]any{"id": in.ID, "kind": in.Kind, "name": in.Name})
+	return &in, nil
+}
+
+func (p *Postgres) GetArtifact(ctx context.Context, id string) (*models.Artifact, error) {
+	var a models.Artifact
+	err := p.pool.QueryRow(ctx, `SELECT id, project_id, task_id, COALESCE(run_id::text, ''), kind, name, body, url, created_at FROM artifacts WHERE id=$1`, id).
+		Scan(&a.ID, &a.ProjectID, &a.TaskID, &a.RunID, &a.Kind, &a.Name, &a.Body, &a.URL, &a.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &a, err
+}
+
+func (p *Postgres) ListArtifacts(ctx context.Context, taskID string) ([]models.Artifact, error) {
+	if _, err := p.GetTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, task_id, COALESCE(run_id::text, ''), kind, name, body, url, created_at FROM artifacts WHERE task_id=$1 ORDER BY created_at DESC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Artifact{}
+	for rows.Next() {
+		var a models.Artifact
+		if err := rows.Scan(&a.ID, &a.ProjectID, &a.TaskID, &a.RunID, &a.Kind, &a.Name, &a.Body, &a.URL, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) CreatePipeline(ctx context.Context, in models.Pipeline) (*models.Pipeline, error) {
+	task, err := p.GetTask(ctx, in.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	t := time.Now().UTC()
+	in.ID = uuid.NewString()
+	in.ProjectID = task.ProjectID
+	if in.Status == "" {
+		in.Status = "pending"
+	}
+	in.CreatedAt = t
+	in.UpdatedAt = t
+	var art any
+	if in.ArtifactID != "" {
+		art = in.ArtifactID
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO pipelines (id, project_id, task_id, artifact_id, name, status, external_url, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, in.ID, in.ProjectID, in.TaskID, art, in.Name, in.Status, in.ExternalURL, in.CreatedAt, in.UpdatedAt); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, in.ProjectID, models.TypePipeline, map[string]any{"id": in.ID, "name": in.Name, "status": in.Status})
+	return &in, nil
+}
+
+func (p *Postgres) ListPipelines(ctx context.Context, taskID string) ([]models.Pipeline, error) {
+	if _, err := p.GetTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, task_id, COALESCE(artifact_id::text, ''), name, status, external_url, created_at, updated_at FROM pipelines WHERE task_id=$1 ORDER BY created_at DESC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Pipeline{}
+	for rows.Next() {
+		var pl models.Pipeline
+		if err := rows.Scan(&pl.ID, &pl.ProjectID, &pl.TaskID, &pl.ArtifactID, &pl.Name, &pl.Status, &pl.ExternalURL, &pl.CreatedAt, &pl.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pl)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) GetPipeline(ctx context.Context, id string) (*models.Pipeline, error) {
+	var pl models.Pipeline
+	err := p.pool.QueryRow(ctx, `SELECT id, project_id, task_id, COALESCE(artifact_id::text, ''), name, status, external_url, created_at, updated_at FROM pipelines WHERE id=$1`, id).
+		Scan(&pl.ID, &pl.ProjectID, &pl.TaskID, &pl.ArtifactID, &pl.Name, &pl.Status, &pl.ExternalURL, &pl.CreatedAt, &pl.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &pl, err
+}
+
+func (p *Postgres) UpdatePipeline(ctx context.Context, id, status, externalURL string) (*models.Pipeline, error) {
+	pl, err := p.GetPipeline(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if externalURL == "" {
+		externalURL = pl.ExternalURL
+	}
+	if _, err := p.pool.Exec(ctx, `UPDATE pipelines SET status=$2, external_url=$3, updated_at=$4 WHERE id=$1`, id, status, externalURL, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, pl.ProjectID, models.TypePipeline, map[string]any{"id": pl.ID, "status": status})
+	return p.GetPipeline(ctx, id)
+}

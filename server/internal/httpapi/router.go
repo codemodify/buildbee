@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/projects/{projectID}/tasks", s.listTasks)
 	mux.HandleFunc("POST /v1/projects/{projectID}/tasks", s.createTask)
 	mux.HandleFunc("GET /v1/tasks/{taskID}", s.getTask)
+	mux.HandleFunc("GET /v1/tasks/{taskID}/detail", s.getTaskDetail)
 	mux.HandleFunc("PATCH /v1/tasks/{taskID}", s.updateTask)
 
 	mux.HandleFunc("POST /v1/tasks/{taskID}/handoffs", s.createHandoff)
@@ -60,8 +61,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/projects/{projectID}/activity", s.listActivity)
 
 	mux.HandleFunc("POST /v1/tasks/{taskID}/runs", s.createRun)
+	mux.HandleFunc("GET /v1/tasks/{taskID}/runs", s.listRuns)
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
 	mux.HandleFunc("PATCH /v1/runs/{runID}", s.updateRun)
+
+	mux.HandleFunc("GET /v1/tasks/{taskID}/artifacts", s.listArtifacts)
+	mux.HandleFunc("POST /v1/tasks/{taskID}/artifacts", s.createArtifact)
+	mux.HandleFunc("GET /v1/artifacts/{artifactID}", s.getArtifact)
+	mux.HandleFunc("POST /v1/tasks/{taskID}/pr", s.openPR)
+
+	mux.HandleFunc("GET /v1/tasks/{taskID}/pipelines", s.listPipelines)
+	mux.HandleFunc("POST /v1/tasks/{taskID}/pipelines", s.createPipeline)
+	mux.HandleFunc("PATCH /v1/pipelines/{pipelineID}", s.updatePipeline)
+	mux.HandleFunc("POST /v1/pipelines/webhook", s.pipelinesWebhook)
 
 	return withCORS(mux)
 }
@@ -73,6 +85,7 @@ func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
+			"artifacts", "pipelines",
 		},
 	})
 }

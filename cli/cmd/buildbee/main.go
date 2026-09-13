@@ -38,6 +38,8 @@ func run(args []string, c *client.Client) error {
 		return runTask(args[1:], c)
 	case "handoff":
 		return runHandoff(args[1:], c)
+	case "run":
+		return runRun(args[1:], c)
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -92,6 +94,64 @@ func runHandoff(args []string, c *client.Client) error {
 	return c.PrintJSON(out)
 }
 
+func runRun(args []string, c *client.Client) error {
+	if len(args) == 0 || args[0] != "start" {
+		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake]")
+	}
+	task := flagValue(args[1:], "task")
+	if task == "" {
+		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake]")
+	}
+	repo := flagValue(args[1:], "repo-url")
+	cmd := flagValue(args[1:], "cmd")
+	fake := hasFlag(args[1:], "fake")
+	if fake {
+		out, err := c.FakeStartRun(task, cmd, repo)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	}
+	runtimeURL := os.Getenv("BUILDBEE_RUNTIME_URL")
+	if runtimeURL == "" {
+		runtimeURL = "http://127.0.0.1:8090"
+	}
+	run, err := c.CreateRun(task)
+	if err != nil {
+		return err
+	}
+	runID, _ := run["id"].(string)
+	out, err := c.RuntimeStart(runtimeURL, task, runID, repo, cmd, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "runtime unavailable (%v); falling back to --fake\n", err)
+		if _, err := c.UpdateRun(runID, "succeeded", "fake success (runtime fallback)"); err != nil {
+			return err
+		}
+		art, err := c.CreateArtifact(task, map[string]string{
+			"kind": "log", "name": "sandbox.log", "body": "fake sandbox fallback\n", "run_id": runID,
+		})
+		if err != nil {
+			return err
+		}
+		pr, err := c.OpenPR(task, true, runID)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(map[string]any{"run": run, "artifact": art, "pr": pr, "fake": true})
+	}
+	return c.PrintJSON(out)
+}
+
+func hasFlag(args []string, name string) bool {
+	want := "--" + name
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
 func flagValue(args []string, name string) string {
 	long := "--" + name
 	for i := 0; i < len(args); i++ {
@@ -114,8 +174,10 @@ Usage:
   buildbee project create --name NAME
   buildbee task list --project ID
   buildbee handoff create --task ID --from ID --to ID [--note TEXT]
+  buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake]
 
 Environment:
-  BUILDBEE_URL   Server base URL (default http://127.0.0.1:8080)
+  BUILDBEE_URL           Server base URL (default http://127.0.0.1:8080)
+  BUILDBEE_RUNTIME_URL   Runtime supervisor (default http://127.0.0.1:8090)
 `)
 }

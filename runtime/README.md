@@ -1,56 +1,64 @@
 # Runtime
 
-Go supervisor + Docker **Sandbox** for ACP agent **Runs**.
+Go supervisor + Docker **Sandbox** for **Runs**. Module: `github.com/codemodify/buildbee/runtime`
 
-Module: `github.com/codemodify/buildbee/runtime`
-
-ACP and Docker Sandboxes are still stubs. The Server already stores **Run** records. This package posts status updates to that API.
-
-## Sandbox + ACP Run lifecycle
+## Sandbox lifecycle
 
 ```
-Server records a Task Handoff to a Bot
+POST /v1/tasks/{taskID}/runs     → pending
         │
-        ▼
-POST /v1/tasks/{taskID}/runs     → Run pending
+PATCH … status=running
         │
-Supervisor.StartRun (stub)
+docker run --rm -w /work <image> sh -c '
+  optional git clone $REPO
+  $CMD
+'
         │
-Sandbox created (not implemented)
-        │
-ACP session (not implemented)
-        │
-PATCH /v1/runs/{runID}           → succeeded | failed | canceled
-        │
-Server appends Activity Type "run"
+POST /v1/tasks/{id}/artifacts    → sandbox.log (Artifact)
+POST /v1/tasks/{id}/pr           → fake or real draft PR Artifact
+PATCH … succeeded | failed
 ```
 
-## Post a fake successful Run
+## Run locally
 
-With the Server running and a Task ID:
+Server must be up. Fake engine (no Docker):
 
 ```bash
-go run ./cmd/fake-run --task "$TASK_ID" --server http://127.0.0.1:8080
+BUILDBEE_FAKE_SANDBOX=1 go run ./cmd/runtime
+# POST http://127.0.0.1:8090/runs  {"task_id":"...","fake":true}
 ```
 
-Or curl:
+Real Docker:
 
 ```bash
-RUN_ID=$(curl -sS -X POST "http://127.0.0.1:8080/v1/tasks/$TASK_ID/runs" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
-curl -sS -X PATCH "http://127.0.0.1:8080/v1/runs/$RUN_ID" \
-  -H 'Content-Type: application/json' \
-  -d '{"status":"succeeded","detail":"fake success (runtime stub)"}'
+go run ./cmd/runtime
+# needs `docker` on PATH
 ```
+
+CLI:
+
+```bash
+buildbee run start --task "$TASK_ID" --fake
+buildbee run start --task "$TASK_ID" --repo-url https://github.com/org/repo.git --cmd "ls"
+```
+
+`fake-run` still exists:
+
+```bash
+go run ./cmd/fake-run --task "$TASK_ID"
+```
+
+Compose: `--profile runtime` (see `deploy/compose`). Default `BUILDBEE_FAKE_SANDBOX=1`.
 
 ## Packages
 
 | Path | Role |
 | --- | --- |
-| `.` | `Supervisor` and Run `Status` |
-| [`sandbox/`](sandbox/) | Docker Sandbox spec (stub) |
-| [`acp/`](acp/) | ACP session stub |
-| [`notify/`](notify/) | HTTP client for Run status |
-| [`cmd/fake-run/`](cmd/fake-run/) | CLI that posts fake success |
+| `.` | Supervisor |
+| [`sandbox/`](sandbox/) | `Engine` interface, `DockerEngine`, `FakeEngine` |
+| [`notify/`](notify/) | Server HTTP client |
+| [`cmd/runtime/`](cmd/runtime/) | HTTP supervisor |
+| [`cmd/fake-run/`](cmd/fake-run/) | Fake success helper |
 
 ```bash
 go test ./...

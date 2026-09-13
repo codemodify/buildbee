@@ -33,7 +33,14 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | POST | `/v1/decisions/{id}/answer` | Answer a Decision |
 | GET | `/v1/projects/{id}/activity?type=` | Activity feed, filter by Type |
 | POST | `/v1/tasks/{id}/runs` | Create Run |
+| GET | `/v1/tasks/{id}/runs` | List Runs |
+| GET | `/v1/tasks/{id}/detail` | Task + Runs + Artifacts + Pipelines |
 | GET/PATCH | `/v1/runs/{id}` | Get / update Run status |
+| GET/POST | `/v1/tasks/{id}/artifacts` | List / create Artifact (logs, PR URL, files) |
+| POST | `/v1/tasks/{id}/pr` | Draft Repo PR (GitHub) or fake PR Artifact |
+| GET/POST | `/v1/tasks/{id}/pipelines` | List / create Pipeline check |
+| PATCH | `/v1/pipelines/{id}` | Update Pipeline status |
+| POST | `/v1/pipelines/webhook` | Record Pipeline status (simple JSON or GitHub `check_run`) |
 
 Auth is stubbed. Pass `X-Member-ID` or `member_id` when posting messages.
 

@@ -44,3 +44,32 @@ export type Decision = {
   recommendation: string;
   answer?: string;
 };
+
+export type Run = {
+  id: string;
+  task_id: string;
+  status: string;
+  detail: string;
+};
+
+export type Artifact = {
+  id: string;
+  kind: string;
+  name: string;
+  body?: string;
+  url?: string;
+  run_id?: string;
+};
+
+export type Pipeline = {
+  id: string;
+  name: string;
+  status: string;
+  external_url?: string;
+};
+
+export type TaskDetail = Task & {
+  runs: Run[];
+  artifacts: Artifact[];
+  pipelines: Pipeline[];
+};
