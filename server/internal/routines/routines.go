@@ -50,10 +50,14 @@ func Fire(ctx context.Context, st store.Store, id string) (*models.Routine, erro
 	}
 	botID := r.BotMemberID
 	if botID == "" {
-		for _, m := range members {
-			if m.Kind == "bot" {
-				botID = m.ID
-				break
+		if pulse := models.MemberByRole(members, models.RolePulse); pulse != nil {
+			botID = pulse.ID
+		} else {
+			for _, m := range members {
+				if m.Kind == "bot" {
+					botID = m.ID
+					break
+				}
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/codemodify/buildbee/runtime/acp"
 	"github.com/codemodify/buildbee/runtime/notify"
 	"github.com/codemodify/buildbee/runtime/sandbox"
 )
@@ -41,12 +42,17 @@ func NewSupervisor(serverURL string, engine sandbox.Engine) *Supervisor {
 }
 
 type Request struct {
-	TaskID  string
-	RunID   string
-	RepoURL string
-	Command string
-	Fake    bool
-	FakePR  bool
+	TaskID  string `json:"task_id"`
+	RunID   string `json:"run_id"`
+	RepoURL string `json:"repo_url"`
+	Command string `json:"command"`
+	Fake    bool   `json:"fake"`
+	FakePR  bool   `json:"fake_pr"`
+	ACP     bool   `json:"acp"`
+	Agent   string `json:"agent"`
+	Title   string `json:"title"`
+	Body    string `json:"body"`
+	Notes   string `json:"notes"`
 }
 
 type Outcome struct {
@@ -55,6 +61,7 @@ type Outcome struct {
 	Artifact *notify.Artifact
 	PR       *notify.Artifact
 	UsedFake bool
+	ACPAgent string `json:"acp_agent,omitempty"`
 }
 
 // Execute creates or reuses a Run, drives Sandbox status, and posts Artifacts.
@@ -77,6 +84,10 @@ func (s *Supervisor) Execute(ctx context.Context, req Request) (*Outcome, error)
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if req.ACP {
+		return s.executeACP(ctx, req, run)
 	}
 
 	if _, err := s.Server.UpdateRun(run.ID, string(StatusRunning), "sandbox starting"); err != nil {
@@ -120,6 +131,62 @@ func (s *Supervisor) Execute(ctx context.Context, req Request) (*Outcome, error)
 		if err == nil {
 			out.PR = pr
 		}
+	}
+	return out, nil
+}
+
+func (s *Supervisor) executeACP(ctx context.Context, req Request, run *notify.Run) (*Outcome, error) {
+	if _, err := s.Server.UpdateRun(run.ID, string(StatusRunning), "acp starting"); err != nil {
+		return nil, err
+	}
+	title, body := req.Title, req.Body
+	if title == "" {
+		if t, err := s.Server.GetTask(req.TaskID); err == nil {
+			title = t.Title
+			if body == "" {
+				body = t.Body
+			}
+		}
+	}
+	prompt := acp.Prompt(title, body, req.Notes)
+	agent := req.Agent
+	if req.Fake && agent == "" {
+		agent = "fake"
+	}
+	name, logs, err := acp.Run(ctx, acp.Config{Agent: agent}, prompt)
+	status := StatusSucceeded
+	detail := "acp " + name + " ok"
+	if err != nil {
+		status = StatusFailed
+		detail = err.Error()
+		if logs == "" {
+			logs = detail
+		}
+	}
+	run, uerr := s.Server.UpdateRun(run.ID, string(status), detail)
+	if uerr != nil {
+		return nil, uerr
+	}
+	art, aerr := s.Server.CreateArtifact(req.TaskID, notify.Artifact{
+		RunID: run.ID, Kind: "log", Name: "acp.log", Body: logs,
+	})
+	if aerr != nil {
+		return nil, aerr
+	}
+	out := &Outcome{Run: run, Logs: logs, Artifact: art, UsedFake: name == "fake", ACPAgent: name}
+	if req.FakePR || status == StatusSucceeded {
+		pr, err := s.Server.OpenPR(req.TaskID, map[string]any{
+			"fake":   true,
+			"run_id": run.ID,
+			"title":  "BuildBee ACP Run Artifact",
+			"body":   "Recorded by the ACP supervisor (" + name + ").",
+		})
+		if err == nil {
+			out.PR = pr
+		}
+	}
+	if err != nil {
+		return out, err
 	}
 	return out, nil
 }

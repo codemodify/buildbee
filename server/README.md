@@ -19,16 +19,16 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/v1/` | Index |
-| GET/POST | `/v1/projects` | List / create Project (seeds human + Bot Members and `#general`) |
+| GET/POST | `/v1/projects` | List / create Project (seeds owner + Scout/Builder/Sentry/Pulse and `#general`) |
 | GET | `/v1/projects/{id}` | Project + Members + Channels |
 | GET/POST | `/v1/projects/{id}/members` | List / add Member (`kind`: human \| bot) |
 | GET/POST | `/v1/projects/{id}/channels` | List / create Channel |
 | GET/POST | `/v1/channels/{id}/messages` | List / post Message |
 | GET | `/v1/channels/{id}/ws` | WebSocket: pushes new Channel messages |
-| GET/POST | `/v1/projects/{id}/tasks` | List / create Task |
+| GET/POST | `/v1/projects/{id}/tasks` | List / create Task (`?handoff=scout\|builder\|none`, default Scout) |
 | GET/PATCH | `/v1/tasks/{id}` | Get / update status |
-| POST | `/v1/tasks/{id}/handoffs` | Create Handoff (from → to) |
-| POST | `/v1/handoffs/{id}/complete` | Complete Handoff |
+| POST | `/v1/tasks/{id}/handoffs` | Create Handoff (`to_role`, `?autorun=1` enqueues a Run for Builder) |
+| POST | `/v1/handoffs/{id}/complete` | Complete Handoff (Scout + ambiguous Task → Decision stub) |
 | GET/POST | `/v1/projects/{id}/decisions` | List / create Decision (options + recommendation) |
 | POST | `/v1/decisions/{id}/answer` | Answer a Decision |
 | GET | `/v1/projects/{id}/activity?type=` | Activity feed, filter by Type |

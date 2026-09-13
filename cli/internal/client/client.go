@@ -81,13 +81,25 @@ func (c *Client) ListTasks(projectID string) (map[string]any, error) {
 	return out, err
 }
 
-func (c *Client) CreateHandoff(taskID, fromID, toID, note string) (map[string]any, error) {
+func (c *Client) GetTask(taskID string) (map[string]any, error) {
 	var out map[string]any
-	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/handoffs", map[string]string{
+	err := c.do(http.MethodGet, "/v1/tasks/"+taskID, nil, &out)
+	return out, err
+}
+
+func (c *Client) CreateHandoff(taskID, fromID, toID, note, toRole string, autorun bool) (map[string]any, error) {
+	var out map[string]any
+	path := "/v1/tasks/" + taskID + "/handoffs"
+	if autorun {
+		path += "?autorun=1"
+	}
+	body := map[string]string{
 		"from_member_id": fromID,
 		"to_member_id":   toID,
+		"to_role":        toRole,
 		"note":           note,
-	}, &out)
+	}
+	err := c.do(http.MethodPost, path, body, &out)
 	return out, err
 }
 
@@ -151,11 +163,55 @@ func (c *Client) RunRoutine(id string) (map[string]any, error) {
 	return out, err
 }
 
-func (c *Client) RuntimeStart(runtimeURL, taskID, runID, repoURL, cmd string, fake bool) (map[string]any, error) {
+func (c *Client) RuntimeStart(runtimeURL, taskID, runID, repoURL, cmd string, fake, acpMode bool, agent, title, notes string) (map[string]any, error) {
 	rt := &Client{Base: strings.TrimRight(runtimeURL, "/"), HTTP: c.HTTP, Output: c.Output}
 	var out map[string]any
 	err := rt.do(http.MethodPost, "/runs", map[string]any{
-		"task_id": taskID, "run_id": runID, "repo_url": repoURL, "command": cmd, "fake": fake, "fake_pr": true,
+		"task_id": taskID, "run_id": runID, "repo_url": repoURL, "command": cmd,
+		"fake": fake, "fake_pr": true, "acp": acpMode, "agent": agent, "title": title, "notes": notes,
 	}, &out)
 	return out, err
+}
+
+func (c *Client) FakeACPRun(taskID, agent string) (map[string]any, error) {
+	run, err := c.CreateRun(taskID)
+	if err != nil {
+		return nil, err
+	}
+	runID, _ := run["id"].(string)
+	return c.completeFakeACP(taskID, runID, agent)
+}
+
+func (c *Client) PrintJSONFallbackACP(taskID, runID, agent string) error {
+	out, err := c.completeFakeACP(taskID, runID, agent)
+	if err != nil {
+		return err
+	}
+	return c.PrintJSON(out)
+}
+
+func (c *Client) completeFakeACP(taskID, runID, agent string) (map[string]any, error) {
+	if agent == "" || agent == "auto" {
+		agent = "fake"
+	}
+	title := ""
+	if t, err := c.GetTask(taskID); err == nil {
+		title, _ = t["title"].(string)
+	}
+	if _, err := c.UpdateRun(runID, "running", "acp "+agent); err != nil {
+		return nil, err
+	}
+	if _, err := c.UpdateRun(runID, "succeeded", "acp "+agent+" ok"); err != nil {
+		return nil, err
+	}
+	logBody := "# FakeACP session\nagent: " + agent + "\nstatus: succeeded\n---\nTask: " + title + "\nNo ACP binary; e2e FakeACP.\n"
+	art, err := c.CreateArtifact(taskID, map[string]string{"kind": "log", "name": "acp.log", "body": logBody, "run_id": runID})
+	if err != nil {
+		return nil, err
+	}
+	pr, err := c.OpenPR(taskID, true, runID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"run": map[string]any{"id": runID, "task_id": taskID, "status": "succeeded"}, "artifact": art, "pr": pr, "fake": true, "acp_agent": agent}, nil
 }

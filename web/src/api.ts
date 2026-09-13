@@ -55,11 +55,14 @@ export const api = {
     request<{ items: import("./types").Task[] }>(
       `/v1/projects/${projectId}/tasks`,
     ),
-  createTask: (projectId: string, title: string) =>
-    request<import("./types").Task>(`/v1/projects/${projectId}/tasks`, {
-      method: "POST",
-      body: JSON.stringify({ title }),
-    }),
+  createTask: (projectId: string, title: string, handoffRole = "scout") =>
+    request<import("./types").Task & { handoff?: { id: string } }>(
+      `/v1/projects/${projectId}/tasks?handoff=${encodeURIComponent(handoffRole)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ title, handoff_role: handoffRole }),
+      },
+    ),
   updateTask: (taskId: string, status: string) =>
     request(`/v1/tasks/${taskId}`, {
       method: "PATCH",
@@ -70,15 +73,19 @@ export const api = {
     from: string,
     to: string,
     note: string,
-  ) =>
-    request(`/v1/tasks/${taskId}/handoffs`, {
+    opts?: { toRole?: string; autorun?: boolean },
+  ) => {
+    const q = opts?.autorun ? "?autorun=1" : "";
+    return request(`/v1/tasks/${taskId}/handoffs${q}`, {
       method: "POST",
       body: JSON.stringify({
         from_member_id: from,
         to_member_id: to,
+        to_role: opts?.toRole ?? "",
         note,
       }),
-    }),
+    });
+  },
   listDecisions: (projectId: string) =>
     request<{ items: import("./types").Decision[] }>(
       `/v1/projects/${projectId}/decisions`,

@@ -1,7 +1,10 @@
 // Package models holds Project workspace records used by the Server.
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Activity Type values recorded on a Project feed.
 const (
@@ -20,9 +23,19 @@ const (
 	TypeIssue    = "issue"
 )
 
+// Bot Role values seeded on every new Project.
+const (
+	RoleOwner   = "owner"
+	RoleScout   = "scout"
+	RoleBuilder = "builder"
+	RoleSentry  = "sentry"
+	RolePulse   = "pulse"
+)
+
 type Project struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	AutoRun   bool      `json:"auto_run"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -34,15 +47,58 @@ type ProjectBundle struct {
 }
 
 type Member struct {
-	ID          string    `json:"id"`
-	ProjectID   string    `json:"project_id"`
-	Kind        string    `json:"kind"` // human | bot
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	Identity    string    `json:"identity"`
-	GitHubLogin string    `json:"github_login,omitempty"`
-	GitHubID    string    `json:"github_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	Kind         string    `json:"kind"` // human | bot
+	DisplayName  string    `json:"display_name"`
+	Role         string    `json:"role"`
+	Instructions string    `json:"instructions,omitempty"`
+	Identity     string    `json:"identity"`
+	GitHubLogin  string    `json:"github_login,omitempty"`
+	GitHubID     string    `json:"github_id,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// BotSeed is the Role + instructions blurb for a seeded Bot Member.
+type BotSeed struct {
+	Name         string
+	Role         string
+	Instructions string
+}
+
+// DefaultBots are the four Bots created with every Project (Scout, Builder, Sentry, Pulse).
+func DefaultBots() []BotSeed {
+	return []BotSeed{
+		{Name: "Scout", Role: RoleScout, Instructions: "Triage incoming Tasks. Clarify scope, flag ambiguity, and Handoff to Builder when ready."},
+		{Name: "Builder", Role: RoleBuilder, Instructions: "Implement Tasks in a Sandbox. Produce Artifacts and Handoff to Sentry for review."},
+		{Name: "Sentry", Role: RoleSentry, Instructions: "Review Runs, watch CI Pipelines, and flag regressions before merge."},
+		{Name: "Pulse", Role: RolePulse, Instructions: "Run Routines: morning digests, Activity summaries, and Channel nudges."},
+	}
+}
+
+// MemberByRole returns the first Member with the given Role (case-insensitive).
+func MemberByRole(members []Member, role string) *Member {
+	want := strings.ToLower(strings.TrimSpace(role))
+	for i := range members {
+		if strings.ToLower(members[i].Role) == want {
+			return &members[i]
+		}
+	}
+	return nil
+}
+
+// TaskLooksAmbiguous is the thin Scout heuristic for a Decision stub.
+func TaskLooksAmbiguous(title, note string) bool {
+	if strings.Contains(title, "?") {
+		return true
+	}
+	s := strings.ToLower(title + " " + note)
+	for _, k := range []string{"ambiguous", "unclear", "tbd", "not sure"} {
+		if strings.Contains(s, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // Identity is who a Member is (GitHub OAuth for humans; server-issued for Bots).

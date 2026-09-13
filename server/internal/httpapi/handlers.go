@@ -18,13 +18,14 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		AutoRun bool   `json:"auto_run"`
 	}
 	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Name) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	p, err := s.store.CreateProject(r.Context(), strings.TrimSpace(in.Name))
+	p, err := s.store.CreateProject(r.Context(), strings.TrimSpace(in.Name), in.AutoRun)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -52,9 +53,10 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		DisplayName string `json:"display_name"`
-		Kind        string `json:"kind"`
-		Role        string `json:"role"`
+		DisplayName  string `json:"display_name"`
+		Kind         string `json:"kind"`
+		Role         string `json:"role"`
+		Instructions string `json:"instructions"`
 	}
 	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.DisplayName) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "display_name is required"})
@@ -64,7 +66,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	if kind != "bot" {
 		kind = "human"
 	}
-	role := in.Role
+	role := strings.ToLower(strings.TrimSpace(in.Role))
 	if role == "" {
 		if kind == "bot" {
 			role = "bot"
@@ -73,10 +75,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m, err := s.store.AddMember(r.Context(), models.Member{
-		ProjectID:   r.PathValue("projectID"),
-		DisplayName: strings.TrimSpace(in.DisplayName),
-		Kind:        kind,
-		Role:        role,
+		ProjectID:    r.PathValue("projectID"),
+		DisplayName:  strings.TrimSpace(in.DisplayName),
+		Kind:         kind,
+		Role:         role,
+		Instructions: strings.TrimSpace(in.Instructions),
 	})
 	if err != nil {
 		writeError(w, err)
@@ -177,17 +180,66 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Title            string `json:"title"`
 		AssigneeMemberID string `json:"assignee_member_id"`
+		HandoffRole      string `json:"handoff_role"`
+		HandoffNote      string `json:"handoff_note"`
 	}
 	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Title) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title is required"})
 		return
 	}
-	t, err := s.store.CreateTask(r.Context(), r.PathValue("projectID"), strings.TrimSpace(in.Title), in.AssigneeMemberID)
+	projectID := r.PathValue("projectID")
+	t, err := s.store.CreateTask(r.Context(), projectID, strings.TrimSpace(in.Title), in.AssigneeMemberID)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, t)
+	role := strings.ToLower(strings.TrimSpace(in.HandoffRole))
+	if q := r.URL.Query().Get("handoff"); q != "" {
+		role = strings.ToLower(strings.TrimSpace(q))
+	}
+	if role == "" {
+		role = models.RoleScout
+	}
+	if role == "0" || role == "none" || role == "off" {
+		writeJSON(w, http.StatusCreated, t)
+		return
+	}
+	members, err := s.store.ListMembers(r.Context(), projectID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	to := models.MemberByRole(members, role)
+	from := models.MemberByRole(members, models.RoleOwner)
+	if from == nil {
+		for i := range members {
+			if members[i].Kind == "human" {
+				from = &members[i]
+				break
+			}
+		}
+	}
+	if to == nil || from == nil {
+		writeJSON(w, http.StatusCreated, t)
+		return
+	}
+	note := strings.TrimSpace(in.HandoffNote)
+	if note == "" {
+		note = "auto-Handoff to " + to.Role
+	}
+	h, err := s.store.CreateHandoff(r.Context(), t.ID, from.ID, to.ID, note)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	task, _ := s.store.GetTask(r.Context(), t.ID)
+	if task == nil {
+		task = t
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"task": task, "handoff": h,
+		"id": task.ID, "project_id": task.ProjectID, "title": task.Title, "status": task.Status,
+		"assignee_member_id": task.AssigneeMemberID, "created_at": task.CreatedAt, "updated_at": task.UpdatedAt,
+	})
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
@@ -219,18 +271,73 @@ func (s *Server) createHandoff(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		FromMemberID string `json:"from_member_id"`
 		ToMemberID   string `json:"to_member_id"`
+		ToRole       string `json:"to_role"`
 		Note         string `json:"note"`
+		AutoRun      bool   `json:"autorun"`
 	}
-	if err := decodeJSON(r, &in); err != nil || in.FromMemberID == "" || in.ToMemberID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from_member_id and to_member_id are required"})
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	h, err := s.store.CreateHandoff(r.Context(), r.PathValue("taskID"), in.FromMemberID, in.ToMemberID, in.Note)
+	taskID := r.PathValue("taskID")
+	task, err := s.store.GetTask(r.Context(), taskID)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, h)
+	members, err := s.store.ListMembers(r.Context(), task.ProjectID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	toID := strings.TrimSpace(in.ToMemberID)
+	toRole := strings.ToLower(strings.TrimSpace(in.ToRole))
+	if q := r.URL.Query().Get("to_role"); q != "" {
+		toRole = strings.ToLower(strings.TrimSpace(q))
+	}
+	if toID == "" && toRole != "" {
+		if m := models.MemberByRole(members, toRole); m != nil {
+			toID = m.ID
+		}
+	}
+	fromID := strings.TrimSpace(in.FromMemberID)
+	if fromID == "" {
+		if m := models.MemberByRole(members, models.RoleOwner); m != nil {
+			fromID = m.ID
+		} else {
+			for _, mem := range members {
+				if mem.Kind == "human" {
+					fromID = mem.ID
+					break
+				}
+			}
+		}
+	}
+	if fromID == "" || toID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from_member_id and to_member_id or to_role are required"})
+		return
+	}
+	h, err := s.store.CreateHandoff(r.Context(), taskID, fromID, toID, in.Note)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	autorun := in.AutoRun || r.URL.Query().Get("autorun") == "1"
+	if !autorun {
+		if proj, err := s.store.GetProject(r.Context(), task.ProjectID); err == nil && proj.AutoRun {
+			autorun = true
+		}
+	}
+	var run *models.Run
+	if autorun {
+		if to, err := s.store.GetMember(r.Context(), toID); err == nil && strings.EqualFold(to.Role, models.RoleBuilder) {
+			run, _ = s.store.CreateRun(r.Context(), taskID)
+		}
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id": h.ID, "task_id": h.TaskID, "from_member_id": h.FromMemberID, "to_member_id": h.ToMemberID,
+		"note": h.Note, "status": h.Status, "created_at": h.CreatedAt, "run": run,
+	})
 }
 
 func (s *Server) completeHandoff(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +346,26 @@ func (s *Server) completeHandoff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h)
+	var decision *models.Decision
+	from, _ := s.store.GetMember(r.Context(), h.FromMemberID)
+	to, _ := s.store.GetMember(r.Context(), h.ToMemberID)
+	scoutSide := (from != nil && strings.EqualFold(from.Role, models.RoleScout)) ||
+		(to != nil && strings.EqualFold(to.Role, models.RoleScout))
+	if scoutSide {
+		task, err := s.store.GetTask(r.Context(), h.TaskID)
+		if err == nil && (models.TaskLooksAmbiguous(task.Title, h.Note) || r.URL.Query().Get("decision") == "1") {
+			decision, _ = s.store.CreateDecision(r.Context(), task.ProjectID,
+				"Scout: is Task \""+task.Title+"\" ready for Builder?",
+				"handoff to Builder",
+				[]string{"handoff to Builder", "needs more info"},
+			)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": h.ID, "task_id": h.TaskID, "from_member_id": h.FromMemberID, "to_member_id": h.ToMemberID,
+		"note": h.Note, "status": h.Status, "created_at": h.CreatedAt, "completed_at": h.CompletedAt,
+		"decision": decision,
+	})
 }
 
 func (s *Server) listDecisions(w http.ResponseWriter, r *http.Request) {

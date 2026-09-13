@@ -80,16 +80,18 @@ func runTask(args []string, c *client.Client) error {
 
 func runHandoff(args []string, c *client.Client) error {
 	if len(args) == 0 || args[0] != "create" {
-		return fmt.Errorf("usage: buildbee handoff create --task ID --from ID --to ID [--note TEXT]")
+		return fmt.Errorf("usage: buildbee handoff create --task ID --from ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]")
 	}
 	task := flagValue(args[1:], "task")
 	from := flagValue(args[1:], "from")
 	to := flagValue(args[1:], "to")
+	toRole := flagValue(args[1:], "to-role")
 	note := flagValue(args[1:], "note")
-	if task == "" || from == "" || to == "" {
-		return fmt.Errorf("usage: buildbee handoff create --task ID --from ID --to ID [--note TEXT]")
+	autorun := hasFlag(args[1:], "autorun")
+	if task == "" || from == "" || (to == "" && toRole == "") {
+		return fmt.Errorf("usage: buildbee handoff create --task ID --from ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]")
 	}
-	out, err := c.CreateHandoff(task, from, to, note)
+	out, err := c.CreateHandoff(task, from, to, note, toRole, autorun)
 	if err != nil {
 		return err
 	}
@@ -98,16 +100,28 @@ func runHandoff(args []string, c *client.Client) error {
 
 func runRun(args []string, c *client.Client) error {
 	if len(args) == 0 || args[0] != "start" {
-		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake]")
+		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake] [--acp] [--agent claude|codex|opencode|goose|fake]")
 	}
 	task := flagValue(args[1:], "task")
 	if task == "" {
-		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake]")
+		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake] [--acp] [--agent claude|codex|opencode|goose|fake]")
 	}
 	repo := flagValue(args[1:], "repo-url")
 	cmd := flagValue(args[1:], "cmd")
 	fake := hasFlag(args[1:], "fake")
-	if fake {
+	acpMode := hasFlag(args[1:], "acp")
+	agent := flagValue(args[1:], "agent")
+	if acpMode && agent == "" {
+		agent = "auto"
+	}
+	if acpMode && (agent == "fake" || fake) {
+		out, err := c.FakeACPRun(task, agent)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	}
+	if fake && !acpMode {
 		out, err := c.FakeStartRun(task, cmd, repo)
 		if err != nil {
 			return err
@@ -123,9 +137,16 @@ func runRun(args []string, c *client.Client) error {
 		return err
 	}
 	runID, _ := run["id"].(string)
-	out, err := c.RuntimeStart(runtimeURL, task, runID, repo, cmd, false)
+	title, notes := "", ""
+	if t, err := c.GetTask(task); err == nil {
+		title, _ = t["title"].(string)
+	}
+	out, err := c.RuntimeStart(runtimeURL, task, runID, repo, cmd, fake, acpMode, agent, title, notes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "runtime unavailable (%v); falling back to --fake\n", err)
+		fmt.Fprintf(os.Stderr, "runtime unavailable (%v); falling back to fake\n", err)
+		if acpMode {
+			return c.PrintJSONFallbackACP(task, runID, agent)
+		}
 		if _, err := c.UpdateRun(runID, "succeeded", "fake success (runtime fallback)"); err != nil {
 			return err
 		}
@@ -205,8 +226,8 @@ Usage:
   buildbee version
   buildbee project create --name NAME
   buildbee task list --project ID
-  buildbee handoff create --task ID --from ID --to ID [--note TEXT]
-  buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake]
+  buildbee handoff create --task ID --from ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]
+  buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake] [--acp] [--agent claude|codex|fake]
   buildbee routine list --project ID
   buildbee routine run --id ID
 

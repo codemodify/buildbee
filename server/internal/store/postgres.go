@@ -50,7 +50,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return migrate.Up(ctx, pool)
 }
 
-func (p *Postgres) CreateProject(ctx context.Context, name string) (*models.ProjectBundle, error) {
+func (p *Postgres) CreateProject(ctx context.Context, name string, autoRun bool) (*models.ProjectBundle, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -58,54 +58,55 @@ func (p *Postgres) CreateProject(ctx context.Context, name string) (*models.Proj
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	t := time.Now().UTC()
-	proj := models.Project{ID: uuid.NewString(), Name: name, CreatedAt: t}
-	human := models.Member{
-		ID: uuid.NewString(), ProjectID: proj.ID, Kind: "human",
-		DisplayName: "You", Role: "owner", Identity: "human:stub", CreatedAt: t,
-	}
-	bot := models.Member{
-		ID: uuid.NewString(), ProjectID: proj.ID, Kind: "bot",
-		DisplayName: "BuildBee Bot", Role: "bot", Identity: "bot:" + uuid.NewString(), CreatedAt: t,
-	}
+	proj := models.Project{ID: uuid.NewString(), Name: name, AutoRun: autoRun, CreatedAt: t}
+	human := seedHuman(proj.ID, t)
+	bots := seedBots(proj.ID, t)
 	ch := models.Channel{ID: uuid.NewString(), ProjectID: proj.ID, Name: "general", CreatedAt: t}
 
-	if _, err := tx.Exec(ctx, `INSERT INTO projects (id, name, created_at) VALUES ($1,$2,$3)`, proj.ID, proj.Name, proj.CreatedAt); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO projects (id, name, created_at, auto_run) VALUES ($1,$2,$3,$4)`, proj.ID, proj.Name, proj.CreatedAt, proj.AutoRun); err != nil {
 		return nil, err
 	}
 	if err := insertMember(ctx, tx, human); err != nil {
 		return nil, err
 	}
-	if err := insertMember(ctx, tx, bot); err != nil {
-		return nil, err
+	members := make([]models.Member, 0, 1+len(bots))
+	members = append(members, human)
+	for _, bot := range bots {
+		if err := insertMember(ctx, tx, bot); err != nil {
+			return nil, err
+		}
+		members = append(members, bot)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO channels (id, project_id, name, created_at) VALUES ($1,$2,$3,$4)`, ch.ID, ch.ProjectID, ch.Name, ch.CreatedAt); err != nil {
 		return nil, err
 	}
-	if err := insertActivity(ctx, tx, proj.ID, models.TypeProject, map[string]any{"name": name, "id": proj.ID}); err != nil {
+	if err := insertActivity(ctx, tx, proj.ID, models.TypeProject, map[string]any{"name": name, "id": proj.ID, "auto_run": autoRun}); err != nil {
 		return nil, err
 	}
-	if err := insertActivity(ctx, tx, proj.ID, models.TypeMember, map[string]any{"id": human.ID, "kind": "human"}); err != nil {
+	if err := insertActivity(ctx, tx, proj.ID, models.TypeMember, map[string]any{"id": human.ID, "kind": "human", "role": human.Role}); err != nil {
 		return nil, err
 	}
-	if err := insertActivity(ctx, tx, proj.ID, models.TypeMember, map[string]any{"id": bot.ID, "kind": "bot"}); err != nil {
-		return nil, err
+	for _, bot := range bots {
+		if err := insertActivity(ctx, tx, proj.ID, models.TypeMember, map[string]any{"id": bot.ID, "kind": "bot", "role": bot.Role}); err != nil {
+			return nil, err
+		}
 	}
 	if err := insertActivity(ctx, tx, proj.ID, models.TypeChannel, map[string]any{"id": ch.ID, "name": ch.Name}); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO routines (id, project_id, bot_member_id, name, schedule, enabled, created_at)
-		VALUES ($1,$2,$3,'morning-digest','24h',false,$4)`, uuid.NewString(), proj.ID, bot.ID, t); err != nil {
+		VALUES ($1,$2,$3,'morning-digest','24h',false,$4)`, uuid.NewString(), proj.ID, pulseID(bots), t); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return &models.ProjectBundle{Project: proj, Members: []models.Member{human, bot}, Channels: []models.Channel{ch}}, nil
+	return &models.ProjectBundle{Project: proj, Members: members, Channels: []models.Channel{ch}}, nil
 }
 
 func insertMember(ctx context.Context, tx pgx.Tx, m models.Member) error {
-	_, err := tx.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`, m.ID, m.ProjectID, m.Kind, m.DisplayName, m.Role, m.Identity, m.CreatedAt)
+	_, err := tx.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at, instructions)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, m.ID, m.ProjectID, m.Kind, m.DisplayName, m.Role, m.Identity, m.CreatedAt, m.Instructions)
 	return err
 }
 
@@ -133,8 +134,8 @@ func (p *Postgres) addActivity(ctx context.Context, projectID, typ string, paylo
 
 func (p *Postgres) GetProject(ctx context.Context, id string) (*models.ProjectBundle, error) {
 	var proj models.Project
-	err := p.pool.QueryRow(ctx, `SELECT id, name, created_at FROM projects WHERE id=$1`, id).
-		Scan(&proj.ID, &proj.Name, &proj.CreatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id, name, created_at, COALESCE(auto_run, false) FROM projects WHERE id=$1`, id).
+		Scan(&proj.ID, &proj.Name, &proj.CreatedAt, &proj.AutoRun)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -153,7 +154,7 @@ func (p *Postgres) GetProject(ctx context.Context, id string) (*models.ProjectBu
 }
 
 func (p *Postgres) ListProjects(ctx context.Context) ([]models.Project, error) {
-	rows, err := p.pool.Query(ctx, `SELECT id, name, created_at FROM projects ORDER BY created_at DESC`)
+	rows, err := p.pool.Query(ctx, `SELECT id, name, created_at, COALESCE(auto_run, false) FROM projects ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +162,7 @@ func (p *Postgres) ListProjects(ctx context.Context) ([]models.Project, error) {
 	out := []models.Project{}
 	for rows.Next() {
 		var proj models.Project
-		if err := rows.Scan(&proj.ID, &proj.Name, &proj.CreatedAt); err != nil {
+		if err := rows.Scan(&proj.ID, &proj.Name, &proj.CreatedAt, &proj.AutoRun); err != nil {
 			return nil, err
 		}
 		out = append(out, proj)
@@ -173,7 +174,7 @@ func (p *Postgres) ListMembers(ctx context.Context, projectID string) ([]models.
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,'')
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,''), COALESCE(instructions,'')
 		FROM members WHERE project_id=$1 ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -182,7 +183,7 @@ func (p *Postgres) ListMembers(ctx context.Context, projectID string) ([]models.
 	out := []models.Member{}
 	for rows.Next() {
 		var m models.Member
-		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID); err != nil {
+		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID, &m.Instructions); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -203,8 +204,8 @@ func (p *Postgres) AddMember(ctx context.Context, in models.Member) (*models.Mem
 			in.Identity = "human:stub"
 		}
 	}
-	_, err := p.pool.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`, in.ID, in.ProjectID, in.Kind, in.DisplayName, in.Role, in.Identity, in.CreatedAt)
+	_, err := p.pool.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at, instructions)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, in.ID, in.ProjectID, in.Kind, in.DisplayName, in.Role, in.Identity, in.CreatedAt, in.Instructions)
 	if err != nil {
 		return nil, err
 	}
@@ -214,8 +215,8 @@ func (p *Postgres) AddMember(ctx context.Context, in models.Member) (*models.Mem
 
 func (p *Postgres) GetMember(ctx context.Context, id string) (*models.Member, error) {
 	var m models.Member
-	err := p.pool.QueryRow(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,'') FROM members WHERE id=$1`, id).
-		Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID)
+	err := p.pool.QueryRow(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,''), COALESCE(instructions,'') FROM members WHERE id=$1`, id).
+		Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID, &m.Instructions)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

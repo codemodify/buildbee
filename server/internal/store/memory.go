@@ -54,35 +54,33 @@ func (m *Memory) addActivity(projectID, typ string, payload map[string]any) {
 	}
 }
 
-func (m *Memory) CreateProject(_ context.Context, name string) (*models.ProjectBundle, error) {
+func (m *Memory) CreateProject(_ context.Context, name string, autoRun bool) (*models.ProjectBundle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t := now()
-	p := models.Project{ID: uuid.NewString(), Name: name, CreatedAt: t}
-	human := models.Member{
-		ID: uuid.NewString(), ProjectID: p.ID, Kind: "human",
-		DisplayName: "You", Role: "owner", Identity: "human:stub", CreatedAt: t,
-	}
-	bot := models.Member{
-		ID: uuid.NewString(), ProjectID: p.ID, Kind: "bot",
-		DisplayName: "BuildBee Bot", Role: "bot",
-		Identity: "bot:" + uuid.NewString(), CreatedAt: t,
-	}
+	p := models.Project{ID: uuid.NewString(), Name: name, AutoRun: autoRun, CreatedAt: t}
+	human := seedHuman(p.ID, t)
+	bots := seedBots(p.ID, t)
 	ch := models.Channel{ID: uuid.NewString(), ProjectID: p.ID, Name: "general", CreatedAt: t}
 	m.projects[p.ID] = p
 	m.members[human.ID] = human
-	m.members[bot.ID] = bot
 	m.channels[ch.ID] = ch
-	m.addActivity(p.ID, models.TypeProject, map[string]any{"name": name, "id": p.ID})
-	m.addActivity(p.ID, models.TypeMember, map[string]any{"id": human.ID, "kind": "human"})
-	m.addActivity(p.ID, models.TypeMember, map[string]any{"id": bot.ID, "kind": "bot"})
+	m.addActivity(p.ID, models.TypeProject, map[string]any{"name": name, "id": p.ID, "auto_run": autoRun})
+	m.addActivity(p.ID, models.TypeMember, map[string]any{"id": human.ID, "kind": "human", "role": human.Role})
+	members := make([]models.Member, 0, 1+len(bots))
+	members = append(members, human)
+	for _, bot := range bots {
+		m.members[bot.ID] = bot
+		members = append(members, bot)
+		m.addActivity(p.ID, models.TypeMember, map[string]any{"id": bot.ID, "kind": "bot", "role": bot.Role})
+	}
 	m.addActivity(p.ID, models.TypeChannel, map[string]any{"id": ch.ID, "name": ch.Name})
 	rid := uuid.NewString()
 	m.routines[rid] = models.Routine{
-		ID: rid, ProjectID: p.ID, BotMemberID: bot.ID,
+		ID: rid, ProjectID: p.ID, BotMemberID: pulseID(bots),
 		Name: "morning-digest", Schedule: "24h", Enabled: false, CreatedAt: t,
 	}
-	return &models.ProjectBundle{Project: p, Members: []models.Member{human, bot}, Channels: []models.Channel{ch}}, nil
+	return &models.ProjectBundle{Project: p, Members: members, Channels: []models.Channel{ch}}, nil
 }
 
 func (m *Memory) GetProject(_ context.Context, id string) (*models.ProjectBundle, error) {
