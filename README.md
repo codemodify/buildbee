@@ -81,7 +81,7 @@ Bots still get server-issued Identities. New Projects seed **Scout**, **Builder*
 
 `POST /v1/projects/{id}/issues/sync` lists open GitHub Issues (`GITHUB_TOKEN`, `GITHUB_REPO` or `{"repo":"owner/name"}`) and upserts **Tasks** with issue number/URL. Without a token, `{"fake":true}` (or missing token) creates two sample Issues→Tasks.
 
-`POST /v1/issues/webhook?project_id=` accepts GitHub `issues` opened/edited JSON.
+`POST /v1/issues/webhook?project_id=` accepts GitHub `issues` opened/edited JSON. Set `GITHUB_WEBHOOK_SECRET` to require `X-Hub-Signature-256` on Issues and Pipelines webhooks (GitHub App style). Channel `@Scout` / `@Builder` mentions create a Task + Handoff to that Bot.
 
 Web: **Sync Issues** on the Project; Task rows and detail show the linked Issues URL.
 

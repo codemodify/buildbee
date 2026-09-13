@@ -158,13 +158,56 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "member_id is required"})
 		return
 	}
-	msg, err := s.store.PostMessage(r.Context(), channelID, memberID, strings.TrimSpace(in.Body))
+	body := strings.TrimSpace(in.Body)
+	msg, err := s.store.PostMessage(r.Context(), channelID, memberID, body)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	s.hub.Publish(channelID, map[string]any{"type": "message", "message": msg})
-	writeJSON(w, http.StatusCreated, msg)
+	ch, err := s.store.GetChannel(r.Context(), channelID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	members, err := s.store.ListMembers(r.Context(), ch.ProjectID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	mentioned := models.MentionedBots(body, members)
+	var mentionTasks []models.Task
+	var mentionHandoffs []models.Handoff
+	for _, bot := range mentioned {
+		title := "Mention @" + bot.DisplayName + ": " + body
+		if len(title) > 120 {
+			title = title[:120]
+		}
+		task, err := s.store.CreateTask(r.Context(), ch.ProjectID, title, bot.ID)
+		if err != nil {
+			continue
+		}
+		mentionTasks = append(mentionTasks, *task)
+		if h, err := s.store.CreateHandoff(r.Context(), task.ID, memberID, bot.ID, body); err == nil {
+			mentionHandoffs = append(mentionHandoffs, *h)
+		}
+	}
+	if len(mentioned) > 0 {
+		ids := make([]string, 0, len(mentioned))
+		roles := make([]string, 0, len(mentioned))
+		for _, bot := range mentioned {
+			ids = append(ids, bot.ID)
+			roles = append(roles, bot.Role)
+		}
+		_ = s.store.AppendActivity(r.Context(), ch.ProjectID, models.TypeMention, map[string]any{
+			"message_id": msg.ID, "channel_id": channelID, "member_ids": ids, "roles": roles,
+		})
+	}
+	s.hub.Publish(channelID, map[string]any{"type": "message", "message": msg, "mentions": mentioned})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id": msg.ID, "channel_id": msg.ChannelID, "member_id": msg.MemberID,
+		"body": msg.Body, "created_at": msg.CreatedAt,
+		"mentions": mentioned, "tasks": mentionTasks, "handoffs": mentionHandoffs,
+	})
 }
 
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {

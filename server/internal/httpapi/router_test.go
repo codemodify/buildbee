@@ -276,6 +276,77 @@ func TestVerticalSlice(t *testing.T) {
 	}
 }
 
+func TestChannelBotMention(t *testing.T) {
+	h := NewMux()
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Mentions"})
+	var proj struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Role string `json:"role"`
+		} `json:"members"`
+		Channels []struct {
+			ID string `json:"id"`
+		} `json:"channels"`
+	}
+	proj = decode[struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Role string `json:"role"`
+		} `json:"members"`
+		Channels []struct {
+			ID string `json:"id"`
+		} `json:"channels"`
+	}](t, created)
+	var human, scout string
+	for _, m := range proj.Members {
+		if m.Kind == "human" {
+			human = m.ID
+		}
+		if m.Role == "scout" {
+			scout = m.ID
+		}
+	}
+	msg := doJSON(t, h, http.MethodPost, "/v1/channels/"+proj.Channels[0].ID+"/messages", map[string]string{
+		"body": "@Scout please triage this", "member_id": human,
+	})
+	if msg.Code != http.StatusCreated {
+		t.Fatalf("mention: %d %s", msg.Code, msg.Body.String())
+	}
+	body := decode[map[string]any](t, msg)
+	ments, _ := body["mentions"].([]any)
+	if len(ments) < 1 {
+		t.Fatalf("expected mention: %#v", body)
+	}
+	tasks, _ := body["tasks"].([]any)
+	if len(tasks) < 1 {
+		t.Fatalf("expected mention Task: %#v", body)
+	}
+	feed := doJSON(t, h, http.MethodGet, "/v1/projects/"+proj.ID+"/activity?type=mention", nil)
+	items := decode[struct {
+		Items []any `json:"items"`
+	}](t, feed)
+	if len(items.Items) < 1 {
+		t.Fatal("expected mention Activity")
+	}
+	_ = scout
+}
+
+func TestWebhookSignatureRequired(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "s3cret")
+	h := NewMux()
+	rec := doJSON(t, h, http.MethodPost, "/v1/issues/webhook?project_id=x", map[string]any{
+		"action": "opened",
+		"issue":  map[string]any{"number": 1, "title": "no sig", "html_url": "https://example.test/1"},
+	})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOAuthProtectsMutations(t *testing.T) {
 	h := NewMuxSecure()
 	rec := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Nope"})

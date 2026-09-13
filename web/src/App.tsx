@@ -1,4 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+
+function renderMentions(text: string): ReactNode {
+  const parts = text.split(/(@[A-Za-z0-9_-]+)/g);
+  return parts.map((part, i) =>
+    part.startsWith("@") ? (
+      <span key={i} className="font-medium text-amber-200">
+        {part}
+      </span>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+}
 import { api } from "./api";
 import type {
   AuthMe,
@@ -372,7 +385,7 @@ function ProjectPage({
               return (
                 <li key={m.id} className="text-sm">
                   <span className="font-medium text-amber-300">{who}</span>{" "}
-                  <span className="text-zinc-200">{m.body}</span>
+                  <span className="text-zinc-200">{renderMentions(m.body)}</span>
                 </li>
               );
             })}
