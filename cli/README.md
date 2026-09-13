@@ -1,25 +1,16 @@
 # CLI
 
-Go CLI named `buildbee`. Module: `github.com/codemodify/buildbee/cli`.
-
-The root [`go.work`](../go.work) includes this module so you can develop Server, CLI, and runtime together.
-
-## Run
+`buildbee` talks to the Server over HTTP. Module: `github.com/codemodify/buildbee/cli`.
 
 ```bash
-go run ./cmd/buildbee version
-# buildbee 0.0.0
+export BUILDBEE_URL=http://127.0.0.1:8080   # default
 
+go run ./cmd/buildbee version
+go run ./cmd/buildbee project create --name Hive
+go run ./cmd/buildbee task list --project "$PROJECT_ID"
+go run ./cmd/buildbee handoff create --task "$TASK_ID" --from "$HUMAN_ID" --to "$BOT_ID" --note "please take this"
+```
+
+```bash
 go test ./...
 ```
-
-Install locally:
-
-```bash
-go install ./cmd/buildbee
-buildbee version
-```
-
-## Later
-
-Commands will talk to the Server (Project, Channel, Task, Handoff, Run) using a Member Identity. Not implemented in this scaffold.
