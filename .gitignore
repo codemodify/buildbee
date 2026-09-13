@@ -1,0 +1,25 @@
+# Go
+bin/
+dist/
+*.exe
+*.test
+*.out
+vendor/
+
+# Node / Vite
+web/node_modules/
+web/dist/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
