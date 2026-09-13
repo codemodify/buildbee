@@ -10,21 +10,22 @@ import (
 
 // Activity Type values recorded on a Project feed.
 const (
-	TypeProject  = "project"
-	TypeMember   = "member"
-	TypeChannel  = "channel"
-	TypeMessage  = "message"
-	TypeTask     = "task"
-	TypeHandoff  = "handoff"
-	TypeDecision = "decision"
-	TypeRun      = "run"
-	TypeArtifact = "artifact"
-	TypePipeline = "pipeline"
-	TypeRepo     = "repo"
-	TypeRoutine  = "routine"
-	TypeIssue    = "issue"
-	TypeMention  = "mention"
-	TypeMemory   = "memory"
+	TypeProject      = "project"
+	TypeMember       = "member"
+	TypeChannel      = "channel"
+	TypeMessage      = "message"
+	TypeTask         = "task"
+	TypeHandoff      = "handoff"
+	TypeDecision     = "decision"
+	TypeRun          = "run"
+	TypeArtifact     = "artifact"
+	TypePipeline     = "pipeline"
+	TypeRepo         = "repo"
+	TypeRoutine      = "routine"
+	TypeIssue        = "issue"
+	TypeMention      = "mention"
+	TypeMemory       = "memory"
+	TypeNotification = "notification"
 )
 
 // Bot Role values seeded on every new Project.
@@ -277,4 +278,17 @@ type Routine struct {
 	Enabled     bool       `json:"enabled"`
 	LastRunAt   *time.Time `json:"last_run_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// Notification is an unread/read inbox item for a Member.
+type Notification struct {
+	ID        string     `json:"id"`
+	ProjectID string     `json:"project_id"`
+	MemberID  string     `json:"member_id"`
+	Kind      string     `json:"kind"` // decision | handoff | mention | pipeline
+	Title     string     `json:"title"`
+	Body      string     `json:"body,omitempty"`
+	Href      string     `json:"href,omitempty"`
+	ReadAt    *time.Time `json:"read_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }

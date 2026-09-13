@@ -1,6 +1,6 @@
 # Go
 bin/
-dist/
+/dist/
 *.exe
 *.test
 *.out
@@ -9,6 +9,10 @@ vendor/
 # Node / Vite
 web/node_modules/
 web/dist/
+
+# Embedded UI (keep .gitkeep so go:embed compiles)
+server/internal/webui/dist/*
+!server/internal/webui/dist/.gitkeep
 
 # Env and secrets
 .env

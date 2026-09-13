@@ -30,7 +30,7 @@ A Run may produce Artifacts (patches, logs, reports). Those Artifacts stay attac
 
 ## 6. Record a Decision
 
-When the team commits to a choice, a **Member** writes a **Decision**. The **Decisions** surface is the durable list for the Project — not chat scrollback. After an answer is stored, the same normalized question is auto-applied from **Decision memory** (Activity notes reuse; no new inbox item).
+When the team commits to a choice, a **Member** writes a **Decision**. The **Decisions** surface is the durable list for the Project — not chat scrollback. After an answer is stored, the same normalized question is auto-applied from **Decision memory** (Activity notes reuse; no new inbox item). New Decisions, Handoffs to you, Channel `@bot` Tasks, and Pipeline failures also land in the Member **Notification** inbox.
 
 ## 7. Repeat with Routines
 

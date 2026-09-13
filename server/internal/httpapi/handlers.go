@@ -208,6 +208,11 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 			mentionHandoffs = append(mentionHandoffs, *h)
 		}
 	}
+	if len(mentionTasks) > 0 {
+		s.notify(r.Context(), ch.ProjectID, memberID, "mention",
+			"@mention created a Task", body,
+			"#/projects/"+ch.ProjectID+"/tasks/"+mentionTasks[0].ID)
+	}
 	if len(mentioned) > 0 {
 		ids := make([]string, 0, len(mentioned))
 		roles := make([]string, 0, len(mentioned))
@@ -292,6 +297,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.notify(r.Context(), projectID, to.ID, "handoff",
+		"Task handed to you: "+t.Title, note,
+		"#/projects/"+projectID+"/tasks/"+t.ID)
 	task, _ := s.store.GetTask(r.Context(), t.ID)
 	if task == nil {
 		task = t
@@ -382,6 +390,9 @@ func (s *Server) createHandoff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.notify(r.Context(), task.ProjectID, toID, "handoff",
+		"Task handed to you: "+task.Title, in.Note,
+		"#/projects/"+task.ProjectID+"/tasks/"+taskID)
 	autorun := in.AutoRun || r.URL.Query().Get("autorun") == "1"
 	if !autorun {
 		if proj, err := s.store.GetProject(r.Context(), task.ProjectID); err == nil && proj.AutoRun {
@@ -419,6 +430,7 @@ func (s *Server) completeHandoff(w http.ResponseWriter, r *http.Request) {
 				"handoff to Builder",
 				[]string{"handoff to Builder", "needs more info"},
 			)
+			s.notifyNewDecision(r.Context(), decision)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -470,6 +482,7 @@ func (s *Server) createDecision(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.notifyNewDecision(r.Context(), d)
 	writeJSON(w, http.StatusCreated, d)
 }
 

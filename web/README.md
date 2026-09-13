@@ -22,9 +22,13 @@ Open [http://localhost:5173](http://localhost:5173).
 - **Routines** list + force Run
 - Dev-auth banner, or **Sign in with GitHub** when OAuth is configured
 - **Decisions** inbox: create and answer
+- **Notifications** bell (unread count, mark read / mark all)
 
-Vite proxies `/healthz` and `/v1` (including WebSocket) to `:8080`.
+Vite proxies `/healthz` and `/v1` (including WebSocket) to `:8080`. API paths are relative `/v1` so the same UI works when the Server serves `dist` on the same origin (`base: "/"`).
 
 ```bash
 npm run build
+# then from repo root:
+#   make run          # BUILDBEE_WEB_DIR=web/dist
+#   make build        # embed into the Server binary
 ```

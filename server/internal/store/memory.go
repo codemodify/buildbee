@@ -13,37 +13,39 @@ import (
 
 // Memory is an in-process Store used by tests and by `go run` when DATABASE_URL is unset.
 type Memory struct {
-	mu        sync.Mutex
-	projects  map[string]models.Project
-	members   map[string]models.Member
-	channels  map[string]models.Channel
-	messages  map[string]models.Message
-	tasks     map[string]models.Task
-	handoffs  map[string]models.Handoff
-	decisions map[string]models.Decision
-	activity  map[string]models.Activity
-	runs      map[string]models.Run
-	artifacts map[string]models.Artifact
-	pipelines map[string]models.Pipeline
-	routines  map[string]models.Routine
-	memories  map[string]models.DecisionMemory
+	mu            sync.Mutex
+	projects      map[string]models.Project
+	members       map[string]models.Member
+	channels      map[string]models.Channel
+	messages      map[string]models.Message
+	tasks         map[string]models.Task
+	handoffs      map[string]models.Handoff
+	decisions     map[string]models.Decision
+	activity      map[string]models.Activity
+	runs          map[string]models.Run
+	artifacts     map[string]models.Artifact
+	pipelines     map[string]models.Pipeline
+	routines      map[string]models.Routine
+	memories      map[string]models.DecisionMemory
+	notifications map[string]models.Notification
 }
 
 func NewMemory() *Memory {
 	return &Memory{
-		projects:  map[string]models.Project{},
-		members:   map[string]models.Member{},
-		channels:  map[string]models.Channel{},
-		messages:  map[string]models.Message{},
-		tasks:     map[string]models.Task{},
-		handoffs:  map[string]models.Handoff{},
-		decisions: map[string]models.Decision{},
-		activity:  map[string]models.Activity{},
-		runs:      map[string]models.Run{},
-		artifacts: map[string]models.Artifact{},
-		pipelines: map[string]models.Pipeline{},
-		routines:  map[string]models.Routine{},
-		memories:  map[string]models.DecisionMemory{},
+		projects:      map[string]models.Project{},
+		members:       map[string]models.Member{},
+		channels:      map[string]models.Channel{},
+		messages:      map[string]models.Message{},
+		tasks:         map[string]models.Task{},
+		handoffs:      map[string]models.Handoff{},
+		decisions:     map[string]models.Decision{},
+		activity:      map[string]models.Activity{},
+		runs:          map[string]models.Run{},
+		artifacts:     map[string]models.Artifact{},
+		pipelines:     map[string]models.Pipeline{},
+		routines:      map[string]models.Routine{},
+		memories:      map[string]models.DecisionMemory{},
+		notifications: map[string]models.Notification{},
 	}
 }
 
@@ -763,4 +765,81 @@ func (m *Memory) UpdateRoutine(_ context.Context, id string, enabled *bool, last
 	}
 	m.routines[id] = r
 	return &r, nil
+}
+
+func (m *Memory) CreateNotification(_ context.Context, in models.Notification) (*models.Notification, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[in.ProjectID]; !ok {
+		return nil, ErrNotFound
+	}
+	if _, ok := m.members[in.MemberID]; !ok {
+		return nil, fmt.Errorf("%w: member", ErrNotFound)
+	}
+	in.ID = uuid.NewString()
+	in.CreatedAt = now()
+	if in.Kind == "" {
+		in.Kind = "notice"
+	}
+	m.notifications[in.ID] = in
+	m.addActivity(in.ProjectID, models.TypeNotification, map[string]any{"id": in.ID, "kind": in.Kind, "member_id": in.MemberID})
+	return &in, nil
+}
+
+func (m *Memory) ListNotifications(_ context.Context, memberID string, unreadOnly bool) ([]models.Notification, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []models.Notification{}
+	for _, n := range m.notifications {
+		if memberID != "" && n.MemberID != memberID {
+			continue
+		}
+		if unreadOnly && n.ReadAt != nil {
+			continue
+		}
+		out = append(out, n)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if len(out) > 100 {
+		out = out[:100]
+	}
+	return out, nil
+}
+
+func (m *Memory) GetNotification(_ context.Context, id string) (*models.Notification, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n, ok := m.notifications[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &n, nil
+}
+
+func (m *Memory) MarkNotificationRead(_ context.Context, id string) (*models.Notification, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n, ok := m.notifications[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	t := now()
+	n.ReadAt = &t
+	m.notifications[id] = n
+	return &n, nil
+}
+
+func (m *Memory) MarkAllNotificationsRead(_ context.Context, memberID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := now()
+	n := 0
+	for id, item := range m.notifications {
+		if item.MemberID == memberID && item.ReadAt == nil {
+			item.ReadAt = &t
+			m.notifications[id] = item
+			n++
+		}
+	}
+	return n, nil
 }

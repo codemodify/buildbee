@@ -40,4 +40,5 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | **Sandbox** | Isolated Docker environment where a Bot Run executes. |
 | **Activity** | An event in a Project. Later Activity may be signed (Nostr-inspired). This scaffold does not implement NIP-01. |
 | **Type** | A named kind of Project object (Task, Artifact, Decision, and so on). |
-| **Server** | The BuildBee backend: REST, WebSocket, and persistence. |
+| **Server** | The BuildBee backend: REST, WebSocket, persistence, and (when built) the web UI. |
+| **Notification** | An inbox item for a Member (Decision pending, Handoff to you, @mention Task, Pipeline failure). |

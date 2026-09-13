@@ -1,4 +1,32 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { api } from "./api";
+import type {
+  AuthMe,
+  Channel,
+  Decision,
+  Member,
+  Message,
+  Notification,
+  Project,
+  Routine,
+  Task,
+  TaskDetail,
+} from "./types";
+
+function formatError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    const parsed = JSON.parse(raw) as { error?: string };
+    if (parsed.error) return parsed.error;
+  } catch {
+    /* keep raw */
+  }
+  return raw;
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="text-sm text-zinc-500">{children}</p>;
+}
 
 function renderMentions(text: string): ReactNode {
   const parts = text.split(/(@[A-Za-z0-9_-]+)/g);
@@ -12,18 +40,6 @@ function renderMentions(text: string): ReactNode {
     ),
   );
 }
-import { api } from "./api";
-import type {
-  AuthMe,
-  Channel,
-  Decision,
-  Member,
-  Message,
-  Project,
-  Routine,
-  Task,
-  TaskDetail,
-} from "./types";
 
 type Route =
   | { page: "home" }
@@ -57,7 +73,7 @@ export default function App() {
   if (route.page === "task") {
     return (
       <>
-        <AuthBar />
+        <Chrome />
         <TaskPage projectId={route.projectId} taskId={route.taskId} />
       </>
     );
@@ -65,45 +81,164 @@ export default function App() {
   if (route.page === "project") {
     return (
       <>
-        <AuthBar />
+        <Chrome />
         <ProjectPage projectId={route.projectId} channelId={route.channelId} />
       </>
     );
   }
   return (
     <>
-      <AuthBar />
+      <Chrome />
       <HomePage />
     </>
   );
 }
 
-function AuthBar() {
+function Chrome() {
   const [me, setMe] = useState<AuthMe | null>(null);
   useEffect(() => {
     void api.authMe().then(setMe).catch(() => setMe(null));
   }, []);
-  if (!me) return null;
-  if (me.dev) {
-    return (
-      <div className="bg-amber-400/15 px-4 py-2 text-center text-sm text-amber-200">
-        Dev auth: acting as Member {me.identity?.display_name ?? "You"} (set
-        GITHUB_CLIENT_ID to enable GitHub OAuth)
-      </div>
-    );
-  }
   return (
-    <div className="flex items-center justify-end gap-3 bg-zinc-900 px-4 py-2 text-sm">
-      {me.signed_in ? (
-        <span>Signed in as {me.identity?.github_login ?? me.identity?.display_name}</span>
-      ) : (
-        <a
-          href="/v1/auth/github"
-          className="rounded bg-zinc-100 px-3 py-1 font-medium text-zinc-950"
-        >
-          Sign in with GitHub
-        </a>
-      )}
+    <div className="flex items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-2 text-sm">
+      <div className="min-w-0 flex-1 text-zinc-300">
+        {!me ? (
+          <span className="text-zinc-500">Connecting…</span>
+        ) : me.dev ? (
+          <span className="text-amber-200">
+            Dev auth: acting as Member {me.identity?.display_name ?? "You"}
+          </span>
+        ) : me.signed_in ? (
+          <span>Signed in as {me.identity?.github_login ?? me.identity?.display_name}</span>
+        ) : (
+          <a
+            href="/v1/auth/github"
+            className="rounded bg-zinc-100 px-3 py-1 font-medium text-zinc-950"
+          >
+            Sign in with GitHub
+          </a>
+        )}
+      </div>
+      <InboxBell />
+    </div>
+  );
+}
+
+function InboxBell() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<Notification[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [error, setError] = useState("");
+
+  async function load() {
+    const projs = await api.listProjects();
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const p of projs.items) {
+      const members = await api.listMembers(p.id);
+      for (const mem of members.items) {
+        if (mem.kind === "human" && !seen.has(mem.id)) {
+          seen.add(mem.id);
+          ids.push(mem.id);
+        }
+      }
+    }
+    const list: Notification[] = [];
+    let unreadN = 0;
+    for (const id of ids) {
+      const data = await api.listNotifications(id);
+      list.push(...data.items);
+      unreadN += data.unread;
+    }
+    list.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    setMemberIds(ids);
+    setItems(list);
+    setUnread(unreadN);
+    setError("");
+  }
+
+  useEffect(() => {
+    let stop = false;
+    async function tick() {
+      try {
+        if (!stop) await load();
+      } catch (e) {
+        if (!stop) setError(formatError(e));
+      }
+    }
+    void tick();
+    const id = window.setInterval(() => void tick(), 8000);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  async function markRead(n: Notification) {
+    await api.readNotification(n.id);
+    if (n.href) {
+      window.location.hash = n.href.startsWith("#") ? n.href : `#${n.href}`;
+    }
+    await load();
+  }
+
+  async function markAll() {
+    for (const id of memberIds) {
+      await api.readAllNotifications(id);
+    }
+    await load();
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="relative rounded bg-zinc-800 px-2 py-1 text-zinc-100"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Notifications inbox"
+      >
+        Inbox
+        {unread > 0 ? (
+          <span className="ml-1 rounded-full bg-amber-400 px-1.5 text-xs font-medium text-zinc-950">
+            {unread}
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-20 mt-2 w-80 rounded-md border border-zinc-700 bg-zinc-950 p-2 shadow-lg">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Notifications
+            </p>
+            <button
+              type="button"
+              className="text-xs text-amber-300"
+              onClick={() => void markAll()}
+            >
+              Mark all read
+            </button>
+          </div>
+          {error ? <p className="mb-2 text-xs text-red-400">{error}</p> : null}
+          <ul className="max-h-72 space-y-1 overflow-auto">
+            {items.map((n) => (
+              <li key={n.id}>
+                <button
+                  type="button"
+                  className={`w-full rounded px-2 py-1.5 text-left text-sm ${
+                    n.read_at ? "text-zinc-500" : "bg-zinc-900 text-zinc-100"
+                  }`}
+                  onClick={() => void markRead(n)}
+                >
+                  <span className="text-[10px] uppercase text-amber-400">{n.kind}</span>
+                  <span className="mt-0.5 block">{n.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {items.length === 0 ? <Empty>You&apos;re all caught up.</Empty> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -118,7 +253,7 @@ function HomePage() {
       const data = await api.listProjects();
       setProjects(data.items);
     } catch (e) {
-      setError(String(e));
+      setError(formatError(e));
     }
   }
 
@@ -133,7 +268,7 @@ function HomePage() {
       const p = await api.createProject(name.trim());
       window.location.hash = `#/projects/${p.id}`;
     } catch (err) {
-      setError(String(err));
+      setError(formatError(err));
     }
   }
 
@@ -163,6 +298,11 @@ function HomePage() {
           </button>
         </form>
         {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
+        {projects.length === 0 && !error ? (
+          <p className="mt-10 text-sm text-zinc-500">
+            No Projects yet — create one to start a workspace.
+          </p>
+        ) : null}
         <ul className="mt-10 space-y-2">
           {projects.map((p) => (
             <li key={p.id}>
@@ -239,7 +379,7 @@ function ProjectPage({
   }
 
   useEffect(() => {
-    void loadProject().catch((e) => setError(String(e)));
+    void loadProject().catch((e) => setError(formatError(e)));
   }, [projectId]);
 
   useEffect(() => {
@@ -265,38 +405,58 @@ function ProjectPage({
   async function send(e: FormEvent) {
     e.preventDefault();
     if (!activeChannel || !human || !body.trim()) return;
-    await api.postMessage(activeChannel.id, body.trim(), human.id);
-    setBody("");
-    const data = await api.listMessages(activeChannel.id);
-    setMessages(data.items);
+    try {
+      await api.postMessage(activeChannel.id, body.trim(), human.id);
+      setBody("");
+      const data = await api.listMessages(activeChannel.id);
+      setMessages(data.items);
+      setError("");
+    } catch (err) {
+      setError(formatError(err));
+    }
   }
 
   async function addTask(e: FormEvent) {
     e.preventDefault();
     if (!taskTitle.trim()) return;
-    await api.createTask(projectId, taskTitle.trim(), handoffRole);
-    setTaskTitle("");
-    setTasks((await api.listTasks(projectId)).items);
+    try {
+      await api.createTask(projectId, taskTitle.trim(), handoffRole);
+      setTaskTitle("");
+      setTasks((await api.listTasks(projectId)).items);
+      setError("");
+    } catch (err) {
+      setError(formatError(err));
+    }
   }
 
   async function addChannel(e: FormEvent) {
     e.preventDefault();
     if (!channelName.trim()) return;
-    const ch = await api.createChannel(projectId, channelName.trim());
-    setChannelName("");
-    setChannels((prev) => [...prev, ch]);
-    window.location.hash = `#/projects/${projectId}/channels/${ch.id}`;
+    try {
+      const ch = await api.createChannel(projectId, channelName.trim());
+      setChannelName("");
+      setChannels((prev) => [...prev, ch]);
+      window.location.hash = `#/projects/${projectId}/channels/${ch.id}`;
+      setError("");
+    } catch (err) {
+      setError(formatError(err));
+    }
   }
 
   async function addMember(e: FormEvent) {
     e.preventDefault();
     if (!memberName.trim()) return;
-    await api.addMember(projectId, {
-      display_name: memberName.trim(),
-      kind: memberKind,
-    });
-    setMemberName("");
-    setMembers((await api.listMembers(projectId)).items);
+    try {
+      await api.addMember(projectId, {
+        display_name: memberName.trim(),
+        kind: memberKind,
+      });
+      setMemberName("");
+      setMembers((await api.listMembers(projectId)).items);
+      setError("");
+    } catch (err) {
+      setError(formatError(err));
+    }
   }
 
   async function addDecision(e: FormEvent) {
@@ -306,14 +466,19 @@ function ProjectPage({
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    await api.createDecision(projectId, {
-      prompt: prompt.trim(),
-      options: opts,
-      recommendation: opts[0] ?? "",
-    });
-    setPrompt("");
-    const d = await api.listDecisions(projectId);
-    setDecisions(d.items);
+    try {
+      await api.createDecision(projectId, {
+        prompt: prompt.trim(),
+        options: opts,
+        recommendation: opts[0] ?? "",
+      });
+      setPrompt("");
+      const d = await api.listDecisions(projectId);
+      setDecisions(d.items);
+      setError("");
+    } catch (err) {
+      setError(formatError(err));
+    }
   }
 
   return (
@@ -413,6 +578,11 @@ function ProjectPage({
             #{activeChannel?.name ?? "…"}
           </div>
           <ul className="flex-1 space-y-2 overflow-auto p-3">
+            {messages.length === 0 ? (
+              <li>
+                <Empty>No messages yet. Say hello or @mention a Bot.</Empty>
+              </li>
+            ) : null}
             {messages.map((m) => {
               const who =
                 members.find((mem) => mem.id === m.member_id)?.display_name ??
@@ -483,6 +653,9 @@ function ProjectPage({
                 <div key={col} className="rounded border border-zinc-800 bg-zinc-950/50 p-1">
                   <p className="px-1 text-[10px] uppercase tracking-wide text-zinc-500">{col}</p>
                   <ul className="mt-1 space-y-1">
+                    {tasks.filter((t) => t.status === col).length === 0 ? (
+                      <li className="px-1 text-[10px] text-zinc-600">None</li>
+                    ) : null}
                     {tasks
                       .filter((t) => t.status === col)
                       .map((t) => (
@@ -543,6 +716,11 @@ function ProjectPage({
               </button>
             </form>
             <ul className="mt-3 space-y-3">
+              {decisions.length === 0 ? (
+                <li>
+                  <Empty>No Decisions yet. Ask when a Bot needs a choice.</Empty>
+                </li>
+              ) : null}
               {decisions.map((d) => (
                 <li key={d.id} className="text-sm">
                   <p className="font-medium">{d.prompt}</p>
@@ -611,6 +789,11 @@ function ProjectPage({
           <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
             <h2 className="text-sm font-medium text-zinc-400">Routines</h2>
             <ul className="mt-2 space-y-2">
+              {routines.length === 0 ? (
+                <li>
+                  <Empty>No Routines on this Project.</Empty>
+                </li>
+              ) : null}
               {routines.map((rt) => (
                 <li key={rt.id} className="flex items-center justify-between text-sm">
                   <span>
@@ -656,7 +839,7 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
   }
 
   useEffect(() => {
-    void refresh().catch((e) => setError(String(e)));
+    void refresh().catch((e) => setError(formatError(e)));
   }, [taskId, projectId]);
 
   const human = members.find((m) => m.kind === "human");
@@ -665,12 +848,17 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
   async function handoff(e: FormEvent) {
     e.preventDefault();
     if (!human) return;
-    await api.createHandoff(taskId, human.id, "", note.trim() || "please take this", {
-      toRole,
-      autorun,
-    });
-    setNote("");
-    await refresh();
+    try {
+      await api.createHandoff(taskId, human.id, "", note.trim() || "please take this", {
+        toRole,
+        autorun,
+      });
+      setNote("");
+      setError("");
+      await refresh();
+    } catch (err) {
+      setError(formatError(err));
+    }
   }
 
   return (
@@ -759,6 +947,9 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
               ) : null}
             </li>
           ))}
+          {detail && detail.artifacts.length === 0 ? (
+            <li className="text-sm text-zinc-500">No Artifacts yet</li>
+          ) : null}
         </ul>
       </section>
 
@@ -778,6 +969,9 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
               ) : null}
             </li>
           ))}
+          {detail && detail.pipelines.length === 0 ? (
+            <li className="text-sm text-zinc-500">No Pipelines yet</li>
+          ) : null}
         </ul>
       </section>
     </main>

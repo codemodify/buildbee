@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/codemodify/buildbee/server/internal/auth"
 	"github.com/codemodify/buildbee/server/internal/store"
+	"github.com/codemodify/buildbee/server/internal/webui"
 	"github.com/codemodify/buildbee/server/internal/ws"
 )
 
@@ -102,7 +104,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{projectID}/routines", s.createRoutine)
 	mux.HandleFunc("POST /v1/routines/{routineID}/run", s.fireRoutine)
 
-	return s.auth.RequireMutating(withCORS(mux))
+	mux.HandleFunc("GET /v1/notifications", s.listNotifications)
+	mux.HandleFunc("POST /v1/notifications/read-all", s.readAllNotifications)
+	mux.HandleFunc("POST /v1/notifications/{notificationID}/read", s.readNotification)
+
+	web := webui.Handler()
+	return s.auth.RequireMutating(withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/v1") {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		web.ServeHTTP(w, r)
+	})))
 }
 
 func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
@@ -113,7 +126,7 @@ func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines", "issues", "routines", "roles", "memories",
+			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications",
 		},
 	})
 }

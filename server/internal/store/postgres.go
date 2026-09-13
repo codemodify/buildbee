@@ -981,3 +981,89 @@ func scanRoutine(row scannable) (models.Routine, error) {
 	r.LastRunAt = last
 	return r, err
 }
+
+func (p *Postgres) CreateNotification(ctx context.Context, in models.Notification) (*models.Notification, error) {
+	if err := p.mustProject(ctx, in.ProjectID); err != nil {
+		return nil, err
+	}
+	if _, err := p.GetMember(ctx, in.MemberID); err != nil {
+		return nil, err
+	}
+	in.ID = uuid.NewString()
+	in.CreatedAt = time.Now().UTC()
+	if in.Kind == "" {
+		in.Kind = "notice"
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO notifications (id, project_id, member_id, kind, title, body, href, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, in.ID, in.ProjectID, in.MemberID, in.Kind, in.Title, in.Body, in.Href, in.CreatedAt); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, in.ProjectID, models.TypeNotification, map[string]any{"id": in.ID, "kind": in.Kind, "member_id": in.MemberID})
+	return &in, nil
+}
+
+func (p *Postgres) ListNotifications(ctx context.Context, memberID string, unreadOnly bool) ([]models.Notification, error) {
+	q := `SELECT id, project_id, member_id, kind, title, body, href, read_at, created_at FROM notifications WHERE 1=1`
+	args := []any{}
+	if memberID != "" {
+		args = append(args, memberID)
+		q += fmt.Sprintf(` AND member_id=$%d`, len(args))
+	}
+	if unreadOnly {
+		q += ` AND read_at IS NULL`
+	}
+	q += ` ORDER BY created_at DESC LIMIT 100`
+	rows, err := p.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Notification{}
+	for rows.Next() {
+		n, err := scanNotification(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) GetNotification(ctx context.Context, id string) (*models.Notification, error) {
+	row := p.pool.QueryRow(ctx, `SELECT id, project_id, member_id, kind, title, body, href, read_at, created_at FROM notifications WHERE id=$1`, id)
+	n, err := scanNotification(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
+func (p *Postgres) MarkNotificationRead(ctx context.Context, id string) (*models.Notification, error) {
+	tag, err := p.pool.Exec(ctx, `UPDATE notifications SET read_at=$2 WHERE id=$1`, id, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return p.GetNotification(ctx, id)
+}
+
+func (p *Postgres) MarkAllNotificationsRead(ctx context.Context, memberID string) (int, error) {
+	tag, err := p.pool.Exec(ctx, `UPDATE notifications SET read_at=$2 WHERE member_id=$1 AND read_at IS NULL`, memberID, time.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func scanNotification(row scannable) (models.Notification, error) {
+	var n models.Notification
+	var read *time.Time
+	err := row.Scan(&n.ID, &n.ProjectID, &n.MemberID, &n.Kind, &n.Title, &n.Body, &n.Href, &read, &n.CreatedAt)
+	n.ReadAt = read
+	return n, err
+}

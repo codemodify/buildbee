@@ -93,3 +93,15 @@ export type Routine = {
   schedule: string;
   enabled: boolean;
 };
+
+export type Notification = {
+  id: string;
+  project_id: string;
+  member_id: string;
+  kind: string;
+  title: string;
+  body?: string;
+  href?: string;
+  read_at?: string | null;
+  created_at: string;
+};

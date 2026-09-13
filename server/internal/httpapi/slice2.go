@@ -100,6 +100,7 @@ func (s *Server) createPipeline(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.maybeNotifyPipeline(r.Context(), p)
 	writeJSON(w, http.StatusCreated, p)
 }
 
@@ -117,6 +118,7 @@ func (s *Server) updatePipeline(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.maybeNotifyPipeline(r.Context(), p)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -146,6 +148,7 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.maybeNotifyPipeline(r.Context(), p)
 	writeJSON(w, http.StatusCreated, p)
 }
 
