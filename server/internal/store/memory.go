@@ -28,6 +28,7 @@ type Memory struct {
 	routines      map[string]models.Routine
 	memories      map[string]models.DecisionMemory
 	notifications map[string]models.Notification
+	invites       map[string]models.Invite
 }
 
 func NewMemory() *Memory {
@@ -46,6 +47,7 @@ func NewMemory() *Memory {
 		routines:      map[string]models.Routine{},
 		memories:      map[string]models.DecisionMemory{},
 		notifications: map[string]models.Notification{},
+		invites:       map[string]models.Invite{},
 	}
 }
 
@@ -842,4 +844,110 @@ func (m *Memory) MarkAllNotificationsRead(_ context.Context, memberID string) (i
 		}
 	}
 	return n, nil
+}
+
+func (m *Memory) CreateInvite(_ context.Context, in models.Invite) (*models.Invite, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[in.ProjectID]; !ok {
+		return nil, ErrNotFound
+	}
+	if _, ok := m.members[in.InvitedByMemberID]; !ok {
+		return nil, fmt.Errorf("%w: invited_by", ErrNotFound)
+	}
+	if in.ID == "" {
+		in.ID = uuid.NewString()
+	}
+	if in.Token == "" {
+		in.Token = uuid.NewString()
+	}
+	in.CreatedAt = now()
+	m.invites[in.ID] = in
+	m.addActivity(in.ProjectID, models.TypeInvite, map[string]any{"id": in.ID, "action": "create", "role": in.Role})
+	return &in, nil
+}
+
+func (m *Memory) GetInvite(_ context.Context, id string) (*models.Invite, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv, ok := m.invites[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &inv, nil
+}
+
+func (m *Memory) GetInviteByToken(_ context.Context, token string) (*models.Invite, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, inv := range m.invites {
+		if inv.Token == token {
+			return &inv, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *Memory) ListInvites(_ context.Context, projectID string, pendingOnly bool) ([]models.Invite, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.projects[projectID]; !ok {
+		return nil, ErrNotFound
+	}
+	out := []models.Invite{}
+	for _, inv := range m.invites {
+		if inv.ProjectID != projectID {
+			continue
+		}
+		if pendingOnly && inv.Status() != "pending" {
+			continue
+		}
+		out = append(out, inv)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) AcceptInvite(_ context.Context, id, memberID string) (*models.Invite, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv, ok := m.invites[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if inv.RevokedAt != nil {
+		return nil, fmt.Errorf("%w: invite revoked", ErrConflict)
+	}
+	if inv.AcceptedAt != nil {
+		return nil, fmt.Errorf("%w: invite already accepted", ErrConflict)
+	}
+	if _, ok := m.members[memberID]; !ok {
+		return nil, fmt.Errorf("%w: member", ErrNotFound)
+	}
+	t := now()
+	inv.AcceptedAt = &t
+	inv.AcceptedMemberID = memberID
+	m.invites[id] = inv
+	m.addActivity(inv.ProjectID, models.TypeInvite, map[string]any{"id": inv.ID, "action": "accept", "member_id": memberID})
+	return &inv, nil
+}
+
+func (m *Memory) RevokeInvite(_ context.Context, id string) (*models.Invite, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv, ok := m.invites[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if inv.AcceptedAt != nil {
+		return nil, fmt.Errorf("%w: invite already accepted", ErrConflict)
+	}
+	if inv.RevokedAt != nil {
+		return &inv, nil
+	}
+	t := now()
+	inv.RevokedAt = &t
+	m.invites[id] = inv
+	m.addActivity(inv.ProjectID, models.TypeInvite, map[string]any{"id": inv.ID, "action": "revoke"})
+	return &inv, nil
 }

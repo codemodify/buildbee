@@ -67,3 +67,4 @@ jobs:
           ./scripts/e2e.sh
           ./scripts/e2e-roles-acp.sh
           ./scripts/e2e-notifications.sh
+          ./scripts/e2e-invites.sh

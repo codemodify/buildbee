@@ -6,6 +6,7 @@ import type {
   Decision,
   Member,
   Message,
+  Invite,
   Notification,
   Project,
   Routine,
@@ -44,11 +45,19 @@ function renderMentions(text: string): ReactNode {
 type Route =
   | { page: "home" }
   | { page: "project"; projectId: string; channelId?: string }
-  | { page: "task"; projectId: string; taskId: string };
+  | { page: "task"; projectId: string; taskId: string }
+  | { page: "invite"; token: string };
 
 function parseHash(): Route {
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+  if (pathParts[0] === "invite" && pathParts[1]) {
+    return { page: "invite", token: pathParts[1] };
+  }
   const raw = window.location.hash.replace(/^#/, "");
   const parts = raw.split("/").filter(Boolean);
+  if (parts[0] === "invite" && parts[1]) {
+    return { page: "invite", token: parts[1] };
+  }
   if (parts[0] === "projects" && parts[1] && parts[2] === "tasks" && parts[3]) {
     return { page: "task", projectId: parts[1], taskId: parts[3] };
   }
@@ -70,6 +79,14 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  if (route.page === "invite") {
+    return (
+      <>
+        <Chrome />
+        <InvitePage token={route.token} />
+      </>
+    );
+  }
   if (route.page === "task") {
     return (
       <>
@@ -346,6 +363,11 @@ function ProjectPage({
   const [activity, setActivity] = useState<
     { id: string; type: string; payload: Record<string, unknown>; created_at: string }[]
   >([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteGithub, setInviteGithub] = useState("");
+  const [inviteRole, setInviteRole] = useState("member");
+  const [toast, setToast] = useState("");
   const [error, setError] = useState("");
 
   const activeChannel = useMemo(() => {
@@ -355,11 +377,12 @@ function ProjectPage({
 
   const human = members.find((m) => m.kind === "human");
   const bots = members.filter((m) => m.kind === "bot");
+  const canInvite = human?.role === "owner" || human?.role === "admin";
 
   async function loadProject() {
     const p = await api.getProject(projectId);
     setProject(p);
-    const [m, c, t, d, rts, plist, act] = await Promise.all([
+    const [m, c, t, d, rts, plist, act, inv] = await Promise.all([
       api.listMembers(projectId),
       api.listChannels(projectId),
       api.listTasks(projectId),
@@ -367,6 +390,7 @@ function ProjectPage({
       api.listRoutines(projectId),
       api.listProjects(),
       api.listActivity(projectId),
+      api.listInvites(projectId).catch(() => ({ items: [] as Invite[] })),
     ]);
     setProjects(plist.items);
     setActivity(act.items.slice(0, 12));
@@ -375,6 +399,7 @@ function ProjectPage({
     setTasks(t.items);
     setDecisions(d.items);
     setRoutines(rts.items);
+    setInvites(inv.items);
     return c.items;
   }
 
@@ -541,6 +566,7 @@ function ProjectPage({
         </form>
       </header>
       {error ? <p className="px-4 py-2 text-sm text-red-400">{error}</p> : null}
+      {toast ? <p className="px-4 py-2 text-sm text-emerald-400">{toast}</p> : null}
       <div className="grid min-h-[calc(100vh-4rem)] gap-4 p-4 lg:grid-cols-[14rem_minmax(0,1fr)_18rem]">
         <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
           <h2 className="text-sm font-medium text-zinc-400">Channels</h2>
@@ -749,6 +775,108 @@ function ProjectPage({
                       ))}
                     </div>
                   )}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <h2 className="text-sm font-medium text-zinc-400">Invites</h2>
+            {canInvite ? (
+              <form
+                className="mt-2 space-y-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!inviteEmail.trim() && !inviteGithub.trim()) {
+                    setError("Email or GitHub login is required");
+                    return;
+                  }
+                  void api
+                    .createInvite(projectId, {
+                      email: inviteEmail.trim() || undefined,
+                      github_login: inviteGithub.trim() || undefined,
+                      role: inviteRole,
+                    })
+                    .then(async () => {
+                      setInviteEmail("");
+                      setInviteGithub("");
+                      setInvites((await api.listInvites(projectId)).items);
+                      setError("");
+                      setToast("Invite created");
+                    })
+                    .catch((err) => setError(formatError(err)));
+                }}
+              >
+                <input
+                  className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="email"
+                />
+                <input
+                  className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+                  value={inviteGithub}
+                  onChange={(e) => setInviteGithub(e.target.value)}
+                  placeholder="GitHub login"
+                />
+                <div className="flex gap-1">
+                  <select
+                    className="rounded border border-zinc-800 bg-zinc-950 px-1 text-xs"
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    aria-label="Invite Role"
+                  >
+                    <option value="member">member</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  <button className="rounded bg-amber-400 px-2 text-sm text-zinc-950" type="submit">
+                    Invite
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <Empty>Only owner or admin can send Invites.</Empty>
+            )}
+            <ul className="mt-3 space-y-2">
+              {invites.length === 0 ? (
+                <li>
+                  <Empty>No pending Invites.</Empty>
+                </li>
+              ) : null}
+              {invites.map((inv) => (
+                <li key={inv.id} className="text-xs">
+                  <p className="font-medium text-zinc-200">
+                    {inv.email || inv.github_login}{" "}
+                    <span className="uppercase text-zinc-500">{inv.role}</span>
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      className="rounded bg-zinc-800 px-2 py-0.5"
+                      onClick={() => {
+                        const link = `${window.location.origin}/${inv.path ?? `#/invite/${inv.token}`}`;
+                        void navigator.clipboard.writeText(link).then(
+                          () => setToast("Invite link copied"),
+                          () => setToast(link),
+                        );
+                      }}
+                    >
+                      Copy link
+                    </button>
+                    {canInvite ? (
+                      <button
+                        type="button"
+                        className="rounded bg-zinc-800 px-2 py-0.5"
+                        onClick={() => {
+                          void api.revokeInvite(inv.id).then(async () => {
+                            setInvites((await api.listInvites(projectId)).items);
+                          });
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -974,6 +1102,80 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
           ) : null}
         </ul>
       </section>
+    </main>
+  );
+}
+
+function InvitePage({ token }: { token: string }) {
+  const [invite, setInvite] = useState<Invite | null>(null);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void api
+      .getInvite(token)
+      .then(setInvite)
+      .catch((e) => setError(formatError(e)));
+  }, [token]);
+
+  async function accept(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const res = await api.acceptInvite(token, {
+        display_name: name.trim() || undefined,
+        github_login: invite?.github_login || undefined,
+      });
+      const pid = res.invite.project_id || invite?.project_id;
+      window.location.hash = pid ? `#/projects/${pid}` : "#/";
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-zinc-950 px-6 py-16 text-zinc-100">
+      <div className="mx-auto max-w-md rounded-lg border border-zinc-800 bg-zinc-900/40 p-6">
+        <p className="text-sm text-amber-400">Project Invite</p>
+        <h1 className="mt-2 text-2xl font-semibold">
+          {invite?.project_name ?? "BuildBee"}
+        </h1>
+        {invite ? (
+          <p className="mt-2 text-sm text-zinc-400">
+            Role <span className="text-zinc-200">{invite.role}</span>
+            {invite.email ? ` · ${invite.email}` : ""}
+            {invite.github_login ? ` · @${invite.github_login}` : ""}
+            {invite.status !== "pending" ? (
+              <span className="block text-red-400">This Invite is {invite.status}.</span>
+            ) : null}
+          </p>
+        ) : null}
+        {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
+        {invite?.status === "pending" ? (
+          <form onSubmit={accept} className="mt-6 space-y-3">
+            <input
+              className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Your display name (optional in dev)"
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-md bg-amber-400 px-4 py-2 font-medium text-zinc-950 disabled:opacity-50"
+            >
+              {busy ? "Joining…" : "Accept Invite"}
+            </button>
+          </form>
+        ) : invite ? (
+          <Empty>Ask the Project owner for a new Invite link.</Empty>
+        ) : (
+          <Empty>Loading Invite…</Empty>
+        )}
+      </div>
     </main>
   );
 }

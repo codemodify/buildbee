@@ -149,4 +149,25 @@ export const api = {
       `/v1/notifications/read-all?member_id=${encodeURIComponent(memberId)}`,
       { method: "POST", body: "{}" },
     ),
+  listInvites: (projectId: string) =>
+    request<{ items: import("./types").Invite[] }>(
+      `/v1/projects/${projectId}/invites`,
+    ),
+  createInvite: (
+    projectId: string,
+    body: { email?: string; github_login?: string; role: string },
+  ) =>
+    request<import("./types").Invite>(`/v1/projects/${projectId}/invites`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getInvite: (token: string) =>
+    request<import("./types").Invite>(`/v1/invites/${token}`),
+  acceptInvite: (token: string, body?: { display_name?: string; github_login?: string }) =>
+    request<{ already_member: boolean; member: import("./types").Member; invite: import("./types").Invite }>(
+      `/v1/invites/${token}/accept`,
+      { method: "POST", body: JSON.stringify(body ?? {}) },
+    ),
+  revokeInvite: (id: string) =>
+    request<import("./types").Invite>(`/v1/invites/${id}`, { method: "DELETE" }),
 };

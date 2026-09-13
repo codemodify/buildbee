@@ -56,6 +56,7 @@ cd web && npm install && npm run dev   # http://localhost:5173 (proxies /v1)
 ./scripts/e2e-identity.sh   # dev auth + fake Issues→Task + Routine fire
 ./scripts/e2e-roles-acp.sh  # Scout/Builder/Sentry/Pulse + FakeACP Run (acp.log)
 ./scripts/e2e-notifications.sh  # Decision / Handoff / mention / Pipeline → inbox read
+./scripts/e2e-invites.sh        # Invite create → accept → revoke + permissions
 
 cd cli
 go run ./cmd/buildbee run start --task "$TASK_ID" --fake
@@ -134,8 +135,20 @@ Implemented:
 - [x] Notifications API (`GET /v1/notifications`, mark read / read-all)
 - [x] CLI `buildbee`; compose + Railway Dockerfile (API + embedded UI)
 - [x] GitHub Actions CI (memory store, no DinD)
+- [x] Multi-user Member Invite (owner/admin; token accept page)
 
 See [docs/v0-status.md](docs/v0-status.md) for the remaining v0 checklist.
+
+### Permissions (Invites)
+
+- **Owner** and **admin** can `POST` / `DELETE` Invites.
+- Any Project **Member** (human) can `GET` pending Invites.
+- Preview `GET /v1/invites/{token}` is public (the token is the secret).
+- Accept `POST /v1/invites/{token}/accept`: dev-auth binds the current session Member (or a new human from `display_name`); OAuth requires sign-in and binds the GitHub Identity. If the Invite specifies `github_login`, it must match.
+
+```bash
+./scripts/e2e-invites.sh
+```
 
 Deferred:
 
@@ -143,5 +156,4 @@ Deferred:
 - [ ] IDE extension
 - [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
 - [ ] Production GitHub App install flow beyond webhook HMAC + PAT
-- [ ] Multi-user Member invite / join (beyond Add Member on the Project)
 - [ ] Real ACP streaming (start / send / collect only)

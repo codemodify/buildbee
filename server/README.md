@@ -52,8 +52,12 @@ DATABASE_URL=postgres://... go run ./cmd/server
 | GET | `/v1/notifications` | Inbox (`member_id` or `X-Member-ID`, `?unread=1`) |
 | POST | `/v1/notifications/{id}/read` | Mark one Notification read |
 | POST | `/v1/notifications/read-all` | Mark all read for `member_id` |
+| GET/POST | `/v1/projects/{id}/invites` | List pending Invites / create (owner or admin; email and/or GitHub login, role `member`\|`admin`) |
+| GET | `/v1/invites/{token}` | Preview Invite (public; token is the secret) |
+| POST | `/v1/invites/{token}/accept` | Join Project (dev session or GitHub Identity) |
+| DELETE | `/v1/invites/{id}` | Revoke (owner or admin) |
 
-Auth is stubbed. Pass `X-Member-ID` or `member_id` when posting messages.
+Auth is stubbed. Pass `X-Member-ID` or `member_id` when posting messages. Invite create/revoke require Role **owner** or **admin**; any human Member may list pending Invites.
 
 Notifications are created when a Decision opens (not reused), a Handoff targets a Member, a Channel `@bot` mention creates a Task, or a Pipeline records `failure`.
 

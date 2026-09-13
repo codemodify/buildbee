@@ -6,7 +6,7 @@ How humans and Bots cooperate in a BuildBee **Project**. Nouns match [glossary v
 
 A **Project** is the workspace. Members join it with a **Role** and an **Identity**.
 
-- Humans authenticate later via GitHub OAuth (dev auth acts as Member **You**, Role **owner**).
+- Humans authenticate later via GitHub OAuth (dev auth acts as Member **You**, Role **owner**). Owner/admin send an **Invite** (email and/or GitHub login); the token link `#/invite/{token}` lets a human join as member or admin.
 - New Projects seed four **Bots**: **Scout** (triage), **Builder** (implement), **Sentry** (review/CI), **Pulse** (Routines). Each Bot Member has a Role and a short instructions blurb.
 - **Bots** receive server-issued Identities from the **Server**.
 

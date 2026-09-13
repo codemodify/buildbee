@@ -222,8 +222,8 @@ func (p *Postgres) AddMember(ctx context.Context, in models.Member) (*models.Mem
 			in.Identity = "human:stub"
 		}
 	}
-	_, err := p.pool.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at, instructions)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, in.ID, in.ProjectID, in.Kind, in.DisplayName, in.Role, in.Identity, in.CreatedAt, in.Instructions)
+	_, err := p.pool.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at, instructions, github_login, github_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, in.ID, in.ProjectID, in.Kind, in.DisplayName, in.Role, in.Identity, in.CreatedAt, in.Instructions, in.GitHubLogin, in.GitHubID)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,4 +1066,127 @@ func scanNotification(row scannable) (models.Notification, error) {
 	err := row.Scan(&n.ID, &n.ProjectID, &n.MemberID, &n.Kind, &n.Title, &n.Body, &n.Href, &read, &n.CreatedAt)
 	n.ReadAt = read
 	return n, err
+}
+
+func (p *Postgres) CreateInvite(ctx context.Context, in models.Invite) (*models.Invite, error) {
+	if err := p.mustProject(ctx, in.ProjectID); err != nil {
+		return nil, err
+	}
+	if _, err := p.GetMember(ctx, in.InvitedByMemberID); err != nil {
+		return nil, err
+	}
+	if in.ID == "" {
+		in.ID = uuid.NewString()
+	}
+	if in.Token == "" {
+		in.Token = uuid.NewString()
+	}
+	in.CreatedAt = time.Now().UTC()
+	_, err := p.pool.Exec(ctx, `INSERT INTO invites (id, project_id, email, github_login, role, token, invited_by_member_id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, in.ID, in.ProjectID, in.Email, in.GitHubLogin, in.Role, in.Token, in.InvitedByMemberID, in.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, in.ProjectID, models.TypeInvite, map[string]any{"id": in.ID, "action": "create", "role": in.Role})
+	return &in, nil
+}
+
+func (p *Postgres) GetInvite(ctx context.Context, id string) (*models.Invite, error) {
+	row := p.pool.QueryRow(ctx, `SELECT id, project_id, email, github_login, role, token, invited_by_member_id, accepted_member_id, created_at, accepted_at, revoked_at FROM invites WHERE id=$1`, id)
+	inv, err := scanInvite(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+func (p *Postgres) GetInviteByToken(ctx context.Context, token string) (*models.Invite, error) {
+	row := p.pool.QueryRow(ctx, `SELECT id, project_id, email, github_login, role, token, invited_by_member_id, accepted_member_id, created_at, accepted_at, revoked_at FROM invites WHERE token=$1`, token)
+	inv, err := scanInvite(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+func (p *Postgres) ListInvites(ctx context.Context, projectID string, pendingOnly bool) ([]models.Invite, error) {
+	if err := p.mustProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	q := `SELECT id, project_id, email, github_login, role, token, invited_by_member_id, accepted_member_id, created_at, accepted_at, revoked_at FROM invites WHERE project_id=$1`
+	if pendingOnly {
+		q += ` AND accepted_at IS NULL AND revoked_at IS NULL`
+	}
+	q += ` ORDER BY created_at DESC`
+	rows, err := p.pool.Query(ctx, q, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Invite{}
+	for rows.Next() {
+		inv, err := scanInvite(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, inv)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) AcceptInvite(ctx context.Context, id, memberID string) (*models.Invite, error) {
+	inv, err := p.GetInvite(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if inv.RevokedAt != nil {
+		return nil, fmt.Errorf("%w: invite revoked", ErrConflict)
+	}
+	if inv.AcceptedAt != nil {
+		return nil, fmt.Errorf("%w: invite already accepted", ErrConflict)
+	}
+	if _, err := p.GetMember(ctx, memberID); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	if _, err := p.pool.Exec(ctx, `UPDATE invites SET accepted_at=$2, accepted_member_id=$3 WHERE id=$1`, id, now, memberID); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, inv.ProjectID, models.TypeInvite, map[string]any{"id": inv.ID, "action": "accept", "member_id": memberID})
+	return p.GetInvite(ctx, id)
+}
+
+func (p *Postgres) RevokeInvite(ctx context.Context, id string) (*models.Invite, error) {
+	inv, err := p.GetInvite(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if inv.AcceptedAt != nil {
+		return nil, fmt.Errorf("%w: invite already accepted", ErrConflict)
+	}
+	if inv.RevokedAt != nil {
+		return inv, nil
+	}
+	if _, err := p.pool.Exec(ctx, `UPDATE invites SET revoked_at=$2 WHERE id=$1`, id, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	_ = p.addActivity(ctx, inv.ProjectID, models.TypeInvite, map[string]any{"id": inv.ID, "action": "revoke"})
+	return p.GetInvite(ctx, id)
+}
+
+func scanInvite(row scannable) (models.Invite, error) {
+	var inv models.Invite
+	var acceptedID *string
+	err := row.Scan(&inv.ID, &inv.ProjectID, &inv.Email, &inv.GitHubLogin, &inv.Role, &inv.Token,
+		&inv.InvitedByMemberID, &acceptedID, &inv.CreatedAt, &inv.AcceptedAt, &inv.RevokedAt)
+	if acceptedID != nil {
+		inv.AcceptedMemberID = *acceptedID
+	}
+	return inv, err
 }
