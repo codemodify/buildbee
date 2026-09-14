@@ -53,6 +53,9 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 	mux.HandleFunc("PATCH /v1/runs/r1", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "r1", "status": "succeeded"})
 	})
+	mux.HandleFunc("POST /v1/runs/r1/events", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "e1", "run_id": "r1", "seq": 1, "kind": "token"})
+	})
 	mux.HandleFunc("POST /v1/tasks/t1/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "a1", "kind": "log"})
 	})

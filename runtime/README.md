@@ -7,10 +7,12 @@ Go supervisor + Docker **Sandbox** (and optional **ACP** CLI) for **Runs**. Modu
 `--acp` (or POST `/runs` with `"acp": true`) starts a short ACP session instead of a Docker command:
 
 1. Detect an agent binary on `PATH`: `claude`, `codex`, `opencode`, `goose` (or `--agent` / `"agent"`).
-2. Start session → send a prompt derived from Task title/body + Handoff notes → collect stdout.
-3. Store Artifact **`acp.log`** and mark the Run succeeded/failed.
+2. Start session → send a prompt derived from Task title/body + Handoff notes → **stream** stdout/stderr (and FakeACP tokens / tool calls) as RunEvents.
+3. Store Artifact **`acp.log`** (rolled-up transcript) and mark the Run succeeded/failed.
 
-If no binary is present, or `--agent fake`, **FakeACP** writes a plausible log and succeeds (CI/e2e).
+If no binary is present, or `--agent fake`, **FakeACP** streams chunks over ~1–2s and succeeds (CI/e2e).
+
+Live events: `POST /v1/runs/{id}/events` · `GET /v1/runs/{id}/events?after=` · `GET /v1/runs/{id}/ws`. Kinds: `token`, `tool_call`, `tool_result`, `status`, `log`.
 
 | Agent | Binary | Non-interactive invocation |
 | --- | --- | --- |
@@ -86,7 +88,7 @@ Compose: `--profile runtime` (see `deploy/compose`). Default `BUILDBEE_FAKE_SAND
 | Path | Role |
 | --- | --- |
 | `.` | Supervisor |
-| [`acp/`](acp/) | ACP `Session` (start/send/collect), Detect, FakeACP |
+| [`acp/`](acp/) | ACP `Stream` / `Session`, Detect, FakeACP chunks |
 | [`sandbox/`](sandbox/) | `Engine` interface, `DockerEngine`, `FakeEngine` |
 | [`notify/`](notify/) | Server HTTP client |
 | [`cmd/runtime/`](cmd/runtime/) | HTTP supervisor |

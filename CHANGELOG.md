@@ -32,7 +32,11 @@ A **Project** workspace where humans and **Bots** cooperate. One Server process 
 - Compose (Postgres 16 + Server) and Railway (`Dockerfile`, `railway.toml`)
 - `make build` / `scripts/build.sh` embed `web/dist`
 - Desktop MVP (`desktop/`): Tauri 2 window loads `web/`; Server URL persists locally; native Reload / Open Server URL / Quit. Server (and Postgres) are not bundled.
-- CI: Go tests, web build, desktop `cargo check` on Ubuntu (no signed `.dmg`), e2e scripts against in-memory Server (no DinD)
+- Live ACP streaming: RunEvent (`token` / `tool_call` / `tool_result` / `status` / `log`), `GET /v1/runs/{id}/events?after=`, WebSocket `/v1/runs/{id}/ws`. FakeACP emits chunks over ~1–2s. Final Artifact remains `acp.log`. Web Task page shows a live transcript.
+- CI: Go tests, web build, desktop `cargo check` on Ubuntu (no signed `.dmg`), e2e scripts against in-memory Server (no DinD) including `e2e-acp-stream.sh`
+
+### Pinned later
+IDE extension, Nostr/NIP-01 signed Activity, production GitHub App install UI.
 
 ### Deferred
-IDE, Nostr/NIP-01, GitHub App install UI, bidirectional ACP stream, desktop tray / multi-window bench.
+Desktop tray / multi-window bench.

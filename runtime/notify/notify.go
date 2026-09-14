@@ -63,6 +63,20 @@ func (c *Client) UpdateRun(runID, status, detail string) (*Run, error) {
 	return &run, err
 }
 
+type RunEvent struct {
+	ID      string         `json:"id"`
+	RunID   string         `json:"run_id"`
+	Seq     int            `json:"seq"`
+	Kind    string         `json:"kind"`
+	Payload map[string]any `json:"payload"`
+}
+
+func (c *Client) PostRunEvent(runID, kind string, payload map[string]any) (*RunEvent, error) {
+	var ev RunEvent
+	err := c.do(http.MethodPost, "/v1/runs/"+runID+"/events", map[string]any{"kind": kind, "payload": payload}, &ev)
+	return &ev, err
+}
+
 func (c *Client) CreateArtifact(taskID string, a Artifact) (*Artifact, error) {
 	var out Artifact
 	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/artifacts", a, &out)

@@ -25,9 +25,19 @@ var upgrader = websocket.Upgrader{
 
 // ServeChannel upgrades GET /v1/channels/{channelID}/ws and streams JSON messages.
 func (h *Hub) ServeChannel(w http.ResponseWriter, r *http.Request) {
-	channelID := r.PathValue("channelID")
-	if channelID == "" {
-		http.Error(w, "missing channel", http.StatusBadRequest)
+	h.serveTopic(w, r, r.PathValue("channelID"))
+}
+
+// ServeRun upgrades GET /v1/runs/{runID}/ws and streams RunEvent JSON.
+func (h *Hub) ServeRun(w http.ResponseWriter, r *http.Request) {
+	h.serveTopic(w, r, runTopic(r.PathValue("runID")))
+}
+
+func runTopic(runID string) string { return "run:" + runID }
+
+func (h *Hub) serveTopic(w http.ResponseWriter, r *http.Request, topic string) {
+	if topic == "" || topic == "run:" {
+		http.Error(w, "missing topic", http.StatusBadRequest)
 		return
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -35,10 +45,10 @@ func (h *Hub) ServeChannel(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ws upgrade: %v", err)
 		return
 	}
-	h.add(channelID, conn)
+	h.add(topic, conn)
 	go func() {
 		defer func() {
-			h.remove(channelID, conn)
+			h.remove(topic, conn)
 			_ = conn.Close()
 		}()
 		for {
@@ -47,6 +57,11 @@ func (h *Hub) ServeChannel(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+}
+
+// PublishRun sends a payload to every subscriber of a Run.
+func (h *Hub) PublishRun(runID string, payload any) {
+	h.Publish(runTopic(runID), payload)
 }
 
 // Publish sends a payload to every subscriber of a Channel.

@@ -153,7 +153,10 @@ func (s *Supervisor) executeACP(ctx context.Context, req Request, run *notify.Ru
 	if req.Fake && agent == "" {
 		agent = "fake"
 	}
-	name, logs, err := acp.Run(ctx, acp.Config{Agent: agent}, prompt)
+	name, logs, err := acp.Stream(ctx, acp.Config{Agent: agent}, prompt, func(ev acp.Event) error {
+		_, perr := s.Server.PostRunEvent(run.ID, ev.Kind, ev.Payload)
+		return perr
+	})
 	status := StatusSucceeded
 	detail := "acp " + name + " ok"
 	if err != nil {

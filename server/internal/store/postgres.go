@@ -747,6 +747,76 @@ func (p *Postgres) ListRuns(ctx context.Context, taskID string) ([]models.Run, e
 	return out, rows.Err()
 }
 
+func (p *Postgres) AppendRunEvent(ctx context.Context, runID, kind string, payload map[string]any) (*models.RunEvent, error) {
+	k := models.NormalizeRunEventKind(kind)
+	if k == "" {
+		return nil, fmt.Errorf("invalid run event kind")
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var exists string
+	if err := tx.QueryRow(ctx, `SELECT id FROM runs WHERE id=$1 FOR UPDATE`, runID).Scan(&exists); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	var seq int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id=$1`, runID).Scan(&seq); err != nil {
+		return nil, err
+	}
+	ev := models.RunEvent{
+		ID: uuid.NewString(), RunID: runID, Seq: seq + 1, Kind: k,
+		Payload: payload, CreatedAt: time.Now().UTC(),
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO run_events (id, run_id, seq, kind, payload, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`, ev.ID, ev.RunID, ev.Seq, ev.Kind, raw, ev.CreatedAt); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &ev, nil
+}
+
+func (p *Postgres) ListRunEvents(ctx context.Context, runID string, afterSeq int) ([]models.RunEvent, error) {
+	if _, err := p.GetRun(ctx, runID); err != nil {
+		return nil, err
+	}
+	rows, err := p.pool.Query(ctx, `SELECT id, run_id, seq, kind, payload, created_at FROM run_events
+		WHERE run_id=$1 AND seq>$2 ORDER BY seq ASC`, runID, afterSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.RunEvent{}
+	for rows.Next() {
+		var ev models.RunEvent
+		var raw []byte
+		if err := rows.Scan(&ev.ID, &ev.RunID, &ev.Seq, &ev.Kind, &raw, &ev.CreatedAt); err != nil {
+			return nil, err
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &ev.Payload)
+		}
+		if ev.Payload == nil {
+			ev.Payload = map[string]any{}
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) CreateArtifact(ctx context.Context, in models.Artifact) (*models.Artifact, error) {
 	task, err := p.GetTask(ctx, in.TaskID)
 	if err != nil {

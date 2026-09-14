@@ -12,3 +12,12 @@ func TestDecisionFingerprint(t *testing.T) {
 		t.Fatal("different questions must not collide")
 	}
 }
+
+func TestNormalizeRunEventKind(t *testing.T) {
+	if NormalizeRunEventKind(" TOKEN ") != RunEventToken {
+		t.Fatal("token")
+	}
+	if NormalizeRunEventKind("nope") != "" {
+		t.Fatal("unknown")
+	}
+}

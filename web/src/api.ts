@@ -82,6 +82,13 @@ export async function persistServerOrigin(url: string): Promise<string> {
   return getServerOrigin();
 }
 
+export function runEventsWsUrl(runId: string): string {
+  const origin = getServerOrigin() || window.location.origin;
+  const u = new URL(`/v1/runs/${runId}/ws`, origin);
+  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  return u.toString();
+}
+
 export async function pingServer(origin = getServerOrigin()): Promise<boolean> {
   const base = (origin || window.location.origin).replace(/\/$/, "");
   const res = await fetch(`${base}/healthz`, { credentials: "omit" });
@@ -221,6 +228,10 @@ export const api = {
       method: "POST",
       body: "{}",
     }),
+  listRunEvents: (runId: string, after = 0) =>
+    request<{ items: import("./types").RunEvent[] }>(
+      `/v1/runs/${runId}/events${after > 0 ? `?after=${after}` : ""}`,
+    ),
   getTaskDetail: (taskId: string) =>
     request<import("./types").TaskDetail>(`/v1/tasks/${taskId}/detail`),
   authMe: () => request<import("./types").AuthMe>("/v1/auth/me"),

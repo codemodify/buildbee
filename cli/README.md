@@ -16,7 +16,7 @@ go run ./cmd/buildbee routine run --id "$ROUTINE_ID"
 go run ./cmd/buildbee run start --task "$TASK_ID" --repo-url https://github.com/org/repo.git --cmd "echo hi"
 ```
 
-`run start --fake` talks only to the Server (log Artifact + fake Repo PR). `--acp` starts an ACP session (`--agent claude|codex|opencode|goose|fake`); missing binaries use FakeACP and write Artifact `acp.log`. Without `--fake`/`--acp --agent fake` it POSTs to `BUILDBEE_RUNTIME_URL` (default `:8090`) and falls back if the runtime is down.
+`run start --fake` talks only to the Server (log Artifact + fake Repo PR). `--acp` starts an ACP session (`--agent claude|codex|opencode|goose|fake`); missing binaries use FakeACP, stream RunEvents (printed on stderr), and write Artifact `acp.log`. Without `--fake`/`--acp --agent fake` it POSTs to `BUILDBEE_RUNTIME_URL` (default `:8090`) and falls back if the runtime is down.
 
 ```bash
 go test ./...
