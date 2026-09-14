@@ -13,8 +13,9 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
-- Create a **Project** (empty home is name + create only). Once any Project exists, a left **Projects** rail lists them on home and inside Project views
-- Click a rail row to open/focus that Project. **Alt-click or ⊕** opens a second Project beside it (two panes max; × closes a pane)
+- Create a **Project** (empty home is name + create only). Once any Project exists, a left **Projects** rail lists them as a Slack-style tree on home and inside Project views
+- **Chevron** expands/collapses Channels under a Project (persisted). Click the name to focus. **Alt-click or ⊕** opens a second Project beside it (two panes max; × closes a pane)
+- Click a nested `#channel` to focus that Project and select the Channel. Create a Channel with **+** under the Project in the rail
 - Deep links: `#/projects/:id` focuses that Project; `#/projects/:id?beside=:id2` restores a split. Layout also persists in `localStorage`
 - Chat in a **Channel** (polls every 2s; Server also has `/v1/channels/{id}/ws`)
 - See seeded **Bots + Roles** (Scout, Builder, Sentry, Pulse)

@@ -28,6 +28,7 @@ A **Project** workspace where humans and **Bots** cooperate. One Server process 
 - Kanban Tasks, Decisions (assignee + mine), Invites, Activity, inbox bell, mute prefs
 - Empty states and inline errors/toasts on Invite, Sync Issues, Routine run, Start Run
 - Persistent Projects rail + two side-by-side Project panes (Alt-click or ⊕ opens beside). Header Project `<select>` removed. `#/projects/:id?beside=` + localStorage restore
+- Slack-style Projects tree: collapsible Project nodes, nested `#channel` navigator, Channel create under each Project; in-pane Channel list removed
 
 ### Ship
 - Compose (Postgres 16 + Server) and Railway (`Dockerfile`, `railway.toml`)

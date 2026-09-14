@@ -20,7 +20,7 @@ export function ProjectPane({
   showClose = false,
   onFocus,
   onClose,
-  onChannelChange,
+  channelsVersion = 0,
 }: {
   projectId: string;
   channelId?: string;
@@ -29,7 +29,7 @@ export function ProjectPane({
   showClose?: boolean;
   onFocus?: () => void;
   onClose?: () => void;
-  onChannelChange?: (channelId: string) => void;
+  channelsVersion?: number;
 }) {
   const [project, setProject] = useState<Project | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -39,7 +39,6 @@ export function ProjectPane({
   const [messages, setMessages] = useState<Message[]>([]);
   const [body, setBody] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
-  const [channelName, setChannelName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [options, setOptions] = useState("yes, no");
   const [memberName, setMemberName] = useState("");
@@ -66,11 +65,6 @@ export function ProjectPane({
   const human = members.find((m) => m.kind === "human");
   const bots = members.filter((m) => m.kind === "bot");
   const canInvite = human?.role === "owner" || human?.role === "admin";
-
-  function selectChannel(id: string) {
-    if (onChannelChange) onChannelChange(id);
-    else window.location.hash = `#/projects/${projectId}/channels/${id}`;
-  }
 
   async function loadProject() {
     const p = await api.getProject(projectId);
@@ -100,7 +94,7 @@ export function ProjectPane({
 
   useEffect(() => {
     void loadProject().catch((e) => setError(formatError(e)));
-  }, [projectId, mineOnly]);
+  }, [projectId, mineOnly, channelsVersion]);
 
   useEffect(() => {
     if (!activeChannel) return;
@@ -149,20 +143,6 @@ export function ProjectPane({
     }
   }
 
-  async function addChannel(e: FormEvent) {
-    e.preventDefault();
-    if (!channelName.trim()) return;
-    try {
-      const ch = await api.createChannel(projectId, channelName.trim());
-      setChannelName("");
-      setChannels((prev) => [...prev, ch]);
-      selectChannel(ch.id);
-      setError("");
-    } catch (err) {
-      setError(formatError(err));
-    }
-  }
-
   async function addMember(e: FormEvent) {
     e.preventDefault();
     if (!memberName.trim()) return;
@@ -203,8 +183,8 @@ export function ProjectPane({
   }
 
   const gridClass = compact
-    ? "grid gap-2 p-2 lg:grid-cols-[9rem_minmax(0,1fr)]"
-    : "grid min-h-[calc(100vh-4rem)] gap-4 p-4 lg:grid-cols-[14rem_minmax(0,1fr)_18rem]";
+    ? "grid gap-2 p-2"
+    : "grid min-h-[calc(100vh-4rem)] gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_18rem]";
 
   return (
     <main
@@ -271,42 +251,6 @@ export function ProjectPane({
       {error ? <p className="px-3 py-2 text-sm text-red-400">{error}</p> : null}
       {toast ? <p className="px-3 py-2 text-sm text-emerald-400">{toast}</p> : null}
       <div className={gridClass}>
-        <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-          <h2 className="text-sm font-medium text-zinc-400">Channels</h2>
-          <ul className="mt-2 space-y-1">
-            {channels.map((ch) => (
-              <li key={ch.id}>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onFocus?.();
-                    selectChannel(ch.id);
-                  }}
-                  className={`block w-full rounded px-2 py-1 text-left text-sm ${
-                    activeChannel?.id === ch.id
-                      ? "bg-zinc-800 text-amber-300"
-                      : "text-zinc-300 hover:bg-zinc-800"
-                  }`}
-                >
-                  #{ch.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <form onSubmit={addChannel} className="mt-3 flex gap-1">
-            <input
-              className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
-              value={channelName}
-              onChange={(e) => setChannelName(e.target.value)}
-              placeholder="new channel"
-            />
-            <button className="rounded bg-zinc-800 px-2 text-sm" type="submit">
-              +
-            </button>
-          </form>
-        </section>
-
         <section className="flex min-h-[16rem] flex-col rounded-lg border border-zinc-800 bg-zinc-900/40">
           <div className="border-b border-zinc-800 px-3 py-2 text-sm text-zinc-400">
             #{activeChannel?.name ?? "…"}
@@ -345,7 +289,7 @@ export function ProjectPane({
           </form>
         </section>
 
-        <div className={`space-y-4 ${compact ? "lg:col-span-2" : ""}`}>
+        <div className="space-y-4">
           <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
             <h2 className="flex items-center justify-between text-sm font-medium text-zinc-400">
               Tasks
