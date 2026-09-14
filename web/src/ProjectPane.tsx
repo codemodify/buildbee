@@ -216,11 +216,27 @@ export function ProjectPane({
       }`}
       onClick={onFocus}
     >
-      <header className="flex items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2">
-        <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold">{project?.name ?? "Project"}</h1>
+      <header className="border-b border-zinc-800 px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
+            {project?.name ?? "Project"}
+          </h1>
+          {showClose ? (
+            <button
+              type="button"
+              data-testid="pane-close"
+              className="shrink-0 rounded bg-zinc-800 px-2 py-1 text-zinc-300 hover:text-zinc-100"
+              aria-label="Close pane"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose?.();
+              }}
+            >
+              ×
+            </button>
+          ) : null}
         </div>
-        <form onSubmit={addMember} className="flex flex-wrap items-center justify-end gap-2 text-xs">
+        <form onSubmit={addMember} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
           <label className="flex items-center gap-1 text-zinc-400">
             <input
               type="checkbox"
@@ -250,20 +266,6 @@ export function ProjectPane({
           <button type="submit" className="rounded bg-zinc-800 px-2 py-1">
             Add Member
           </button>
-          {showClose ? (
-            <button
-              type="button"
-              data-testid="pane-close"
-              className="rounded bg-zinc-800 px-2 py-1 text-zinc-300 hover:text-zinc-100"
-              aria-label="Close pane"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose?.();
-              }}
-            >
-              ×
-            </button>
-          ) : null}
         </form>
       </header>
       {error ? <p className="px-3 py-2 text-sm text-red-400">{error}</p> : null}
