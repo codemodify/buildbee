@@ -26,3 +26,25 @@ export function savePanes(state: SavedPanes): void {
     /* quota / private mode */
   }
 }
+
+const TREE_KEY = "buildbee.workspace.tree";
+
+export function loadTreeCollapsed(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(TREE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { collapsed?: Record<string, boolean> };
+    if (!parsed?.collapsed || typeof parsed.collapsed !== "object") return {};
+    return parsed.collapsed;
+  } catch {
+    return {};
+  }
+}
+
+export function saveTreeCollapsed(collapsed: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(TREE_KEY, JSON.stringify({ collapsed }));
+  } catch {
+    /* quota / private mode */
+  }
+}

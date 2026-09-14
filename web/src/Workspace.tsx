@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { api } from "./api";
 import { projectHash, type Route } from "./hash";
 import { ProjectPane } from "./ProjectPane";
-import type { Project } from "./types";
+import type { Channel, Project } from "./types";
 import { formatError } from "./ui";
-import { loadSavedPanes, savePanes } from "./workspaceState";
+import { loadSavedPanes, loadTreeCollapsed, savePanes, saveTreeCollapsed } from "./workspaceState";
 
 type Layout = {
   leftId?: string;
@@ -122,6 +122,7 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
   const [projects, setProjects] = useState<Project[]>([]);
   const [layout, setLayout] = useState<Layout>(emptyLayout);
   const [loaded, setLoaded] = useState(false);
+  const [channelsVersion, setChannelsVersion] = useState(0);
   const skipHash = useRef(false);
   const projectsRef = useRef(projects);
   const routeRef = useRef(route);
@@ -200,12 +201,17 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
     });
   }
 
-  function setChannel(projectId: string, channelId: string) {
-    setLayout((cur) => ({
-      ...cur,
-      channels: { ...cur.channels, [projectId]: channelId },
-      focus: cur.rightId === projectId ? "right" : "left",
-    }));
+  function selectChannel(projectId: string, channelId: string) {
+    setLayout((cur) => {
+      const channels = { ...cur.channels, [projectId]: channelId };
+      if (cur.leftId === projectId) return { ...cur, channels, focus: "left" };
+      if (cur.rightId === projectId) return { ...cur, channels, focus: "right" };
+      if (!cur.leftId) return { ...cur, channels, leftId: projectId, focus: "left" };
+      if (cur.focus === "right" && cur.rightId) {
+        return { ...cur, channels, rightId: projectId, focus: "right" };
+      }
+      return { ...cur, channels, leftId: projectId, focus: "left" };
+    });
   }
 
   async function onCreated(project: Project) {
@@ -242,6 +248,8 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
         projects={projects}
         layout={layout}
         onOpen={openProject}
+        onSelectChannel={selectChannel}
+        onChannelCreated={() => setChannelsVersion((n) => n + 1)}
         onCreated={onCreated}
       />
       {children ? (
@@ -257,9 +265,9 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
                 focused={layout.focus === "left"}
                 compact={split}
                 showClose={showClose}
+                channelsVersion={channelsVersion}
                 onFocus={() => setLayout((c) => ({ ...c, focus: "left" }))}
                 onClose={() => closePane("left")}
-                onChannelChange={(id) => setChannel(layout.leftId!, id)}
               />
             </div>
           ) : null}
@@ -272,9 +280,9 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
                 focused={layout.focus === "right"}
                 compact={split}
                 showClose={showClose}
+                channelsVersion={channelsVersion}
                 onFocus={() => setLayout((c) => ({ ...c, focus: "right" }))}
                 onClose={() => closePane("right")}
-                onChannelChange={(id) => setChannel(layout.rightId!, id)}
               />
             </div>
           ) : null}
@@ -293,16 +301,69 @@ function ProjectsRail({
   projects,
   layout,
   onOpen,
+  onSelectChannel,
+  onChannelCreated,
   onCreated,
 }: {
   projects: Project[];
   layout: Layout;
   onOpen: (id: string, mode: "focus" | "beside") => void;
+  onSelectChannel: (projectId: string, channelId: string) => void;
+  onChannelCreated: () => void;
   onCreated: (project: Project) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [channelsByProject, setChannelsByProject] = useState<Record<string, Channel[]>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadTreeCollapsed);
+  const [draftByProject, setDraftByProject] = useState<Record<string, string>>({});
   const canCreate = name.trim().length > 0;
+  const projectKey = projects.map((p) => p.id).join(",");
+
+  useEffect(() => {
+    saveTreeCollapsed(collapsed);
+  }, [collapsed]);
+
+  useEffect(() => {
+    let stop = false;
+    void (async () => {
+      const next: Record<string, Channel[]> = {};
+      await Promise.all(
+        projects.map(async (p) => {
+          try {
+            next[p.id] = (await api.listChannels(p.id)).items;
+          } catch {
+            next[p.id] = [];
+          }
+        }),
+      );
+      if (!stop) setChannelsByProject(next);
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [projectKey]);
+
+  function isCollapsed(id: string): boolean {
+    return collapsed[id] === true;
+  }
+
+  function toggleCollapsed(id: string) {
+    setCollapsed((cur) => ({ ...cur, [id]: !cur[id] }));
+  }
+
+  function expand(id: string) {
+    setCollapsed((cur) => (cur[id] ? { ...cur, [id]: false } : cur));
+  }
+
+  async function refreshChannels(projectId: string) {
+    try {
+      const data = await api.listChannels(projectId);
+      setChannelsByProject((cur) => ({ ...cur, [projectId]: data.items }));
+    } catch {
+      /* keep last */
+    }
+  }
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -312,7 +373,26 @@ function ProjectsRail({
     try {
       const p = await api.createProject(title);
       setName("");
+      setCollapsed((cur) => ({ ...cur, [p.id]: false }));
       await onCreated(p);
+      await refreshChannels(p.id);
+    } catch (err) {
+      setError(formatError(err));
+    }
+  }
+
+  async function onCreateChannel(projectId: string, e: FormEvent) {
+    e.preventDefault();
+    const title = (draftByProject[projectId] ?? "").trim();
+    if (!title) return;
+    setError("");
+    try {
+      const ch = await api.createChannel(projectId, title);
+      setDraftByProject((cur) => ({ ...cur, [projectId]: "" }));
+      expand(projectId);
+      await refreshChannels(projectId);
+      onChannelCreated();
+      onSelectChannel(projectId, ch.id);
     } catch (err) {
       setError(formatError(err));
     }
@@ -321,21 +401,24 @@ function ProjectsRail({
   return (
     <aside
       data-testid="projects-rail"
-      className="flex w-44 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950"
+      className="flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950"
     >
       <div className="border-b border-zinc-800 px-3 py-2">
         <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Projects</p>
         <p className="mt-1 text-[11px] leading-snug text-zinc-500">
-          Click to focus. Alt-click or ⊕ opens beside.
+          Chevron expands. Click name to focus. Alt-click or ⊕ opens beside.
         </p>
       </div>
-      <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto p-1">
+      <ul className="min-h-0 flex-1 space-y-1 overflow-auto p-1">
         {projects.map((p) => {
           const inLeft = layout.leftId === p.id;
           const inRight = layout.rightId === p.id;
           const open = inLeft || inRight;
           const focused =
             (inLeft && layout.focus === "left") || (inRight && layout.focus === "right");
+          const expanded = !isCollapsed(p.id);
+          const children = channelsByProject[p.id] ?? [];
+          const activeId = layout.channels[p.id] ?? children[0]?.id;
           return (
             <li key={p.id}>
               <div
@@ -349,11 +432,21 @@ function ProjectsRail({
               >
                 <button
                   type="button"
+                  data-testid="project-rail-chevron"
+                  aria-label={expanded ? `Collapse ${p.name}` : `Expand ${p.name}`}
+                  aria-expanded={expanded}
+                  className="w-6 shrink-0 text-center text-xs text-zinc-400 hover:text-zinc-100"
+                  onClick={() => toggleCollapsed(p.id)}
+                >
+                  {expanded ? "▾" : "▸"}
+                </button>
+                <button
+                  type="button"
                   data-testid="project-rail-row"
                   data-project-id={p.id}
                   data-open={open ? "true" : "false"}
                   data-focused={focused ? "true" : "false"}
-                  className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm text-zinc-100"
+                  className="min-w-0 flex-1 truncate py-1.5 pr-1 text-left text-sm text-zinc-100"
                   onClick={(e) => onOpen(p.id, e.altKey ? "beside" : "focus")}
                 >
                   {p.name}
@@ -369,10 +462,65 @@ function ProjectsRail({
                   ⊕
                 </button>
               </div>
+              {expanded ? (
+                <ul className="mt-0.5 space-y-0.5 pl-6">
+                  {children.map((ch) => {
+                    const treeActive = focused && activeId === ch.id;
+                    const openQuiet = open && !focused && activeId === ch.id;
+                    return (
+                      <li key={ch.id}>
+                        <button
+                          type="button"
+                          data-testid="rail-channel"
+                          data-channel-id={ch.id}
+                          data-active={treeActive ? "true" : "false"}
+                          className={`block w-full truncate rounded px-2 py-1 text-left text-sm ${
+                            treeActive
+                              ? "bg-amber-400/15 text-amber-200"
+                              : openQuiet
+                                ? "bg-zinc-800/60 text-zinc-200"
+                                : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                          }`}
+                          onClick={() => {
+                            expand(p.id);
+                            onSelectChannel(p.id, ch.id);
+                          }}
+                        >
+                          #{ch.name}
+                        </button>
+                      </li>
+                    );
+                  })}
+                  <li>
+                    <form
+                      className="flex gap-1 px-1 pt-0.5"
+                      onSubmit={(e) => void onCreateChannel(p.id, e)}
+                    >
+                      <input
+                        className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-100"
+                        value={draftByProject[p.id] ?? ""}
+                        onChange={(e) =>
+                          setDraftByProject((cur) => ({ ...cur, [p.id]: e.target.value }))
+                        }
+                        placeholder="new channel"
+                        aria-label={`New Channel in ${p.name}`}
+                      />
+                      <button
+                        type="submit"
+                        className="rounded bg-zinc-800 px-1.5 text-[11px] text-zinc-300 hover:text-zinc-100"
+                        aria-label={`Create Channel in ${p.name}`}
+                      >
+                        +
+                      </button>
+                    </form>
+                  </li>
+                </ul>
+              ) : null}
             </li>
           );
         })}
       </ul>
+      {error ? <p className="px-2 text-[11px] text-red-400">{error}</p> : null}
       <form onSubmit={onCreate} className="space-y-1 border-t border-zinc-800 p-2">
         <input
           className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-100"
@@ -387,7 +535,6 @@ function ProjectsRail({
         >
           create
         </button>
-        {error ? <p className="text-[11px] text-red-400">{error}</p> : null}
       </form>
     </aside>
   );
