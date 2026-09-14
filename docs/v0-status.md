@@ -1,6 +1,6 @@
 # v0 status
 
-**v0 is feature-complete for merge** (Server + web + CLI + runtime loop). Remaining items are explicitly deferred (desktop, IDE, Nostr, GitHub App install, ACP stream).
+**v0 is feature-complete for merge** (Server + web + CLI + runtime loop + desktop MVP). Remaining items are explicitly deferred (IDE, Nostr, GitHub App install, ACP stream).
 
 ## Shipped (v0 complete)
 
@@ -17,10 +17,11 @@
 - [x] One Server hosts API + UI (`Dockerfile` / `make build` / `BUILDBEE_WEB_DIR`)
 - [x] CLI `buildbee`; compose + Railway
 - [x] CI (memory store, FakeACP, no Docker-in-Docker)
+- [x] Desktop MVP (Tauri 2 wraps `web/`; Server URL setting; hash Invite routes)
 
 ## Deferred (out of v0)
 
-- [ ] Desktop / tray app
+- [ ] Desktop tray / multi-window agent bench (beyond the v1 shell)
 - [ ] IDE extension
 - [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
 - [ ] Production GitHub App install flow beyond webhook HMAC + PAT

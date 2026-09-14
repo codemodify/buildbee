@@ -14,6 +14,13 @@ echo "== go test runtime =="
 echo "== web build =="
 (cd web && npm ci && npm run build)
 
+if command -v cargo >/dev/null 2>&1 && (pkg-config --exists webkit2gtk-4.1 || pkg-config --exists webkit2gtk-4.0); then
+  echo "== desktop cargo check =="
+  (cd desktop/src-tauri && cargo check && cargo test)
+else
+  echo "== desktop cargo check skipped (need cargo + webkit2gtk) =="
+fi
+
 echo "== e2e (memory Server) =="
 need_stop=0
 if ! curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then

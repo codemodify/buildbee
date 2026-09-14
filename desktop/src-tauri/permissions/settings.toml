@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-get-settings"
+description = "Read persisted desktop settings including the Server URL"
+commands.allow = ["get_settings"]
+
+[[permission]]
+identifier = "allow-set-server-url"
+description = "Update the Server URL stored in the desktop config directory"
+commands.allow = ["set_server_url"]

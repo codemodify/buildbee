@@ -10,6 +10,11 @@ vendor/
 web/node_modules/
 web/dist/
 
+# Desktop (Tauri)
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
 # Embedded UI (keep .gitkeep so go:embed compiles)
 server/internal/webui/dist/*
 !server/internal/webui/dist/.gitkeep

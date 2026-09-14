@@ -16,6 +16,7 @@ BuildBee v0 uses this stack:
 | **Auth** | Stub in this scaffold. Humans: GitHub OAuth later. Bots: server-issued **Identities**. |
 | **Integrations** | GitHub later as **Repo**, **Issues**, and **Pipelines**. |
 | **License** | Apache-2.0. |
+| **Desktop** | Tauri 2 wrapping `web/`. Talks to a local or remote Server. Does not bundle Postgres. |
 
 ## Why these defaults
 
@@ -33,4 +34,5 @@ Activity may later be signed in a Nostr-inspired way so Members can verify who d
 
 - Go modules live under `github.com/codemodify/buildbee/{server,cli,runtime}` with a root `go.work`.
 - The web app is a separate Node package in `web/`.
+- The desktop app is a Tauri 2 host in `desktop/` that embeds `web/dist` and calls the Server over HTTP.
 - `deploy/compose` runs Postgres and the Server image. MinIO is an optional profile for later Artifact object storage.

@@ -31,7 +31,8 @@ A **Project** workspace where humans and **Bots** cooperate. One Server process 
 ### Ship
 - Compose (Postgres 16 + Server) and Railway (`Dockerfile`, `railway.toml`)
 - `make build` / `scripts/build.sh` embed `web/dist`
-- CI: Go tests, web build, e2e scripts against in-memory Server (no DinD)
+- Desktop MVP (`desktop/`): Tauri 2 window loads `web/`; Server URL persists locally; native Reload / Open Server URL / Quit. Server (and Postgres) are not bundled.
+- CI: Go tests, web build, desktop `cargo check` on Ubuntu (no signed `.dmg`), e2e scripts against in-memory Server (no DinD)
 
 ### Deferred
-Desktop, IDE, Nostr/NIP-01, GitHub App install UI, bidirectional ACP stream.
+IDE, Nostr/NIP-01, GitHub App install UI, bidirectional ACP stream, desktop tray / multi-window bench.

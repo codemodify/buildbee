@@ -25,7 +25,7 @@ Open [http://localhost:5173](http://localhost:5173).
 - **Notifications** bell (unread count, mark read / mark all)
 - **Invites**: Project form + pending list + copy link; `#/invite/:token` (or `/invite/:token`) accept page
 
-Vite proxies `/healthz` and `/v1` (including WebSocket) to `:8080`. API paths are relative `/v1` so the same UI works when the Server serves `dist` on the same origin (`base: "/"`).
+Vite proxies `/healthz` and `/v1` (including WebSocket) to `:8080`. In the browser, API paths stay relative `/v1` so the same UI works when the Server serves `dist` on the same origin (`base: "/"`). The Tauri desktop shell (see [`desktop/`](../desktop/)) prefixes `/v1` with a configurable Server URL (default `http://127.0.0.1:8080`) so the webview can reach a local or remote Server. Hash routes (`#/invite/:token`) are unchanged.
 
 ```bash
 npm run build

@@ -12,6 +12,7 @@ License: [Apache-2.0](LICENSE).
 | --- | --- |
 | [`server/`](server/) | Go **Server**: Postgres (or memory), REST `/v1`, Channel WebSocket, optional embedded web UI |
 | [`web/`](web/) | Vite + React UI: Project, Channel, Tasks, Decisions, Runs, Artifacts, Pipelines, Notifications inbox |
+| [`desktop/`](desktop/) | Tauri 2 shell around `web/`; talks to a local or remote Server (v1 window + settings) |
 | [`cli/`](cli/) | `buildbee` CLI (project / task / handoff / run start) |
 | [`runtime/`](runtime/) | Docker **Sandbox** supervisor for **Runs** (`fake-run` fallback) |
 | [`deploy/compose/`](deploy/compose/) | Postgres 16 + Server; optional runtime profile (self-host source of truth) |
@@ -50,6 +51,7 @@ Then:
 
 ```bash
 cd web && npm install && npm run dev   # http://localhost:5173 (proxies /v1)
+cd desktop && npm install && npm run dev   # Tauri window; Server must already be running
 
 ./scripts/e2e.sh            # Project → message → Task → Handoff → Decision → Run
 ./scripts/e2e-run.sh        # Run → log Artifact → fake Repo PR → Pipelines webhook
@@ -111,14 +113,15 @@ Answered Decisions are fingerprinted (`project_id` + normalized prompt). Asking 
 
 ## Tests / CI
 
-GitHub Actions (`.github/workflows/ci.yml`) on PR/push to `dev`: Go tests, web build, e2e against an in-memory Server (FakeACP, no Docker-in-Docker).
+GitHub Actions (`.github/workflows/ci.yml`) on PR/push to `dev`: Go tests, web build, desktop `cargo check` (Ubuntu, no signed `.dmg`), e2e against an in-memory Server (FakeACP, no Docker-in-Docker).
 
 ```bash
-./scripts/ci-local.sh          # same steps as CI
+./scripts/ci-local.sh          # same steps as CI (desktop check if webkit2gtk is present)
 cd server && go test ./...
 cd runtime && go test ./...
 cd cli && go test ./...
 cd web && npm run build
+make desktop-check             # needs Rust + WebKit/GTK on Linux; see desktop/README.md
 ```
 
 ## Deploy
@@ -142,6 +145,7 @@ Implemented:
 - [x] Multi-user Member Invite (owner/admin; token accept page)
 - [x] Cross-Project GitHub Identity; Decision assignee; notification mute prefs
 - [x] **v0 feature-complete** (see [docs/v0-status.md](docs/v0-status.md))
+- [x] Desktop MVP (Tauri 2 shell + Server URL settings; Server runs separately)
 
 See [CHANGELOG.md](CHANGELOG.md) for the full stack summary.
 
@@ -158,7 +162,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full stack summary.
 
 Deferred:
 
-- [ ] Desktop / tray app
 - [ ] IDE extension
 - [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
 - [ ] Production GitHub App install flow beyond webhook HMAC + PAT
