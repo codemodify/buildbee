@@ -54,7 +54,7 @@ func TestUnknownPath(t *testing.T) {
 
 func TestRunEventsStream(t *testing.T) {
 	h := NewMux()
-	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Stream Hive"}))
+	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Stream Project"}))
 	task := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+proj["id"].(string)+"/tasks?handoff=none", map[string]string{"title": "Stream"}))
 	run := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/tasks/"+task["id"].(string)+"/runs", nil))
 	rid := run["id"].(string)
@@ -166,7 +166,7 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 func TestVerticalSlice(t *testing.T) {
 	h := NewMux()
 
-	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Hive"})
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Project"})
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", created.Code, created.Body.String())
 	}
@@ -219,7 +219,7 @@ func TestVerticalSlice(t *testing.T) {
 		t.Fatalf("get project: %d", got.Code)
 	}
 
-	msg := doJSON(t, h, http.MethodPost, "/v1/channels/"+channelID+"/messages", map[string]string{"body": "hello hive", "member_id": human})
+	msg := doJSON(t, h, http.MethodPost, "/v1/channels/"+channelID+"/messages", map[string]string{"body": "hello project", "member_id": human})
 	if msg.Code != http.StatusCreated {
 		t.Fatalf("message: %d %s", msg.Code, msg.Body.String())
 	}
@@ -433,7 +433,7 @@ func TestWebhookSignatureRequired(t *testing.T) {
 
 func TestDecisionMemoryReuse(t *testing.T) {
 	h := NewMux()
-	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Memory Hive"})
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Memory Project"})
 	proj := decode[map[string]any](t, created)
 	pid := proj["id"].(string)
 
@@ -490,7 +490,7 @@ func TestDecisionMemoryReuse(t *testing.T) {
 
 func TestNotificationsInbox(t *testing.T) {
 	h := NewMux()
-	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Notify Hive"})
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Notify Project"})
 	var proj struct {
 		ID      string `json:"id"`
 		Members []struct {
@@ -706,7 +706,7 @@ func TestBotRolesHandoffAndAutorun(t *testing.T) {
 
 func TestMemberInvites(t *testing.T) {
 	h := NewMux()
-	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Invite Hive"})
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Invite Project"})
 	var proj struct {
 		ID      string `json:"id"`
 		Name    string `json:"name"`
@@ -758,7 +758,7 @@ func TestMemberInvites(t *testing.T) {
 		t.Fatalf("preview: %d %s", preview.Code, preview.Body.String())
 	}
 	prev := decode[map[string]any](t, preview)
-	if prev["project_name"] != "Invite Hive" || prev["status"] != "pending" {
+	if prev["project_name"] != "Invite Project" || prev["status"] != "pending" {
 		t.Fatalf("preview: %#v", prev)
 	}
 

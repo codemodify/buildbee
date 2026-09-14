@@ -6,7 +6,7 @@
 export BUILDBEE_URL=http://127.0.0.1:8080   # default
 
 go run ./cmd/buildbee version
-go run ./cmd/buildbee project create --name Hive
+go run ./cmd/buildbee project create --name Project
 go run ./cmd/buildbee task list --project "$PROJECT_ID"
 go run ./cmd/buildbee handoff create --task "$TASK_ID" --from "$HUMAN_ID" --to-role builder --note "please take this" --autorun
 go run ./cmd/buildbee run start --task "$TASK_ID" --fake

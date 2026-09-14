@@ -3,7 +3,7 @@ package githubconn
 import "testing"
 
 func TestFakePR(t *testing.T) {
-	res, err := OpenDraftPR(nil, Options{Fake: true, TaskID: "aaaaaaaa-bbbb", Repo: "acme/hive"})
+	res, err := OpenDraftPR(nil, Options{Fake: true, TaskID: "aaaaaaaa-bbbb", Repo: "acme/buildbee"})
 	if err != nil {
 		t.Fatal(err)
 	}

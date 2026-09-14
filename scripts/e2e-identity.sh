@@ -6,7 +6,7 @@ json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
 echo "auth: $(curl -fsS "$BASE/v1/auth/me")"
 
-proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Identity Hive"}')
+proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Identity Project"}')
 pid=$(printf '%s' "$proj" | json "['id']")
 echo "project=$pid"
 

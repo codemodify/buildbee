@@ -7,7 +7,7 @@ json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
 echo "health: $(curl -fsS "$BASE/healthz")"
 
-proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Invite Hive"}')
+proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Invite Project"}')
 pid=$(printf '%s' "$proj" | json "['id']")
 owner=$(printf '%s' "$proj" | python3 -c "import json,sys; p=json.load(sys.stdin); print(next(m['id'] for m in p['members'] if m.get('role')=='owner'))")
 echo "project=$pid owner=$owner"
@@ -21,7 +21,7 @@ python3 -c "import sys; t,p=sys.argv[1:3]; assert t and p.startswith('#/invite/'
 echo "invite=$iid token_ok path=$path"
 
 preview=$(curl -fsS "$BASE/v1/invites/$token")
-printf '%s' "$preview" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='pending' and d['project_name']=='Invite Hive', d"
+printf '%s' "$preview" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='pending' and d['project_name']=='Invite Project', d"
 
 pending=$(curl -fsS "$BASE/v1/projects/$pid/invites")
 printf '%s' "$pending" | python3 -c "import json,sys; d=json.load(sys.stdin); assert len(d['items'])==1, d"
