@@ -465,17 +465,9 @@ function HomePage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-16 text-zinc-100">
-      <div className="mx-auto max-w-xl">
-        <p className="text-sm font-medium tracking-wide text-amber-400">
-          Project workspace
-        </p>
-        <h1 className="mt-2 text-4xl font-semibold">BuildBee</h1>
-        <p className="mt-3 text-zinc-400">
-          Create a Project, then chat in a Channel, open Tasks, and answer
-          Decisions.
-        </p>
-        <form onSubmit={onCreate} className="mt-8 flex gap-2">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-6 py-16 text-zinc-100">
+      <div className="w-full max-w-xl">
+        <form onSubmit={onCreate} className="flex gap-2">
           <input
             className="flex-1 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"
             value={name}
@@ -491,23 +483,20 @@ function HomePage() {
           </button>
         </form>
         {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
-        {projects.length === 0 && !error ? (
-          <p className="mt-10 text-sm text-zinc-500">
-            No Projects yet — create one to start a workspace.
-          </p>
+        {projects.length > 0 ? (
+          <ul className="mt-10 space-y-2">
+            {projects.map((p) => (
+              <li key={p.id}>
+                <a
+                  href={`#/projects/${p.id}`}
+                  className="block rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3 hover:border-zinc-600"
+                >
+                  {p.name}
+                </a>
+              </li>
+            ))}
+          </ul>
         ) : null}
-        <ul className="mt-10 space-y-2">
-          {projects.map((p) => (
-            <li key={p.id}>
-              <a
-                href={`#/projects/${p.id}`}
-                className="block rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3 hover:border-zinc-600"
-              >
-                {p.name}
-              </a>
-            </li>
-          ))}
-        </ul>
       </div>
     </main>
   );
