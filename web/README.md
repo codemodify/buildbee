@@ -13,7 +13,9 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
-- Create or pick a **Project**
+- Create a **Project** (empty home is name + create only). Once any Project exists, a left **Projects** rail lists them on home and inside Project views
+- Click a rail row to open/focus that Project. **Alt-click or ⊕** opens a second Project beside it (two panes max; × closes a pane)
+- Deep links: `#/projects/:id` focuses that Project; `#/projects/:id?beside=:id2` restores a split. Layout also persists in `localStorage`
 - Chat in a **Channel** (polls every 2s; Server also has `/v1/channels/{id}/ws`)
 - See seeded **Bots + Roles** (Scout, Builder, Sentry, Pulse)
 - Add **Tasks** (auto-Handoff to Scout or Builder); Task page Handoff picker lists Bots by Role
