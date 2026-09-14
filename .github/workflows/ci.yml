@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.12"
+      - name: Test server
+        working-directory: server
+        run: go test ./...
+      - name: Test cli
+        working-directory: cli
+        run: go test ./...
+      - name: Test runtime
+        working-directory: runtime
+        run: go test ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci && npm run build
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri Linux deps (webkit/gtk)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+      - name: cargo check + test (no signed bundle)
+        working-directory: desktop/src-tauri
+        run: |
+          cargo check
+          cargo test
+        # CI does not run `tauri build` or produce .dmg/.msi. See desktop/README.md.
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      BUILDBEE_URL: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.12"
+      - name: Start Server (memory store, dev auth)
+        working-directory: server
+        run: |
+          go run ./cmd/server > /tmp/buildbee-server.log 2>&1 &
+          echo $! > /tmp/buildbee-server.pid
+          for i in $(seq 1 45); do
+            if curl -fsS "$BUILDBEE_URL/healthz"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server failed to start" >&2
+          cat /tmp/buildbee-server.log >&2
+          exit 1
+      - name: e2e scripts
+        run: |
+          ./scripts/e2e.sh
+          ./scripts/e2e-roles-acp.sh
+          ./scripts/e2e-notifications.sh
+          ./scripts/e2e-invites.sh
+          ./scripts/e2e-polish.sh
+          ./scripts/e2e-acp-stream.sh
