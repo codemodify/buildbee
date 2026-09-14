@@ -14,6 +14,7 @@
 - [x] Cross-Project human Identity: same GitHub login reuses one Identity on every Invite accept
 - [x] Multi-user Member Invite (token link; owner/admin)
 - [x] Web: Channel, Kanban, Decisions (assignee + mine), Bots, Invites, Activity, inbox, prefs
+- [x] Web: Projects rail + two side-by-side Project panes (shared with desktop)
 - [x] One Server hosts API + UI (`Dockerfile` / `make build` / `BUILDBEE_WEB_DIR`)
 - [x] CLI `buildbee`; compose + Railway
 - [x] CI (memory store, FakeACP, no Docker-in-Docker)

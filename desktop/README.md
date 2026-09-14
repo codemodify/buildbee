@@ -12,7 +12,7 @@ not bundle a database or start `buildbee-server` for you.
 - Dev: `tauri dev` starts Vite (`web/` `npm run dev`) at `http://127.0.0.1:5173` (`vite.config.ts` binds `127.0.0.1` so Linux does not sit on `[::1]` only)
 - Prod: the bundle embeds `web/dist`
 - Settings (`#/settings`): **Server** URL, default `http://127.0.0.1:8080`, persisted in local storage and the desktop config directory
-- Hash routes still work (`#/invite/…`, `#/projects/…`)
+- Hash routes still work (`#/invite/…`, `#/projects/…`, `#/projects/…?beside=…` for a two-pane split)
 - Native menu: **Reload**, **Open Server URL**, **Quit**
 
 ## Prerequisites

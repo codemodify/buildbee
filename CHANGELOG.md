@@ -27,6 +27,7 @@ A **Project** workspace where humans and **Bots** cooperate. One Server process 
 - Same-origin `/v1` (Vite `base: "/"`); hash routes including `#/invite/:token`
 - Kanban Tasks, Decisions (assignee + mine), Invites, Activity, inbox bell, mute prefs
 - Empty states and inline errors/toasts on Invite, Sync Issues, Routine run, Start Run
+- Persistent Projects rail + two side-by-side Project panes (Alt-click or ⊕ opens beside). Header Project `<select>` removed. `#/projects/:id?beside=` + localStorage restore
 
 ### Ship
 - Compose (Postgres 16 + Server) and Railway (`Dockerfile`, `railway.toml`)
