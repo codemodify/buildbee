@@ -154,11 +154,36 @@ func DecisionFingerprint(prompt string) string {
 
 // Identity is who a Member is (GitHub OAuth for humans; server-issued for Bots).
 type Identity struct {
-	ID          string `json:"id"`
-	Kind        string `json:"kind"`
-	DisplayName string `json:"display_name"`
-	GitHubLogin string `json:"github_login,omitempty"`
-	GitHubID    string `json:"github_id,omitempty"`
+	ID          string    `json:"id"`
+	Kind        string    `json:"kind"`
+	DisplayName string    `json:"display_name"`
+	GitHubLogin string    `json:"github_login,omitempty"`
+	GitHubID    string    `json:"github_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at,omitempty"`
+}
+
+// HumanIdentityKey is the stable login key for a GitHub-linked human.
+func HumanIdentityKey(login string) string {
+	return "github:" + strings.ToLower(strings.TrimSpace(login))
+}
+
+// PreferencesKey scopes mute prefs: shared Identity, else one Member.
+func PreferencesKey(m Member) string {
+	if m.GitHubLogin != "" {
+		return HumanIdentityKey(m.GitHubLogin)
+	}
+	if id := strings.TrimSpace(m.Identity); id != "" && id != "human:stub" && id != "dev" {
+		return id
+	}
+	return "member:" + m.ID
+}
+
+// Preferences are per-Identity (or per-Member when no GitHub login).
+type Preferences struct {
+	Identity     string    `json:"identity"`
+	MuteMentions bool      `json:"mute_mentions"`
+	MuteRoutines bool      `json:"mute_routines"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
 type Channel struct {
@@ -201,16 +226,17 @@ type Handoff struct {
 }
 
 type Decision struct {
-	ID             string     `json:"id"`
-	ProjectID      string     `json:"project_id"`
-	Prompt         string     `json:"prompt"`
-	Options        []string   `json:"options"`
-	Recommendation string     `json:"recommendation"`
-	Answer         string     `json:"answer,omitempty"`
-	Reused         bool       `json:"reused,omitempty"`
-	Fingerprint    string     `json:"fingerprint,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	AnsweredAt     *time.Time `json:"answered_at,omitempty"`
+	ID               string     `json:"id"`
+	ProjectID        string     `json:"project_id"`
+	Prompt           string     `json:"prompt"`
+	Options          []string   `json:"options"`
+	Recommendation   string     `json:"recommendation"`
+	Answer           string     `json:"answer,omitempty"`
+	Reused           bool       `json:"reused,omitempty"`
+	Fingerprint      string     `json:"fingerprint,omitempty"`
+	AssigneeMemberID string     `json:"assignee_id,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	AnsweredAt       *time.Time `json:"answered_at,omitempty"`
 }
 
 // DecisionMemory is a remembered answer so the same question is not asked twice.

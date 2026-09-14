@@ -48,6 +48,7 @@ export type Decision = {
   recommendation: string;
   answer?: string;
   reused?: boolean;
+  assignee_id?: string;
 };
 
 export type Run = {
@@ -77,6 +78,12 @@ export type TaskDetail = Task & {
   runs: Run[];
   artifacts: Artifact[];
   pipelines: Pipeline[];
+};
+
+export type Preferences = {
+  identity: string;
+  mute_mentions: boolean;
+  mute_routines: boolean;
 };
 
 export type AuthMe = {

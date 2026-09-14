@@ -1,28 +1,22 @@
 # v0 status
 
-Honest checklist after Member Invite. v0 core (including multi-user join) is in place. Remaining work is polish and the deferred desktop/IDE/Nostr tracks.
+**v0 is feature-complete for merge** (Server + web + CLI + runtime loop). Remaining items are explicitly deferred (desktop, IDE, Nostr, GitHub App install, ACP stream).
 
-## Shipped (v0 core)
+## Shipped (v0 complete)
 
 - [x] Project workspace REST + Channel chat / WebSocket
-- [x] Task, Handoff, Decision (+ memory / don’t-ask-twice), Activity
+- [x] Task, Handoff, Decision (+ memory / don’t-ask-twice + optional assignee), Activity
 - [x] Bot Roles: Scout / Builder / Sentry / Pulse
 - [x] Run + Artifact + Pipelines webhook; FakeACP / Docker Sandbox
 - [x] GitHub OAuth / dev Identity, Issues→Task, Routines
 - [x] Channel `@bot` mentions; webhook HMAC when secret set
-- [x] Notifications: generate on Decision open, Handoff to a Member, @mention Task, Pipeline failure; `GET /v1/notifications`, mark read / read-all
-- [x] Web: Channel, Kanban, Decisions, Bots, auto_run, Project switcher, Activity, inbox bell
+- [x] Notifications inbox; mute mentions / Routine digests (`GET/PATCH /v1/me/preferences`)
+- [x] Cross-Project human Identity: same GitHub login reuses one Identity on every Invite accept
+- [x] Multi-user Member Invite (token link; owner/admin)
+- [x] Web: Channel, Kanban, Decisions (assignee + mine), Bots, Invites, Activity, inbox, prefs
 - [x] One Server hosts API + UI (`Dockerfile` / `make build` / `BUILDBEE_WEB_DIR`)
 - [x] CLI `buildbee`; compose + Railway
 - [x] CI (memory store, FakeACP, no Docker-in-Docker)
-- [x] Multi-user Member Invite (token link; owner/admin invite; accept binds session / GitHub Identity)
-
-## Still open (not new subsystems)
-
-- [ ] Bind GitHub Identity to an existing Member across Projects automatically (Invite accept does this per Project)
-- [ ] Notification preferences / per-Role mute
-- [ ] Empty-state and error UX beyond current pages (keep polishing in place)
-- [ ] Persist Decision assignee (inbox is “all humans” for new Decisions)
 
 ## Deferred (out of v0)
 

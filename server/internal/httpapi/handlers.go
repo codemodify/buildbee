@@ -429,6 +429,7 @@ func (s *Server) completeHandoff(w http.ResponseWriter, r *http.Request) {
 				"Scout: is Task \""+task.Title+"\" ready for Builder?",
 				"handoff to Builder",
 				[]string{"handoff to Builder", "needs more info"},
+				"",
 			)
 			s.notifyNewDecision(r.Context(), decision)
 		}
@@ -455,6 +456,18 @@ func (s *Server) listDecisions(w http.ResponseWriter, r *http.Request) {
 		}
 		items = open
 	}
+	if r.URL.Query().Get("mine") == "1" {
+		memberID := s.resolveNotifyMember(r)
+		if memberID != "" {
+			mine := items[:0]
+			for _, d := range items {
+				if d.AssigneeMemberID == "" || d.AssigneeMemberID == memberID {
+					mine = append(mine, d)
+				}
+			}
+			items = mine
+		}
+	}
 	writeItems(w, items)
 }
 
@@ -469,15 +482,21 @@ func (s *Server) listDecisionMemories(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createDecision(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Prompt         string   `json:"prompt"`
-		Options        []string `json:"options"`
-		Recommendation string   `json:"recommendation"`
+		Prompt           string   `json:"prompt"`
+		Options          []string `json:"options"`
+		Recommendation   string   `json:"recommendation"`
+		AssigneeID       string   `json:"assignee_id"`
+		AssigneeMemberID string   `json:"assignee_member_id"`
 	}
 	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Prompt) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "prompt is required"})
 		return
 	}
-	d, err := s.openDecision(r.Context(), r.PathValue("projectID"), strings.TrimSpace(in.Prompt), in.Recommendation, in.Options)
+	assignee := strings.TrimSpace(in.AssigneeID)
+	if assignee == "" {
+		assignee = strings.TrimSpace(in.AssigneeMemberID)
+	}
+	d, err := s.openDecision(r.Context(), r.PathValue("projectID"), strings.TrimSpace(in.Prompt), in.Recommendation, in.Options, assignee)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -486,12 +505,12 @@ func (s *Server) createDecision(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, d)
 }
 
-func (s *Server) openDecision(ctx context.Context, projectID, prompt, recommendation string, options []string) (*models.Decision, error) {
+func (s *Server) openDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, assigneeMemberID string) (*models.Decision, error) {
 	fp := models.DecisionFingerprint(prompt)
 	if mem, err := s.store.GetDecisionMemory(ctx, projectID, fp); err == nil && mem != nil && mem.Answer != "" {
-		return s.store.CreateReusedDecision(ctx, projectID, prompt, recommendation, options, mem.Answer)
+		return s.store.CreateReusedDecision(ctx, projectID, prompt, recommendation, options, mem.Answer, assigneeMemberID)
 	}
-	return s.store.CreateDecision(ctx, projectID, prompt, recommendation, options)
+	return s.store.CreateDecision(ctx, projectID, prompt, recommendation, options, assigneeMemberID)
 }
 
 func (s *Server) answerDecision(w http.ResponseWriter, r *http.Request) {

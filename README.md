@@ -57,6 +57,7 @@ cd web && npm install && npm run dev   # http://localhost:5173 (proxies /v1)
 ./scripts/e2e-roles-acp.sh  # Scout/Builder/Sentry/Pulse + FakeACP Run (acp.log)
 ./scripts/e2e-notifications.sh  # Decision / Handoff / mention / Pipeline → inbox read
 ./scripts/e2e-invites.sh        # Invite create → accept → revoke + permissions
+./scripts/e2e-polish.sh         # shared Identity, Decision assignee, mute prefs
 
 cd cli
 go run ./cmd/buildbee run start --task "$TASK_ID" --fake
@@ -81,8 +82,11 @@ Open a Task in the web UI to see **Runs**, **Artifacts** (including PR URLs), an
 
 - **Dev auth** (default): `GITHUB_CLIENT_ID` unset. Mutating `/v1` is open. Session Identity is Member **You**. The web shows a banner.
 - **GitHub OAuth**: set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT` (default `http://127.0.0.1:8080/v1/auth/callback`), optional `SESSION_SECRET` and `BUILDBEE_FRONTEND_URL`. Then `GET /v1/auth/github` and the web “Sign in with GitHub” button. Mutating `/v1` requires the session cookie. `/healthz`, reads, `/v1/auth/*`, and webhooks stay open.
+- **Cross-Project Identity**: the first time a GitHub login accepts an Invite (or is added as a human Member with `github_login`), the Server upserts one human **Identity**. Later Invites with the same login (any case) reuse that Identity ID and display name so the person is not fragmented across Projects. Members remain per-Project (Role can differ). Prefs (`GET/PATCH /v1/me/preferences`) are keyed by that Identity when a login exists, otherwise by Member ID.
 
 Bots still get server-issued Identities. New Projects seed **Scout**, **Builder**, **Sentry**, and **Pulse** (Role + instructions on each Bot Member). Task create auto-Handoffs to Scout unless `?handoff=none`. Handoff to Builder with `?autorun=1` (or Project `auto_run`) enqueues a Run. Completing a Scout Handoff on an ambiguous Task opens a Decision stub.
+
+Decisions accept optional `assignee_id`. Notifications go only to that Member; if unset, all humans are notified (backward compatible). `GET /v1/projects/{id}/decisions?inbox=1&mine=1&member_id=` is the personal unanswered inbox. Mute Channel mention noise or Routine digests with `mute_mentions` / `mute_routines`.
 
 ## Issues
 
@@ -136,8 +140,10 @@ Implemented:
 - [x] CLI `buildbee`; compose + Railway Dockerfile (API + embedded UI)
 - [x] GitHub Actions CI (memory store, no DinD)
 - [x] Multi-user Member Invite (owner/admin; token accept page)
+- [x] Cross-Project GitHub Identity; Decision assignee; notification mute prefs
+- [x] **v0 feature-complete** (see [docs/v0-status.md](docs/v0-status.md))
 
-See [docs/v0-status.md](docs/v0-status.md) for the remaining v0 checklist.
+See [CHANGELOG.md](CHANGELOG.md) for the full stack summary.
 
 ### Permissions (Invites)
 

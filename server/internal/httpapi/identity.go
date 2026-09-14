@@ -168,6 +168,8 @@ func (s *Server) fireRoutine(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.notifyHumans(r.Context(), out.ProjectID, "routine",
+		"Routine: "+out.Name, out.Name, "#/projects/"+out.ProjectID)
 	writeJSON(w, http.StatusOK, out)
 }
 

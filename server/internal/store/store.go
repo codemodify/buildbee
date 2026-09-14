@@ -42,8 +42,8 @@ type Store interface {
 	CompleteHandoff(ctx context.Context, id string) (*models.Handoff, error)
 
 	ListDecisions(ctx context.Context, projectID string) ([]models.Decision, error)
-	CreateDecision(ctx context.Context, projectID, prompt, recommendation string, options []string) (*models.Decision, error)
-	CreateReusedDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, answer string) (*models.Decision, error)
+	CreateDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, assigneeMemberID string) (*models.Decision, error)
+	CreateReusedDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, answer, assigneeMemberID string) (*models.Decision, error)
 	AnswerDecision(ctx context.Context, id, answer string) (*models.Decision, error)
 	GetDecisionMemory(ctx context.Context, projectID, fingerprint string) (*models.DecisionMemory, error)
 	ListDecisionMemories(ctx context.Context, projectID string) ([]models.DecisionMemory, error)
@@ -85,4 +85,10 @@ type Store interface {
 	ListInvites(ctx context.Context, projectID string, pendingOnly bool) ([]models.Invite, error)
 	AcceptInvite(ctx context.Context, id, memberID string) (*models.Invite, error)
 	RevokeInvite(ctx context.Context, id string) (*models.Invite, error)
+
+	UpsertHumanIdentity(ctx context.Context, login, githubID, displayName string) (*models.Identity, error)
+	GetHumanIdentityByLogin(ctx context.Context, login string) (*models.Identity, error)
+
+	GetPreferences(ctx context.Context, identity string) (*models.Preferences, error)
+	SetPreferences(ctx context.Context, in models.Preferences) (*models.Preferences, error)
 }

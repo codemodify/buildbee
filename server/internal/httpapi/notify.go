@@ -12,6 +12,17 @@ func (s *Server) notify(ctx context.Context, projectID, memberID, kind, title, b
 	if memberID == "" || projectID == "" {
 		return
 	}
+	if mem, err := s.store.GetMember(ctx, memberID); err == nil && mem != nil {
+		prefs, _ := s.store.GetPreferences(ctx, models.PreferencesKey(*mem))
+		if prefs != nil {
+			if kind == "mention" && prefs.MuteMentions {
+				return
+			}
+			if kind == "routine" && prefs.MuteRoutines {
+				return
+			}
+		}
+	}
 	_, _ = s.store.CreateNotification(ctx, models.Notification{
 		ProjectID: projectID, MemberID: memberID, Kind: kind,
 		Title: title, Body: body, Href: href,
@@ -42,9 +53,13 @@ func (s *Server) notifyNewDecision(ctx context.Context, d *models.Decision) {
 	if d == nil || d.Reused {
 		return
 	}
-	s.notifyHumans(ctx, d.ProjectID, "decision",
-		"Decision needed: "+d.Prompt, d.Prompt,
-		"#/projects/"+d.ProjectID)
+	title := "Decision needed: " + d.Prompt
+	href := "#/projects/" + d.ProjectID
+	if d.AssigneeMemberID != "" {
+		s.notify(ctx, d.ProjectID, d.AssigneeMemberID, "decision", title, d.Prompt, href)
+		return
+	}
+	s.notifyHumans(ctx, d.ProjectID, "decision", title, d.Prompt, href)
 }
 
 func (s *Server) maybeNotifyPipeline(ctx context.Context, p *models.Pipeline) {
