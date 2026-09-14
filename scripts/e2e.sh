@@ -7,7 +7,7 @@ json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
 echo "health: $(curl -fsS "$BASE/healthz")"
 
-proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"E2E Hive"}')
+proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"E2E Project"}')
 pid=$(printf '%s' "$proj" | json "['id']")
 human=$(printf '%s' "$proj" | python3 -c "import json,sys; p=json.load(sys.stdin); print(next(m['id'] for m in p['members'] if m['kind']=='human'))")
 bot=$(printf '%s' "$proj" | python3 -c "import json,sys; p=json.load(sys.stdin); print(next(m['id'] for m in p['members'] if m.get('role')=='scout'))")

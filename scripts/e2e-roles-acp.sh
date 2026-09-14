@@ -17,7 +17,7 @@ for m in p['members']:
 
 echo "health: $(curl -fsS "$BASE/healthz")"
 
-proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Roles ACP Hive"}')
+proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Roles ACP Project"}')
 pid=$(printf '%s' "$proj" | json "['id']")
 human=$(printf '%s' "$proj" | member_id owner)
 scout=$(printf '%s' "$proj" | member_id scout)

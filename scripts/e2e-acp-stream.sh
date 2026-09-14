@@ -9,7 +9,7 @@ json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
 echo "health: $(curl -fsS "$BASE/healthz")"
 
-proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"ACP Stream Hive"}')
+proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"ACP Stream Project"}')
 pid=$(printf '%s' "$proj" | json "['id']")
 task=$(curl -fsS -X POST "$BASE/v1/projects/$pid/tasks?handoff=none" -H 'Content-Type: application/json' \
   -d '{"title":"Stream the FakeACP Run"}')

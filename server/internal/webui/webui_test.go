@@ -20,7 +20,7 @@ func TestHandlerMissingUI(t *testing.T) {
 
 func TestHandlerSPAFromDir(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>hive</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>buildbee</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "assets"), 0o755); err != nil {
@@ -34,7 +34,7 @@ func TestHandlerSPAFromDir(t *testing.T) {
 
 	index := httptest.NewRecorder()
 	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
-	if index.Code != http.StatusOK || index.Body.String() != "<html>hive</html>" {
+	if index.Code != http.StatusOK || index.Body.String() != "<html>buildbee</html>" {
 		t.Fatalf("index: %d %s", index.Code, index.Body.String())
 	}
 
@@ -46,7 +46,7 @@ func TestHandlerSPAFromDir(t *testing.T) {
 
 	spa := httptest.NewRecorder()
 	h.ServeHTTP(spa, httptest.NewRequest(http.MethodGet, "/projects/abc", nil))
-	if spa.Code != http.StatusOK || spa.Body.String() != "<html>hive</html>" {
+	if spa.Code != http.StatusOK || spa.Body.String() != "<html>buildbee</html>" {
 		t.Fatalf("spa fallback: %d %s", spa.Code, spa.Body.String())
 	}
 }

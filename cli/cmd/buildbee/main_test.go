@@ -36,7 +36,7 @@ func TestRunUnknown(t *testing.T) {
 func TestProjectCreateAndTaskList(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/projects", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "p1", "name": "Hive"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "p1", "name": "Project"})
 	})
 	mux.HandleFunc("GET /v1/projects/p1/tasks", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
@@ -73,7 +73,7 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 
 	var buf bytes.Buffer
 	c := &client.Client{Base: srv.URL, HTTP: srv.Client(), Output: &buf}
-	if err := run([]string{"project", "create", "--name", "Hive"}, c); err != nil {
+	if err := run([]string{"project", "create", "--name", "Project"}, c); err != nil {
 		t.Fatal(err)
 	}
 	buf.Reset()

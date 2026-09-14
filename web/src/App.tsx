@@ -433,7 +433,7 @@ function SettingsPage() {
 }
 
 function HomePage() {
-  const [name, setName] = useState("Hive");
+  const [name, setName] = useState("My Project");
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState("");
 

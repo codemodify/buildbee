@@ -5,7 +5,7 @@ BASE="${BUILDBEE_URL:-http://127.0.0.1:8080}"
 
 json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
-proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Run Hive"}')
+proj=$(curl -fsS -X POST "$BASE/v1/projects" -H 'Content-Type: application/json' -d '{"name":"Run Project"}')
 pid=$(printf '%s' "$proj" | json "['id']")
 task=$(curl -fsS -X POST "$BASE/v1/projects/$pid/tasks" -H 'Content-Type: application/json' -d '{"title":"Sandbox slice"}')
 tid=$(printf '%s' "$task" | json "['id']")
