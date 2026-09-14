@@ -12,14 +12,14 @@ export function formatError(e: unknown): string {
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="text-sm text-zinc-500">{children}</p>;
+  return <p className="text-sm text-bb-subtle">{children}</p>;
 }
 
 export function renderMentions(text: string): ReactNode {
   const parts = text.split(/(@[A-Za-z0-9_-]+)/g);
   return parts.map((part, i) =>
     part.startsWith("@") ? (
-      <span key={i} className="font-medium text-amber-200">
+      <span key={i} className="font-medium text-bb-accent">
         {part}
       </span>
     ) : (

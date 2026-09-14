@@ -191,12 +191,12 @@ export function ProjectPane({
       data-testid="project-pane"
       data-project-id={projectId}
       data-focused={focused ? "true" : "false"}
-      className={`h-full overflow-auto bg-zinc-950 text-zinc-100 ${
+      className={`h-full overflow-auto bg-bb-bg text-bb-fg ${
         focused ? "ring-1 ring-inset ring-amber-400/80" : "ring-1 ring-inset ring-transparent"
       }`}
       onClick={onFocus}
     >
-      <header className="border-b border-zinc-800 px-3 py-2">
+      <header className="border-b border-bb-border px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
             {project?.name ?? "Project"}
@@ -205,7 +205,7 @@ export function ProjectPane({
             <button
               type="button"
               data-testid="pane-close"
-              className="shrink-0 rounded bg-zinc-800 px-2 py-1 text-zinc-300 hover:text-zinc-100"
+              className="shrink-0 rounded bg-bb-inset px-2 py-1 text-bb-fg hover:text-bb-fg"
               aria-label="Close pane"
               onClick={(e) => {
                 e.stopPropagation();
@@ -217,7 +217,7 @@ export function ProjectPane({
           ) : null}
         </div>
         <form onSubmit={addMember} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <label className="flex items-center gap-1 text-zinc-400">
+          <label className="flex items-center gap-1 text-bb-muted">
             <input
               type="checkbox"
               checked={!!project?.auto_run}
@@ -228,31 +228,31 @@ export function ProjectPane({
             />
             auto_run
           </label>
-          <span className="text-zinc-500">{members.length} Members</span>
+          <span className="text-bb-subtle">{members.length} Members</span>
           <input
-            className="w-28 rounded border border-zinc-800 bg-zinc-950 px-2 py-1"
+            className="w-28 rounded border border-bb-border bg-bb-surface px-2 py-1"
             value={memberName}
             onChange={(e) => setMemberName(e.target.value)}
             placeholder="name"
           />
           <select
-            className="bg-zinc-950"
+            className="bg-bb-surface"
             value={memberKind}
             onChange={(e) => setMemberKind(e.target.value)}
           >
             <option value="human">human</option>
             <option value="bot">bot</option>
           </select>
-          <button type="submit" className="rounded bg-zinc-800 px-2 py-1">
+          <button type="submit" className="rounded bg-bb-inset px-2 py-1">
             Add Member
           </button>
         </form>
       </header>
-      {error ? <p className="px-3 py-2 text-sm text-red-400">{error}</p> : null}
-      {toast ? <p className="px-3 py-2 text-sm text-emerald-400">{toast}</p> : null}
+      {error ? <p className="px-3 py-2 text-sm text-bb-danger">{error}</p> : null}
+      {toast ? <p className="px-3 py-2 text-sm text-bb-success">{toast}</p> : null}
       <div className={gridClass}>
-        <section className="flex min-h-[16rem] flex-col rounded-lg border border-zinc-800 bg-zinc-900/40">
-          <div className="border-b border-zinc-800 px-3 py-2 text-sm text-zinc-400">
+        <section className="flex min-h-[16rem] flex-col rounded-lg border border-bb-border bg-bb-surface">
+          <div className="border-b border-bb-border px-3 py-2 text-sm text-bb-muted">
             #{activeChannel?.name ?? "…"}
           </div>
           <ul className="flex-1 space-y-2 overflow-auto p-3">
@@ -266,15 +266,15 @@ export function ProjectPane({
                 members.find((mem) => mem.id === m.member_id)?.display_name ?? m.member_id;
               return (
                 <li key={m.id} className="text-sm">
-                  <span className="font-medium text-amber-300">{who}</span>{" "}
-                  <span className="text-zinc-200">{renderMentions(m.body)}</span>
+                  <span className="font-medium text-bb-accent">{who}</span>{" "}
+                  <span className="text-bb-fg">{renderMentions(m.body)}</span>
                 </li>
               );
             })}
           </ul>
-          <form onSubmit={send} className="flex gap-2 border-t border-zinc-800 p-3">
+          <form onSubmit={send} className="flex gap-2 border-t border-bb-border p-3">
             <input
-              className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2"
+              className="flex-1 rounded-md border border-bb-border bg-bb-surface px-3 py-2"
               value={body}
               onChange={(e) => setBody(e.target.value)}
               placeholder="Message the Channel"
@@ -290,12 +290,12 @@ export function ProjectPane({
         </section>
 
         <div className="space-y-4">
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="flex items-center justify-between text-sm font-medium text-zinc-400">
+          <section className="rounded-lg border border-bb-border bg-bb-surface p-3">
+            <h2 className="flex items-center justify-between text-sm font-medium text-bb-muted">
               Tasks
               <button
                 type="button"
-                className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200"
+                className="rounded bg-bb-inset px-2 py-0.5 text-xs text-bb-fg"
                 onClick={() => {
                   void api
                     .syncIssues(projectId)
@@ -312,13 +312,13 @@ export function ProjectPane({
             </h2>
             <form onSubmit={addTask} className="mt-2 flex flex-wrap gap-1">
               <input
-                className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+                className="min-w-0 flex-1 rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
                 value={taskTitle}
                 onChange={(e) => setTaskTitle(e.target.value)}
                 placeholder="New Task"
               />
               <select
-                className="rounded border border-zinc-800 bg-zinc-950 px-1 text-xs"
+                className="rounded border border-bb-border bg-bb-surface px-1 text-xs"
                 value={handoffRole}
                 onChange={(e) => setHandoffRole(e.target.value)}
                 aria-label="Handoff Role"
@@ -333,19 +333,19 @@ export function ProjectPane({
             </form>
             <div className="mt-2 grid grid-cols-3 gap-1">
               {(["open", "in_progress", "done"] as const).map((col) => (
-                <div key={col} className="rounded border border-zinc-800 bg-zinc-950/50 p-1">
-                  <p className="px-1 text-[10px] uppercase tracking-wide text-zinc-500">{col}</p>
+                <div key={col} className="rounded border border-bb-border bg-bb-inset p-1">
+                  <p className="px-1 text-[10px] uppercase tracking-wide text-bb-subtle">{col}</p>
                   <ul className="mt-1 space-y-1">
                     {tasks.filter((t) => t.status === col).length === 0 ? (
-                      <li className="px-1 text-[10px] text-zinc-600">None</li>
+                      <li className="px-1 text-[10px] text-bb-subtle">None</li>
                     ) : null}
                     {tasks
                       .filter((t) => t.status === col)
                       .map((t) => (
-                        <li key={t.id} className="rounded bg-zinc-900 px-1.5 py-1 text-xs">
+                        <li key={t.id} className="rounded bg-bb-surface px-1.5 py-1 text-xs">
                           <a
                             href={`#/projects/${projectId}/tasks/${t.id}`}
-                            className="block hover:text-amber-300"
+                            className="block hover:text-bb-accent"
                           >
                             {t.title}
                           </a>
@@ -355,7 +355,7 @@ export function ProjectPane({
                             </a>
                           ) : null}
                           <select
-                            className="mt-1 w-full bg-zinc-950 text-[10px]"
+                            className="mt-1 w-full bg-bb-surface text-[10px]"
                             value={t.status}
                             onChange={(e) => {
                               const status = e.target.value;
@@ -376,8 +376,8 @@ export function ProjectPane({
             </div>
           </section>
 
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="flex items-center justify-between text-sm font-medium text-zinc-400">
+          <section className="rounded-lg border border-bb-border bg-bb-surface p-3">
+            <h2 className="flex items-center justify-between text-sm font-medium text-bb-muted">
               Decisions
               <label className="flex items-center gap-1 text-xs font-normal">
                 <input
@@ -390,19 +390,19 @@ export function ProjectPane({
             </h2>
             <form onSubmit={addDecision} className="mt-2 space-y-1">
               <input
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+                className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Decision prompt"
               />
               <input
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+                className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
                 value={options}
                 onChange={(e) => setOptions(e.target.value)}
                 placeholder="options, comma separated"
               />
               <select
-                className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs"
+                className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-xs"
                 value={assigneeId}
                 onChange={(e) => setAssigneeId(e.target.value)}
                 aria-label="Decision assignee"
@@ -416,7 +416,7 @@ export function ProjectPane({
                     </option>
                   ))}
               </select>
-              <button className="rounded bg-zinc-800 px-2 py-1 text-sm" type="submit">
+              <button className="rounded bg-bb-inset px-2 py-1 text-sm" type="submit">
                 Ask
               </button>
             </form>
@@ -431,16 +431,16 @@ export function ProjectPane({
                   <p className="font-medium">
                     {d.prompt}
                     {d.assignee_id ? (
-                      <span className="ml-1 text-xs text-zinc-500">
+                      <span className="ml-1 text-xs text-bb-subtle">
                         → {members.find((m) => m.id === d.assignee_id)?.display_name ?? "assigned"}
                       </span>
                     ) : null}
                   </p>
                   {d.answer ? (
-                    <p className="text-emerald-400">
+                    <p className="text-bb-success">
                       Answer: {d.answer}
                       {d.reused ? (
-                        <span className="ml-1 text-xs text-zinc-500">(reused memory)</span>
+                        <span className="ml-1 text-xs text-bb-subtle">(reused memory)</span>
                       ) : null}
                     </p>
                   ) : (
@@ -449,7 +449,7 @@ export function ProjectPane({
                         <button
                           key={opt}
                           type="button"
-                          className="rounded bg-zinc-800 px-2 py-0.5"
+                          className="rounded bg-bb-inset px-2 py-0.5"
                           onClick={() => {
                             void api.answerDecision(d.id, opt).then(async () => {
                               setDecisions((await api.listDecisions(projectId)).items);
@@ -466,8 +466,8 @@ export function ProjectPane({
             </ul>
           </section>
 
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="text-sm font-medium text-zinc-400">Invites</h2>
+          <section className="rounded-lg border border-bb-border bg-bb-surface p-3">
+            <h2 className="text-sm font-medium text-bb-muted">Invites</h2>
             {canInvite ? (
               <form
                 className="mt-2 space-y-1"
@@ -494,20 +494,20 @@ export function ProjectPane({
                 }}
               >
                 <input
-                  className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+                  className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder="email"
                 />
                 <input
-                  className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+                  className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
                   value={inviteGithub}
                   onChange={(e) => setInviteGithub(e.target.value)}
                   placeholder="GitHub login"
                 />
                 <div className="flex gap-1">
                   <select
-                    className="rounded border border-zinc-800 bg-zinc-950 px-1 text-xs"
+                    className="rounded border border-bb-border bg-bb-surface px-1 text-xs"
                     value={inviteRole}
                     onChange={(e) => setInviteRole(e.target.value)}
                     aria-label="Invite Role"
@@ -531,14 +531,14 @@ export function ProjectPane({
               ) : null}
               {invites.map((inv) => (
                 <li key={inv.id} className="text-xs">
-                  <p className="font-medium text-zinc-200">
+                  <p className="font-medium text-bb-fg">
                     {inv.email || inv.github_login}{" "}
-                    <span className="uppercase text-zinc-500">{inv.role}</span>
+                    <span className="uppercase text-bb-subtle">{inv.role}</span>
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1">
                     <button
                       type="button"
-                      className="rounded bg-zinc-800 px-2 py-0.5"
+                      className="rounded bg-bb-inset px-2 py-0.5"
                       onClick={() => {
                         const link = `${window.location.origin}/${inv.path ?? `#/invite/${inv.token}`}`;
                         void navigator.clipboard.writeText(link).then(
@@ -552,7 +552,7 @@ export function ProjectPane({
                     {canInvite ? (
                       <button
                         type="button"
-                        className="rounded bg-zinc-800 px-2 py-0.5"
+                        className="rounded bg-bb-inset px-2 py-0.5"
                         onClick={() => {
                           void api.revokeInvite(inv.id).then(async () => {
                             setInvites((await api.listInvites(projectId)).items);
@@ -568,29 +568,29 @@ export function ProjectPane({
             </ul>
           </section>
 
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="text-sm font-medium text-zinc-400">Bots + Roles</h2>
+          <section className="rounded-lg border border-bb-border bg-bb-surface p-3">
+            <h2 className="text-sm font-medium text-bb-muted">Bots + Roles</h2>
             <ul className="mt-2 space-y-2">
               {bots.map((b) => (
                 <li key={b.id} className="text-sm">
-                  <span className="font-medium text-amber-300">{b.display_name}</span>{" "}
-                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs uppercase text-zinc-300">
+                  <span className="font-medium text-bb-accent">{b.display_name}</span>{" "}
+                  <span className="rounded bg-bb-inset px-1.5 py-0.5 text-xs uppercase text-bb-fg">
                     {b.role}
                   </span>
                   {b.instructions ? (
-                    <p className="mt-0.5 text-xs text-zinc-500">{b.instructions}</p>
+                    <p className="mt-0.5 text-xs text-bb-subtle">{b.instructions}</p>
                   ) : null}
                 </li>
               ))}
             </ul>
           </section>
 
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="text-sm font-medium text-zinc-400">Activity</h2>
-            <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-xs text-zinc-400">
+          <section className="rounded-lg border border-bb-border bg-bb-surface p-3">
+            <h2 className="text-sm font-medium text-bb-muted">Activity</h2>
+            <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-xs text-bb-muted">
               {activity.map((a) => (
                 <li key={a.id}>
-                  <span className="text-amber-300">{a.type}</span>{" "}
+                  <span className="text-bb-accent">{a.type}</span>{" "}
                   {a.payload?.action ? String(a.payload.action) : ""}{" "}
                   {a.payload?.title ? String(a.payload.title) : ""}
                   {a.payload?.name ? String(a.payload.name) : ""}
@@ -604,8 +604,8 @@ export function ProjectPane({
             </ul>
           </section>
 
-          <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="text-sm font-medium text-zinc-400">Routines</h2>
+          <section className="rounded-lg border border-bb-border bg-bb-surface p-3">
+            <h2 className="text-sm font-medium text-bb-muted">Routines</h2>
             <ul className="mt-2 space-y-2">
               {routines.length === 0 ? (
                 <li>
@@ -615,11 +615,11 @@ export function ProjectPane({
               {routines.map((rt) => (
                 <li key={rt.id} className="flex items-center justify-between text-sm">
                   <span>
-                    {rt.name} <span className="text-zinc-500">{rt.schedule}</span>
+                    {rt.name} <span className="text-bb-subtle">{rt.schedule}</span>
                   </span>
                   <button
                     type="button"
-                    className="rounded bg-zinc-800 px-2 py-0.5 text-xs"
+                    className="rounded bg-bb-inset px-2 py-0.5 text-xs"
                     onClick={() => {
                       void api
                         .fireRoutine(rt.id)

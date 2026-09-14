@@ -226,7 +226,7 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
 
   if (!loaded) {
     return (
-      <div className="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-zinc-500">
+      <div className="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-bb-subtle">
         Loading Projects…
       </div>
     );
@@ -272,7 +272,7 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
             </div>
           ) : null}
           {layout.rightId ? (
-            <div className="min-h-0 min-w-0 flex-1 border-l border-zinc-800">
+            <div className="min-h-0 min-w-0 flex-1 border-l border-bb-border">
               <ProjectPane
                 key={`right-${layout.rightId}`}
                 projectId={layout.rightId}
@@ -287,7 +287,7 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
             </div>
           ) : null}
           {!layout.leftId && !layout.rightId ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
+            <div className="flex flex-1 items-center justify-center text-sm text-bb-subtle">
               Pick a Project in the rail.
             </div>
           ) : null}
@@ -401,11 +401,11 @@ function ProjectsRail({
   return (
     <aside
       data-testid="projects-rail"
-      className="flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950"
+      className="flex w-60 shrink-0 flex-col border-r border-bb-border bg-bb-bg"
     >
-      <div className="border-b border-zinc-800 px-3 py-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Projects</p>
-        <p className="mt-1 text-[11px] leading-snug text-zinc-500">
+      <div className="border-b border-bb-border px-3 py-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-bb-subtle">Projects</p>
+        <p className="mt-1 text-[11px] leading-snug text-bb-subtle">
           Chevron expands. Click name to focus. Alt-click or ⊕ opens beside.
         </p>
       </div>
@@ -426,8 +426,8 @@ function ProjectsRail({
                   focused
                     ? "bg-amber-400/15 ring-1 ring-amber-400/60"
                     : open
-                      ? "bg-zinc-800/80"
-                      : "hover:bg-zinc-900"
+                      ? "bg-bb-inset"
+                      : "hover:bg-bb-hover"
                 }`}
               >
                 <button
@@ -435,7 +435,7 @@ function ProjectsRail({
                   data-testid="project-rail-chevron"
                   aria-label={expanded ? `Collapse ${p.name}` : `Expand ${p.name}`}
                   aria-expanded={expanded}
-                  className="w-6 shrink-0 text-center text-xs text-zinc-400 hover:text-zinc-100"
+                  className="w-6 shrink-0 text-center text-xs text-bb-muted hover:text-bb-fg"
                   onClick={() => toggleCollapsed(p.id)}
                 >
                   {expanded ? "▾" : "▸"}
@@ -446,7 +446,7 @@ function ProjectsRail({
                   data-project-id={p.id}
                   data-open={open ? "true" : "false"}
                   data-focused={focused ? "true" : "false"}
-                  className="min-w-0 flex-1 truncate py-1.5 pr-1 text-left text-sm text-zinc-100"
+                  className="min-w-0 flex-1 truncate py-1.5 pr-1 text-left text-sm text-bb-fg"
                   onClick={(e) => onOpen(p.id, e.altKey ? "beside" : "focus")}
                 >
                   {p.name}
@@ -456,7 +456,7 @@ function ProjectsRail({
                   data-testid="open-beside"
                   title="Open beside"
                   aria-label={`Open ${p.name} beside`}
-                  className="px-1.5 text-xs text-zinc-400 hover:text-amber-300"
+                  className="px-1.5 text-xs text-bb-muted hover:text-bb-accent"
                   onClick={() => onOpen(p.id, "beside")}
                 >
                   ⊕
@@ -476,10 +476,10 @@ function ProjectsRail({
                           data-active={treeActive ? "true" : "false"}
                           className={`block w-full truncate rounded px-2 py-1 text-left text-sm ${
                             treeActive
-                              ? "bg-amber-400/15 text-amber-200"
+                              ? "bg-amber-400/15 text-bb-accent"
                               : openQuiet
-                                ? "bg-zinc-800/60 text-zinc-200"
-                                : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                                ? "bg-bb-inset text-bb-fg"
+                                : "text-bb-muted hover:bg-bb-hover hover:text-bb-fg"
                           }`}
                           onClick={() => {
                             expand(p.id);
@@ -497,7 +497,7 @@ function ProjectsRail({
                       onSubmit={(e) => void onCreateChannel(p.id, e)}
                     >
                       <input
-                        className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-100"
+                        className="min-w-0 flex-1 rounded border border-bb-border bg-bb-surface px-1.5 py-0.5 text-[11px] text-bb-fg"
                         value={draftByProject[p.id] ?? ""}
                         onChange={(e) =>
                           setDraftByProject((cur) => ({ ...cur, [p.id]: e.target.value }))
@@ -507,7 +507,7 @@ function ProjectsRail({
                       />
                       <button
                         type="submit"
-                        className="rounded bg-zinc-800 px-1.5 text-[11px] text-zinc-300 hover:text-zinc-100"
+                        className="rounded bg-bb-inset px-1.5 text-[11px] text-bb-fg hover:text-bb-fg"
                         aria-label={`Create Channel in ${p.name}`}
                       >
                         +
@@ -520,10 +520,10 @@ function ProjectsRail({
           );
         })}
       </ul>
-      {error ? <p className="px-2 text-[11px] text-red-400">{error}</p> : null}
-      <form onSubmit={onCreate} className="space-y-1 border-t border-zinc-800 p-2">
+      {error ? <p className="px-2 text-[11px] text-bb-danger">{error}</p> : null}
+      <form onSubmit={onCreate} className="space-y-1 border-t border-bb-border p-2">
         <input
-          className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-100"
+          className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-xs text-bb-fg"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="project name"
@@ -559,11 +559,11 @@ function EmptyHome({ onCreated }: { onCreated: (project: Project) => Promise<voi
   }
 
   return (
-    <main className="flex h-full min-h-0 w-full flex-1 flex-col items-center justify-center overflow-hidden bg-zinc-950 px-6 text-zinc-100">
+    <main className="flex h-full min-h-0 w-full flex-1 flex-col items-center justify-center overflow-hidden bg-bb-bg px-6 text-bb-fg">
       <div className="w-full max-w-xl">
         <form onSubmit={onCreate} className="flex gap-2">
           <input
-            className="flex-1 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"
+            className="flex-1 rounded-md border border-bb-border bg-bb-surface px-3 py-2"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="project name"
@@ -576,7 +576,7 @@ function EmptyHome({ onCreated }: { onCreated: (project: Project) => Promise<voi
             create
           </button>
         </form>
-        {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
+        {error ? <p className="mt-3 text-sm text-bb-danger">{error}</p> : null}
       </div>
     </main>
   );
