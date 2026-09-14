@@ -35,7 +35,7 @@ export default function App() {
 
   if (!ready) {
     return (
-      <main className="min-h-screen bg-zinc-950 px-6 py-16 text-sm text-zinc-400">
+      <main className="min-h-screen bg-bb-bg px-6 py-16 text-sm text-bb-muted">
         Connecting to Server…
       </main>
     );
@@ -58,7 +58,7 @@ export default function App() {
     );
   }
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-zinc-950">
+    <div className="flex h-dvh flex-col overflow-hidden bg-bb-bg">
       <Chrome />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {route.page === "task" ? (
@@ -79,12 +79,12 @@ function Chrome() {
     void api.authMe().then(setMe).catch(() => setMe(null));
   }, []);
   return (
-    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-2 text-sm">
-      <div className="min-w-0 flex-1 text-zinc-300">
+    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-bb-border bg-bb-surface px-4 py-2 text-sm">
+      <div className="min-w-0 flex-1 text-bb-fg">
         {!me ? (
-          <span className="text-zinc-500">Connecting…</span>
+          <span className="text-bb-subtle">Connecting…</span>
         ) : me.dev ? (
-          <span className="text-amber-200">
+          <span className="text-bb-accent">
             Dev auth: acting as Member {me.identity?.display_name ?? "You"}
           </span>
         ) : me.signed_in ? (
@@ -92,16 +92,16 @@ function Chrome() {
         ) : (
           <a
             href={`${getServerOrigin()}/v1/auth/github`}
-            className="rounded bg-zinc-100 px-3 py-1 font-medium text-zinc-950"
+            className="rounded bg-zinc-900 px-3 py-1 font-medium text-zinc-50"
           >
             Sign in with GitHub
           </a>
         )}
       </div>
       {isDesktopShell() ? (
-        <span className="hidden text-xs text-amber-400 sm:inline">Desktop</span>
+        <span className="hidden text-xs text-bb-accent sm:inline">Desktop</span>
       ) : null}
-      <a href="#/settings" className="text-xs text-zinc-400 hover:text-zinc-200">
+      <a href="#/settings" className="text-xs text-bb-muted hover:text-bb-fg">
         Settings
       </a>
       <PrefsBar />
@@ -135,7 +135,7 @@ function PrefsBar() {
   }, []);
 
   if (!memberId || !prefs) {
-    return error ? <span className="text-xs text-red-400">{error}</span> : null;
+    return error ? <span className="text-xs text-bb-danger">{error}</span> : null;
   }
 
   async function patch(next: Partial<Preferences>) {
@@ -147,7 +147,7 @@ function PrefsBar() {
   }
 
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-400">
+    <div className="flex items-center gap-2 text-xs text-bb-muted">
       <label className="flex items-center gap-1">
         <input
           type="checkbox"
@@ -238,7 +238,7 @@ function InboxBell() {
     <div className="relative">
       <button
         type="button"
-        className="relative rounded bg-zinc-800 px-2 py-1 text-zinc-100"
+        className="relative rounded bg-bb-inset px-2 py-1 text-bb-fg"
         onClick={() => setOpen((v) => !v)}
         aria-label="Notifications inbox"
       >
@@ -250,31 +250,31 @@ function InboxBell() {
         ) : null}
       </button>
       {open ? (
-        <div className="absolute right-0 z-20 mt-2 w-80 rounded-md border border-zinc-700 bg-zinc-950 p-2 shadow-lg">
+        <div className="absolute right-0 z-20 mt-2 w-80 rounded-md border border-bb-border bg-bb-surface p-2 shadow-lg">
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            <p className="text-xs font-medium uppercase tracking-wide text-bb-subtle">
               Notifications
             </p>
             <button
               type="button"
-              className="text-xs text-amber-300"
+              className="text-xs text-bb-accent"
               onClick={() => void markAll()}
             >
               Mark all read
             </button>
           </div>
-          {error ? <p className="mb-2 text-xs text-red-400">{error}</p> : null}
+          {error ? <p className="mb-2 text-xs text-bb-danger">{error}</p> : null}
           <ul className="max-h-72 space-y-1 overflow-auto">
             {items.map((n) => (
               <li key={n.id}>
                 <button
                   type="button"
                   className={`w-full rounded px-2 py-1.5 text-left text-sm ${
-                    n.read_at ? "text-zinc-500" : "bg-zinc-900 text-zinc-100"
+                    n.read_at ? "text-bb-subtle" : "bg-bb-surface text-bb-fg"
                   }`}
                   onClick={() => void markRead(n)}
                 >
-                  <span className="text-[10px] uppercase text-amber-400">{n.kind}</span>
+                  <span className="text-[10px] uppercase text-bb-accent">{n.kind}</span>
                   <span className="mt-0.5 block">{n.title}</span>
                 </button>
               </li>
@@ -315,31 +315,31 @@ function SettingsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-16 text-zinc-100">
+    <main className="min-h-screen bg-bb-bg px-6 py-16 text-bb-fg">
       <div className="mx-auto max-w-xl">
-        <a href="#/" className="text-sm text-amber-400">
+        <a href="#/" className="text-sm text-bb-accent">
           BuildBee
         </a>
         <h1 className="mt-2 text-3xl font-semibold">Settings</h1>
-        <p className="mt-3 text-sm text-zinc-400">
+        <p className="mt-3 text-sm text-bb-muted">
           The desktop shell loads this web UI and talks to a local or remote{" "}
-          <span className="text-zinc-200">Server</span>. Hash routes such as{" "}
-          <code className="text-zinc-300">#/invite/…</code> keep working.
+          <span className="text-bb-fg">Server</span>. Hash routes such as{" "}
+          <code className="text-bb-fg">#/invite/…</code> keep working.
           The Server (and Postgres, if you use it) run separately — they are
           not bundled in this app.
         </p>
         <form onSubmit={onSave} className="mt-8 space-y-3">
-          <label className="block text-sm text-zinc-300">
+          <label className="block text-sm text-bb-fg">
             Server URL
             <input
-              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"
+              className="mt-1 w-full rounded-md border border-bb-border bg-bb-surface px-3 py-2"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="http://127.0.0.1:8080"
               autoComplete="off"
             />
           </label>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-bb-subtle">
             Default is <code>http://127.0.0.1:8080</code> in the desktop app.
             In a browser the UI stays same-origin unless you set a URL here.
             Settings persist in local storage
@@ -353,8 +353,8 @@ function SettingsPage() {
             {busy ? "Saving…" : "Save and ping Server"}
           </button>
         </form>
-        {status ? <p className="mt-3 text-sm text-emerald-300">{status}</p> : null}
-        {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
+        {status ? <p className="mt-3 text-sm text-bb-success">{status}</p> : null}
+        {error ? <p className="mt-3 text-sm text-bb-danger">{error}</p> : null}
       </div>
     </main>
   );
@@ -449,7 +449,7 @@ function RunTranscript({ runId, status }: { runId: string; status: string }) {
 
   if (events.length === 0) {
     return (
-      <p className="mt-2 text-xs text-zinc-500">
+      <p className="mt-2 text-xs text-bb-subtle">
         Transcript idle ({status}
         {live === "poll" ? " · polling" : live === "ws" ? " · live" : ""}).
       </p>
@@ -458,12 +458,12 @@ function RunTranscript({ runId, status }: { runId: string; status: string }) {
 
   return (
     <div className="mt-3 space-y-2">
-      <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+      <p className="text-[10px] uppercase tracking-wide text-bb-subtle">
         Live transcript
         {live === "ws" ? " · websocket" : live === "poll" ? " · poll" : ""}
       </p>
       {tokens ? (
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-bb-inset px-2 py-1 text-xs text-bb-fg">
           {tokens}
         </pre>
       ) : null}
@@ -472,17 +472,17 @@ function RunTranscript({ runId, status }: { runId: string; status: string }) {
           key={ev.id}
           className={`rounded px-2 py-1 text-xs ${
             ev.kind === "tool_call"
-              ? "border border-amber-700/60 bg-amber-950/40 text-amber-100"
-              : "border border-zinc-700 bg-zinc-900 text-zinc-300"
+              ? "border border-amber-200 bg-amber-50 text-amber-900"
+              : "border border-bb-border bg-bb-surface text-bb-fg"
           }`}
         >
           <span className="font-medium uppercase">{ev.kind.replace("_", " ")}</span>{" "}
           {String(ev.payload?.name ?? "")}
-          {eventText(ev) ? <span className="block text-zinc-400">{eventText(ev)}</span> : null}
+          {eventText(ev) ? <span className="block text-bb-muted">{eventText(ev)}</span> : null}
         </div>
       ))}
       {logs.map((ev) => (
-        <pre key={ev.id} className="text-[11px] text-zinc-500">
+        <pre key={ev.id} className="text-[11px] text-bb-subtle">
           {eventText(ev)}
         </pre>
       ))}
@@ -541,17 +541,17 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-100">
-      <a href={`#/projects/${projectId}`} className="text-sm text-amber-400">
+    <main className="min-h-screen bg-bb-bg px-6 py-8 text-bb-fg">
+      <a href={`#/projects/${projectId}`} className="text-sm text-bb-accent">
         ← Project
       </a>
       <h1 className="mt-3 text-2xl font-semibold">{detail?.title ?? "Task"}</h1>
-      <p className="text-sm text-zinc-500">status {detail?.status}</p>
-      {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
-      {toast ? <p className="mt-2 text-sm text-emerald-400">{toast}</p> : null}
+      <p className="text-sm text-bb-subtle">status {detail?.status}</p>
+      {error ? <p className="mt-2 text-sm text-bb-danger">{error}</p> : null}
+      {toast ? <p className="mt-2 text-sm text-bb-success">{toast}</p> : null}
       <button
         type="button"
-        className="mt-3 rounded bg-zinc-800 px-3 py-1 text-sm"
+        className="mt-3 rounded bg-bb-inset px-3 py-1 text-sm"
         onClick={() => {
           void api
             .startRun(taskId)
@@ -568,17 +568,17 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
       {detail?.issue_url ? (
         <p className="mt-1 text-sm">
           Issues{" "}
-          <a className="text-amber-300 underline" href={detail.issue_url}>
+          <a className="text-bb-accent underline" href={detail.issue_url}>
             #{detail.issue_number} {detail.issue_url}
           </a>
         </p>
       ) : null}
 
-      <form onSubmit={handoff} className="mt-6 flex flex-wrap items-end gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-        <label className="text-xs text-zinc-400">
+      <form onSubmit={handoff} className="mt-6 flex flex-wrap items-end gap-2 rounded-lg border border-bb-border bg-bb-surface p-3">
+        <label className="text-xs text-bb-muted">
           Handoff to Role
           <select
-            className="mt-1 block rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+            className="mt-1 block rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
             value={toRole}
             onChange={(e) => setToRole(e.target.value)}
           >
@@ -590,12 +590,12 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
           </select>
         </label>
         <input
-          className="min-w-[12rem] flex-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
+          className="min-w-[12rem] flex-1 rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="Handoff notes"
         />
-        <label className="flex items-center gap-1 text-xs text-zinc-400">
+        <label className="flex items-center gap-1 text-xs text-bb-muted">
           <input
             type="checkbox"
             checked={autorun}
@@ -609,57 +609,57 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
       </form>
 
       <section className="mt-8">
-        <h2 className="text-sm font-medium text-zinc-400">Runs</h2>
+        <h2 className="text-sm font-medium text-bb-muted">Runs</h2>
         <ul className="mt-2 space-y-2">
           {(detail?.runs ?? []).map((r) => (
-            <li key={r.id} className="rounded border border-zinc-800 px-3 py-2 text-sm">
-              <span className="text-amber-300">{r.status}</span> {r.detail}
+            <li key={r.id} className="rounded border border-bb-border px-3 py-2 text-sm">
+              <span className="text-bb-accent">{r.status}</span> {r.detail}
               <RunTranscript runId={r.id} status={r.status} />
             </li>
           ))}
           {detail && detail.runs.length === 0 ? (
-            <li className="text-sm text-zinc-500">No Runs yet</li>
+            <li className="text-sm text-bb-subtle">No Runs yet</li>
           ) : null}
         </ul>
       </section>
 
       <section className="mt-8">
-        <h2 className="text-sm font-medium text-zinc-400">Artifacts</h2>
+        <h2 className="text-sm font-medium text-bb-muted">Artifacts</h2>
         <ul className="mt-2 space-y-2">
           {(detail?.artifacts ?? []).map((a) => (
-            <li key={a.id} className="rounded border border-zinc-800 px-3 py-2 text-sm">
-              <span className="text-zinc-400">{a.kind}</span> {a.name}
+            <li key={a.id} className="rounded border border-bb-border px-3 py-2 text-sm">
+              <span className="text-bb-muted">{a.kind}</span> {a.name}
               {a.url ? (
                 <>
                   {" "}
-                  <a className="text-amber-300 underline" href={a.url}>
+                  <a className="text-bb-accent underline" href={a.url}>
                     {a.url}
                   </a>
                 </>
               ) : null}
               {a.body ? (
-                <pre className="mt-2 max-h-40 overflow-auto text-xs text-zinc-400">
+                <pre className="mt-2 max-h-40 overflow-auto text-xs text-bb-muted">
                   {a.body}
                 </pre>
               ) : null}
             </li>
           ))}
           {detail && detail.artifacts.length === 0 ? (
-            <li className="text-sm text-zinc-500">No Artifacts yet</li>
+            <li className="text-sm text-bb-subtle">No Artifacts yet</li>
           ) : null}
         </ul>
       </section>
 
       <section className="mt-8">
-        <h2 className="text-sm font-medium text-zinc-400">Pipelines</h2>
+        <h2 className="text-sm font-medium text-bb-muted">Pipelines</h2>
         <ul className="mt-2 space-y-2">
           {(detail?.pipelines ?? []).map((p) => (
-            <li key={p.id} className="rounded border border-zinc-800 px-3 py-2 text-sm">
-              <span className="text-amber-300">{p.status}</span> {p.name}
+            <li key={p.id} className="rounded border border-bb-border px-3 py-2 text-sm">
+              <span className="text-bb-accent">{p.status}</span> {p.name}
               {p.external_url ? (
                 <>
                   {" "}
-                  <a className="text-amber-300 underline" href={p.external_url}>
+                  <a className="text-bb-accent underline" href={p.external_url}>
                     {p.external_url}
                   </a>
                 </>
@@ -667,7 +667,7 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
             </li>
           ))}
           {detail && detail.pipelines.length === 0 ? (
-            <li className="text-sm text-zinc-500">No Pipelines yet</li>
+            <li className="text-sm text-bb-subtle">No Pipelines yet</li>
           ) : null}
         </ul>
       </section>
@@ -706,27 +706,27 @@ function InvitePage({ token }: { token: string }) {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-16 text-zinc-100">
-      <div className="mx-auto max-w-md rounded-lg border border-zinc-800 bg-zinc-900/40 p-6">
-        <p className="text-sm text-amber-400">Project Invite</p>
+    <main className="min-h-screen bg-bb-bg px-6 py-16 text-bb-fg">
+      <div className="mx-auto max-w-md rounded-lg border border-bb-border bg-bb-surface p-6">
+        <p className="text-sm text-bb-accent">Project Invite</p>
         <h1 className="mt-2 text-2xl font-semibold">
           {invite?.project_name ?? "BuildBee"}
         </h1>
         {invite ? (
-          <p className="mt-2 text-sm text-zinc-400">
-            Role <span className="text-zinc-200">{invite.role}</span>
+          <p className="mt-2 text-sm text-bb-muted">
+            Role <span className="text-bb-fg">{invite.role}</span>
             {invite.email ? ` · ${invite.email}` : ""}
             {invite.github_login ? ` · @${invite.github_login}` : ""}
             {invite.status !== "pending" ? (
-              <span className="block text-red-400">This Invite is {invite.status}.</span>
+              <span className="block text-bb-danger">This Invite is {invite.status}.</span>
             ) : null}
           </p>
         ) : null}
-        {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
+        {error ? <p className="mt-3 text-sm text-bb-danger">{error}</p> : null}
         {invite?.status === "pending" ? (
           <form onSubmit={accept} className="mt-6 space-y-3">
             <input
-              className="w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2"
+              className="w-full rounded border border-bb-border bg-bb-surface px-3 py-2"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your display name (optional in dev)"

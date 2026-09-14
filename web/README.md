@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173).
+Open [http://localhost:5173](http://localhost:5173). The UI is **light by default** (`html[data-theme=light]` and `--bb-*` CSS variables in `src/index.css`). Desktop uses the same `web/` bundle.
 
 - Create a **Project** (empty home is name + create only). Once any Project exists, a left **Projects** rail lists them as a Slack-style tree on home and inside Project views
 - **Chevron** expands/collapses Channels under a Project (persisted). Click the name to focus. **Alt-click or ⊕** opens a second Project beside it (two panes max; × closes a pane)
