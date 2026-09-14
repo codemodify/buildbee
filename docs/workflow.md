@@ -24,7 +24,7 @@ A **Handoff** targets a Member or a Role (`to_role=builder`). Completing a Scout
 
 ## 5. Execute a Run
 
-The Bot starts a **Run**. The **runtime** supervisor prefers an ACP CLI (`claude` / `codex` / `opencode` / `goose`) when `--acp` is set; otherwise it opens a Docker **Sandbox** (or FakeEngine). Output is stored as Artifact `acp.log` or `sandbox.log`. Without an ACP binary, **FakeACP** succeeds so e2e/CI stay green.
+The Bot starts a **Run**. The **runtime** supervisor prefers an ACP CLI (`claude` / `codex` / `opencode` / `goose`) when `--acp` is set; otherwise it opens a Docker **Sandbox** (or FakeEngine). Tokens, tool calls, and logs stream to the Server as RunEvents (`GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`). The rolled-up transcript is stored as Artifact `acp.log` or `sandbox.log`. Without an ACP binary, **FakeACP** streams fake chunks over ~1–2s so e2e/CI stay green.
 
 A Run may produce Artifacts (patches, logs, reports). Those Artifacts stay attached to the Task.
 
@@ -40,5 +40,5 @@ A **Routine** can reopen this loop on a schedule or a trigger (for example, a ne
 
 - GitHub as Repo / Issues / Pipelines
 - Signed Activity (Nostr-inspired; not NIP-01)
-- Full bidirectional ACP stream (this slice is start / send prompt / collect)
+- Bidirectional ACP control (send follow-ups mid-Run; this slice is live outbound events)
 - Production auth

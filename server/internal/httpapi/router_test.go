@@ -52,6 +52,51 @@ func TestUnknownPath(t *testing.T) {
 	}
 }
 
+func TestRunEventsStream(t *testing.T) {
+	h := NewMux()
+	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Stream Hive"}))
+	task := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+proj["id"].(string)+"/tasks?handoff=none", map[string]string{"title": "Stream"}))
+	run := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/tasks/"+task["id"].(string)+"/runs", nil))
+	rid := run["id"].(string)
+
+	tok := doJSON(t, h, http.MethodPost, "/v1/runs/"+rid+"/events", map[string]any{
+		"kind": "token", "payload": map[string]any{"text": "hello"},
+	})
+	if tok.Code != http.StatusCreated {
+		t.Fatalf("token: %d %s", tok.Code, tok.Body.String())
+	}
+	tool := doJSON(t, h, http.MethodPost, "/v1/runs/"+rid+"/events", map[string]any{
+		"kind": "tool_call", "payload": map[string]any{"name": "read_task"},
+	})
+	if tool.Code != http.StatusCreated {
+		t.Fatalf("tool: %d %s", tool.Code, tool.Body.String())
+	}
+	bad := doJSON(t, h, http.MethodPost, "/v1/runs/"+rid+"/events", map[string]any{"kind": "nope"})
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("bad kind: %d", bad.Code)
+	}
+
+	all := doJSON(t, h, http.MethodGet, "/v1/runs/"+rid+"/events", nil)
+	var listed struct {
+		Items []map[string]any `json:"items"`
+	}
+	listed = decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, all)
+	if len(listed.Items) < 3 { // pending status + token + tool
+		t.Fatalf("events: %#v", listed.Items)
+	}
+	after := doJSON(t, h, http.MethodGet, "/v1/runs/"+rid+"/events?after=1", nil)
+	listed = decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, after)
+	for _, ev := range listed.Items {
+		if int(ev["seq"].(float64)) <= 1 {
+			t.Fatalf("after=1 returned seq %+v", ev)
+		}
+	}
+}
+
 func TestCORSEchoesDesktopOrigin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodOptions, "/v1/projects", nil)

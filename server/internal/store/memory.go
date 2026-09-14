@@ -24,6 +24,7 @@ type Memory struct {
 	decisions     map[string]models.Decision
 	activity      map[string]models.Activity
 	runs          map[string]models.Run
+	runEvents     map[string]models.RunEvent
 	artifacts     map[string]models.Artifact
 	pipelines     map[string]models.Pipeline
 	routines      map[string]models.Routine
@@ -46,6 +47,7 @@ func NewMemory() *Memory {
 		decisions:     map[string]models.Decision{},
 		activity:      map[string]models.Activity{},
 		runs:          map[string]models.Run{},
+		runEvents:     map[string]models.RunEvent{},
 		artifacts:     map[string]models.Artifact{},
 		pipelines:     map[string]models.Pipeline{},
 		routines:      map[string]models.Routine{},
@@ -566,6 +568,49 @@ func (m *Memory) ListRuns(_ context.Context, taskID string) ([]models.Run, error
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) AppendRunEvent(_ context.Context, runID, kind string, payload map[string]any) (*models.RunEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.runs[runID]; !ok {
+		return nil, ErrNotFound
+	}
+	k := models.NormalizeRunEventKind(kind)
+	if k == "" {
+		return nil, fmt.Errorf("invalid run event kind")
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	max := 0
+	for _, ev := range m.runEvents {
+		if ev.RunID == runID && ev.Seq > max {
+			max = ev.Seq
+		}
+	}
+	ev := models.RunEvent{
+		ID: uuid.NewString(), RunID: runID, Seq: max + 1, Kind: k,
+		Payload: payload, CreatedAt: now(),
+	}
+	m.runEvents[ev.ID] = ev
+	return &ev, nil
+}
+
+func (m *Memory) ListRunEvents(_ context.Context, runID string, afterSeq int) ([]models.RunEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.runs[runID]; !ok {
+		return nil, ErrNotFound
+	}
+	out := []models.RunEvent{}
+	for _, ev := range m.runEvents {
+		if ev.RunID == runID && ev.Seq > afterSeq {
+			out = append(out, ev)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out, nil
 }
 

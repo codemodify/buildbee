@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/codemodify/buildbee/server/internal/models"
@@ -544,6 +545,7 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.recordRunEvent(r.Context(), run.ID, models.RunEventStatus, map[string]any{"status": run.Status, "detail": run.Detail})
 	writeJSON(w, http.StatusCreated, run)
 }
 
@@ -570,5 +572,54 @@ func (s *Server) updateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	s.recordRunEvent(r.Context(), run.ID, models.RunEventStatus, map[string]any{"status": run.Status, "detail": run.Detail})
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (s *Server) recordRunEvent(ctx context.Context, runID, kind string, payload map[string]any) *models.RunEvent {
+	ev, err := s.store.AppendRunEvent(ctx, runID, kind, payload)
+	if err != nil {
+		return nil
+	}
+	s.hub.PublishRun(runID, ev)
+	return ev
+}
+
+func (s *Server) createRunEvent(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Kind    string         `json:"kind"`
+		Payload map[string]any `json:"payload"`
+	}
+	if err := decodeJSON(r, &in); err != nil || models.NormalizeRunEventKind(in.Kind) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind must be token, tool_call, tool_result, status, or log"})
+		return
+	}
+	ev := s.recordRunEvent(r.Context(), r.PathValue("runID"), in.Kind, in.Payload)
+	if ev == nil {
+		if _, err := s.store.GetRun(r.Context(), r.PathValue("runID")); err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not append run event"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, ev)
+}
+
+func (s *Server) listRunEvents(w http.ResponseWriter, r *http.Request) {
+	after := 0
+	if q := strings.TrimSpace(r.URL.Query().Get("after")); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "after must be a sequence number"})
+			return
+		}
+		after = n
+	}
+	items, err := s.store.ListRunEvents(r.Context(), r.PathValue("runID"), after)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeItems(w, items)
 }

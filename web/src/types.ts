@@ -58,6 +58,15 @@ export type Run = {
   detail: string;
 };
 
+export type RunEvent = {
+  id: string;
+  run_id: string;
+  seq: number;
+  kind: "token" | "tool_call" | "tool_result" | "status" | "log" | string;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
 export type Artifact = {
   id: string;
   kind: string;

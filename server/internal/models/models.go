@@ -27,7 +27,27 @@ const (
 	TypeMemory       = "memory"
 	TypeNotification = "notification"
 	TypeInvite       = "invite"
+	TypeRunEvent     = "run_event"
 )
+
+// RunEvent kinds streamed during a Run (ACP tokens, tools, status, logs).
+const (
+	RunEventToken      = "token"
+	RunEventToolCall   = "tool_call"
+	RunEventToolResult = "tool_result"
+	RunEventStatus     = "status"
+	RunEventLog        = "log"
+)
+
+func NormalizeRunEventKind(kind string) string {
+	k := strings.ToLower(strings.TrimSpace(kind))
+	switch k {
+	case RunEventToken, RunEventToolCall, RunEventToolResult, RunEventStatus, RunEventLog:
+		return k
+	default:
+		return ""
+	}
+}
 
 // Bot Role values seeded on every new Project.
 const (
@@ -267,6 +287,16 @@ type Run struct {
 	Detail    string    `json:"detail"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// RunEvent is one incremental ACP / Sandbox event on a Run.
+type RunEvent struct {
+	ID        string         `json:"id"`
+	RunID     string         `json:"run_id"`
+	Seq       int            `json:"seq"`
+	Kind      string         `json:"kind"`
+	Payload   map[string]any `json:"payload"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 // Artifact is a file, log, or Repo link produced by a Task or Run.

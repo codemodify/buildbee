@@ -86,6 +86,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tasks/{taskID}/runs", s.listRuns)
 	mux.HandleFunc("GET /v1/runs/{runID}", s.getRun)
 	mux.HandleFunc("PATCH /v1/runs/{runID}", s.updateRun)
+	mux.HandleFunc("POST /v1/runs/{runID}/events", s.createRunEvent)
+	mux.HandleFunc("GET /v1/runs/{runID}/events", s.listRunEvents)
+	mux.HandleFunc("GET /v1/runs/{runID}/ws", s.hub.ServeRun)
 
 	mux.HandleFunc("GET /v1/tasks/{taskID}/artifacts", s.listArtifacts)
 	mux.HandleFunc("POST /v1/tasks/{taskID}/artifacts", s.createArtifact)
@@ -135,7 +138,7 @@ func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications", "invites", "preferences",
+			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications", "invites", "preferences", "run_events",
 		},
 	})
 }

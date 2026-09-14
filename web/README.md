@@ -17,7 +17,7 @@ Open [http://localhost:5173](http://localhost:5173).
 - Chat in a **Channel** (polls every 2s; Server also has `/v1/channels/{id}/ws`)
 - See seeded **Bots + Roles** (Scout, Builder, Sentry, Pulse)
 - Add **Tasks** (auto-Handoff to Scout or Builder); Task page Handoff picker lists Bots by Role
-- Open a Task for **Runs**, **Artifacts**, and **Pipelines**
+- Open a Task for **Runs** (live transcript over WebSocket / poll), **Artifacts**, and **Pipelines**
 - **Sync Issues** (fake sample Issues→Tasks without `GITHUB_TOKEN`)
 - **Routines** list + force Run
 - Dev-auth banner, or **Sign in with GitHub** when OAuth is configured

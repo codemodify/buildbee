@@ -35,6 +35,27 @@ func TestFakeSession(t *testing.T) {
 	}
 }
 
+func TestStreamFakeEmitsChunks(t *testing.T) {
+	var evs []Event
+	out, err := StreamFake(context.Background(), "fake", Prompt("Ship", "", "go"), func(ev Event) error {
+		evs = append(evs, ev)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "FakeACP") {
+		t.Fatalf("transcript: %s", out)
+	}
+	kinds := map[string]int{}
+	for _, ev := range evs {
+		kinds[ev.Kind]++
+	}
+	if len(evs) < 5 || kinds["token"] == 0 || kinds["tool_call"] == 0 || kinds["tool_result"] == 0 {
+		t.Fatalf("events %#v kinds %#v", evs, kinds)
+	}
+}
+
 func contains(xs []string, v string) bool {
 	for _, x := range xs {
 		if x == v {

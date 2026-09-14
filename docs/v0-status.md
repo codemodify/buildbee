@@ -1,6 +1,6 @@
 # v0 status
 
-**v0 is feature-complete for merge** (Server + web + CLI + runtime loop + desktop MVP). Remaining items are explicitly deferred (IDE, Nostr, GitHub App install, ACP stream).
+**v0 is feature-complete for merge** (Server + web + CLI + runtime loop + desktop MVP + live ACP streaming). Remaining items are **pinned later** (do not build now).
 
 ## Shipped (v0 complete)
 
@@ -18,11 +18,14 @@
 - [x] CLI `buildbee`; compose + Railway
 - [x] CI (memory store, FakeACP, no Docker-in-Docker)
 - [x] Desktop MVP (Tauri 2 wraps `web/`; Server URL setting; hash Invite routes)
+- [x] Live ACP streaming: RunEvent (`token` / `tool_call` / `tool_result` / `status` / `log`), `GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`, FakeACP chunks, web transcript, `acp.log` rollup
+
+## Pinned later (do not build)
+
+- [ ] IDE extension
+- [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
+- [ ] Production GitHub App install UI (beyond webhook HMAC + PAT)
 
 ## Deferred (out of v0)
 
 - [ ] Desktop tray / multi-window agent bench (beyond the v1 shell)
-- [ ] IDE extension
-- [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
-- [ ] Production GitHub App install flow beyond webhook HMAC + PAT
-- [ ] Real ACP streaming (start / send / collect only)

@@ -1,21 +1,43 @@
 // Package acp talks to an ACP-compatible CLI during a Run.
 //
 // Detection order: claude, codex, opencode, goose. If none are on PATH
-// (or agent=fake), FakeACP writes a plausible log and succeeds so e2e/CI
+// (or agent=fake), FakeACP streams plausible chunks and succeeds so e2e/CI
 // work without real binaries.
 package acp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
+	"testing"
 	"time"
 )
 
 // KnownAgents are ACP-oriented CLIs BuildBee will spawn when present.
 var KnownAgents = []string{"claude", "codex", "opencode", "goose"}
+
+// StreamStep is the pause between FakeACP chunks (~1–2s total outside tests).
+var StreamStep = 180 * time.Millisecond
+
+func init() {
+	if testing.Testing() {
+		StreamStep = 0
+	}
+}
+
+// Event is one incremental ACP / log chunk posted as a RunEvent.
+type Event struct {
+	Kind    string
+	Payload map[string]any
+}
+
+// Handler receives events as they arrive. Return an error to abort the stream.
+type Handler func(Event) error
 
 // Session is a short-lived ACP conversation: start, send one prompt, collect output.
 type Session interface {
@@ -87,6 +109,68 @@ Done.
 `, agent, strings.TrimSpace(prompt))
 }
 
+func emit(h Handler, kind string, payload map[string]any) error {
+	if h == nil {
+		return nil
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	return h(Event{Kind: kind, Payload: payload})
+}
+
+func pause(ctx context.Context) error {
+	if StreamStep <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(StreamStep)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// StreamFake emits FakeACP chunks over StreamStep intervals (tokens + a tool call).
+func StreamFake(ctx context.Context, agent, prompt string, h Handler) (string, error) {
+	if agent == "" {
+		agent = "fake"
+	}
+	transcript := FakeLog(agent, prompt)
+	chunks := []Event{
+		{Kind: "log", Payload: map[string]any{"text": "# FakeACP session\nagent: " + agent + "\n"}},
+		{Kind: "token", Payload: map[string]any{"text": "Plan: "}},
+		{Kind: "token", Payload: map[string]any{"text": "implement the Task in a Sandbox.\n"}},
+		{Kind: "tool_call", Payload: map[string]any{"name": "read_task", "args": map[string]any{"title": firstLine(prompt)}}},
+		{Kind: "tool_result", Payload: map[string]any{"name": "read_task", "ok": true, "summary": "Task context loaded"}},
+		{Kind: "token", Payload: map[string]any{"text": "No ACP binary on PATH; this is the e2e FakeACP log.\n"}},
+		{Kind: "token", Payload: map[string]any{"text": "Done.\n"}},
+		{Kind: "log", Payload: map[string]any{"text": "status: succeeded\n"}},
+	}
+	for _, ev := range chunks {
+		if err := ctx.Err(); err != nil {
+			return transcript, err
+		}
+		if err := emit(h, ev.Kind, ev.Payload); err != nil {
+			return transcript, err
+		}
+		if err := pause(ctx); err != nil {
+			return transcript, err
+		}
+	}
+	return transcript, nil
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
 // Open returns a Session for the resolved agent (CLI or FakeACP).
 func Open(cfg Config) (Session, string) {
 	name := Detect(cfg.Agent)
@@ -96,14 +180,24 @@ func Open(cfg Config) (Session, string) {
 	return &CLISession{Bin: name, WorkDir: cfg.WorkDir}, name
 }
 
-// Run starts a session, sends the prompt, and collects output.
+// Run starts a session, sends the prompt, and collects output (no live events).
 func Run(ctx context.Context, cfg Config, prompt string) (agent, output string, err error) {
-	sess, name := Open(cfg)
+	return Stream(ctx, cfg, prompt, nil)
+}
+
+// Stream runs the agent and invokes emit for each token, tool, or log line.
+func Stream(ctx context.Context, cfg Config, prompt string, emitFn Handler) (agent, output string, err error) {
+	name := Detect(cfg.Agent)
+	if name == "fake" {
+		out, err := StreamFake(ctx, name, prompt, emitFn)
+		return name, out, err
+	}
+	sess := &CLISession{Bin: name, WorkDir: cfg.WorkDir, emit: emitFn}
 	if err := sess.Start(ctx); err != nil {
 		return name, "", err
 	}
 	if err := sess.Send(ctx, prompt); err != nil {
-		return name, "", err
+		return name, sess.out, err
 	}
 	out, err := sess.Collect(ctx)
 	return name, out, err
@@ -118,10 +212,11 @@ type FakeSession struct {
 
 func (s *FakeSession) Start(context.Context) error { return nil }
 
-func (s *FakeSession) Send(_ context.Context, prompt string) error {
+func (s *FakeSession) Send(ctx context.Context, prompt string) error {
 	s.prompt = prompt
-	s.out = FakeLog(s.Agent, prompt)
-	return nil
+	out, err := StreamFake(ctx, s.Agent, prompt, nil)
+	s.out = out
+	return err
 }
 
 func (s *FakeSession) Collect(context.Context) (string, error) {
@@ -131,13 +226,14 @@ func (s *FakeSession) Collect(context.Context) (string, error) {
 	return s.out, nil
 }
 
-// CLISession runs an ACP-compatible binary with a non-interactive prompt.
+// CLISession runs an ACP-compatible binary and streams stdout/stderr as it arrives.
 type CLISession struct {
 	Bin     string
 	WorkDir string
 	out     string
 	err     error
 	sent    bool
+	emit    Handler
 }
 
 func (s *CLISession) Start(_ context.Context) error {
@@ -158,16 +254,60 @@ func (s *CLISession) Send(ctx context.Context, prompt string) error {
 	if s.WorkDir != "" {
 		cmd.Dir = s.WorkDir
 	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	s.err = cmd.Run()
+	var mu sync.Mutex
+	writeLine := func(kind, stream, line string) {
+		mu.Lock()
+		buf.WriteString(line)
+		if !strings.HasSuffix(line, "\n") {
+			buf.WriteByte('\n')
+		}
+		mu.Unlock()
+		payload := map[string]any{"text": line}
+		if stream != "" {
+			payload["stream"] = stream
+		}
+		_ = emit(s.emit, kind, payload)
+	}
+	if err := cmd.Start(); err != nil {
+		s.err = err
+		s.sent = true
+		return nil
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		scanStream(stdout, func(line string) { writeLine("token", "stdout", line) })
+	}()
+	go func() {
+		defer wg.Done()
+		scanStream(stderr, func(line string) { writeLine("log", "stderr", line) })
+	}()
+	s.err = cmd.Wait()
+	wg.Wait()
 	s.out = buf.String()
 	s.sent = true
 	if s.err != nil && s.out == "" {
 		s.out = s.err.Error()
 	}
 	return nil
+}
+
+func scanStream(r io.Reader, each func(string)) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		each(sc.Text() + "\n")
+	}
 }
 
 func (s *CLISession) Collect(context.Context) (string, error) {

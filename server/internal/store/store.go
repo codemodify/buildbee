@@ -54,6 +54,8 @@ type Store interface {
 	GetRun(ctx context.Context, id string) (*models.Run, error)
 	UpdateRun(ctx context.Context, id, status, detail string) (*models.Run, error)
 	ListRuns(ctx context.Context, taskID string) ([]models.Run, error)
+	AppendRunEvent(ctx context.Context, runID, kind string, payload map[string]any) (*models.RunEvent, error)
+	ListRunEvents(ctx context.Context, runID string, afterSeq int) ([]models.RunEvent, error)
 
 	CreateArtifact(ctx context.Context, in models.Artifact) (*models.Artifact, error)
 	GetArtifact(ctx context.Context, id string) (*models.Artifact, error)

@@ -57,6 +57,7 @@ cd desktop && npm install && npm run dev   # Tauri window; Server must already b
 ./scripts/e2e-run.sh        # Run → log Artifact → fake Repo PR → Pipelines webhook
 ./scripts/e2e-identity.sh   # dev auth + fake Issues→Task + Routine fire
 ./scripts/e2e-roles-acp.sh  # Scout/Builder/Sentry/Pulse + FakeACP Run (acp.log)
+./scripts/e2e-acp-stream.sh     # FakeACP live RunEvents before the Run completes
 ./scripts/e2e-notifications.sh  # Decision / Handoff / mention / Pipeline → inbox read
 ./scripts/e2e-invites.sh        # Invite create → accept → revoke + permissions
 ./scripts/e2e-polish.sh         # shared Identity, Decision assignee, mute prefs
@@ -113,7 +114,7 @@ Answered Decisions are fingerprinted (`project_id` + normalized prompt). Asking 
 
 ## Tests / CI
 
-GitHub Actions (`.github/workflows/ci.yml`) on PR/push to `dev`: Go tests, web build, desktop `cargo check` (Ubuntu, no signed `.dmg`), e2e against an in-memory Server (FakeACP, no Docker-in-Docker).
+GitHub Actions (`.github/workflows/ci.yml`) on PR/push to `dev`: Go tests, web build, desktop `cargo check` (Ubuntu, no signed `.dmg`), e2e against an in-memory Server (FakeACP stream, no Docker-in-Docker).
 
 ```bash
 ./scripts/ci-local.sh          # same steps as CI (desktop check if webkit2gtk is present)
@@ -146,6 +147,7 @@ Implemented:
 - [x] Cross-Project GitHub Identity; Decision assignee; notification mute prefs
 - [x] **v0 feature-complete** (see [docs/v0-status.md](docs/v0-status.md))
 - [x] Desktop MVP (Tauri 2 shell + Server URL settings; Server runs separately)
+- [x] Live ACP streaming (RunEvent + WS + FakeACP chunks + web transcript)
 
 See [CHANGELOG.md](CHANGELOG.md) for the full stack summary.
 
@@ -160,9 +162,12 @@ See [CHANGELOG.md](CHANGELOG.md) for the full stack summary.
 ./scripts/e2e-invites.sh
 ```
 
-Deferred:
+Pinned later (do not build):
 
 - [ ] IDE extension
 - [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
-- [ ] Production GitHub App install flow beyond webhook HMAC + PAT
-- [ ] Real ACP streaming (start / send / collect only)
+- [ ] Production GitHub App install UI (beyond webhook HMAC + PAT)
+
+Deferred:
+
+- [ ] Desktop tray / multi-window agent bench

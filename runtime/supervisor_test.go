@@ -56,6 +56,10 @@ func TestExecuteFakeACP(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		_ = json.NewEncoder(w).Encode(map[string]string{"id": "r1", "task_id": "t1", "status": in["status"]})
 	})
+	mux.HandleFunc("POST /v1/runs/r1/events", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "e1", "run_id": "r1", "seq": 1, "kind": "token"})
+	})
 	mux.HandleFunc("POST /v1/tasks/t1/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&in)

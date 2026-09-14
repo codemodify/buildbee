@@ -6,6 +6,7 @@ import {
   isDesktopShell,
   persistServerOrigin,
   pingServer,
+  runEventsWsUrl,
 } from "./api";
 import type {
   AuthMe,
@@ -20,6 +21,7 @@ import type {
   Routine,
   Task,
   TaskDetail,
+  RunEvent,
 } from "./types";
 
 function formatError(e: unknown): string {
@@ -1172,6 +1174,136 @@ function ProjectPage({
   );
 }
 
+function eventText(ev: RunEvent): string {
+  const p = ev.payload ?? {};
+  if (typeof p.text === "string") return p.text;
+  if (typeof p.summary === "string") return p.summary;
+  if (typeof p.detail === "string") return p.detail;
+  if (typeof p.status === "string") return p.status;
+  return "";
+}
+
+function RunTranscript({ runId, status }: { runId: string; status: string }) {
+  const [events, setEvents] = useState<RunEvent[]>([]);
+  const [live, setLive] = useState<"ws" | "poll" | "off">("off");
+
+  useEffect(() => {
+    let stop = false;
+    let after = 0;
+    let ws: WebSocket | null = null;
+    let pollId = 0;
+
+    function merge(items: RunEvent[]) {
+      if (!items.length) return;
+      setEvents((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        const next = [...prev];
+        for (const ev of items) {
+          if (!seen.has(ev.id)) {
+            next.push(ev);
+            seen.add(ev.id);
+          }
+        }
+        next.sort((a, b) => a.seq - b.seq);
+        after = next.reduce((m, e) => Math.max(m, e.seq), after);
+        return next;
+      });
+    }
+
+    async function pull() {
+      const data = await api.listRunEvents(runId, after);
+      merge(data.items);
+    }
+
+    function startPoll() {
+      setLive("poll");
+      void pull().catch(() => undefined);
+      pollId = window.setInterval(() => {
+        void pull().catch(() => undefined);
+      }, 800);
+    }
+
+    void pull()
+      .then(() => {
+        if (stop) return;
+        try {
+          ws = new WebSocket(runEventsWsUrl(runId));
+          ws.onopen = () => setLive("ws");
+          ws.onmessage = (msg) => {
+            try {
+              merge([JSON.parse(msg.data as string) as RunEvent]);
+            } catch {
+              /* ignore */
+            }
+          };
+          ws.onerror = () => {
+            if (!stop && !pollId) startPoll();
+          };
+          ws.onclose = () => {
+            if (!stop && !pollId) startPoll();
+          };
+        } catch {
+          startPoll();
+        }
+      })
+      .catch(() => {
+        if (!stop) startPoll();
+      });
+
+    return () => {
+      stop = true;
+      if (ws) ws.close();
+      if (pollId) window.clearInterval(pollId);
+    };
+  }, [runId]);
+
+  const tokens = events.filter((e) => e.kind === "token").map(eventText).join("");
+  const tools = events.filter((e) => e.kind === "tool_call" || e.kind === "tool_result");
+  const logs = events.filter((e) => e.kind === "log");
+
+  if (events.length === 0) {
+    return (
+      <p className="mt-2 text-xs text-zinc-500">
+        Transcript idle ({status}
+        {live === "poll" ? " · polling" : live === "ws" ? " · live" : ""}).
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+        Live transcript
+        {live === "ws" ? " · websocket" : live === "poll" ? " · poll" : ""}
+      </p>
+      {tokens ? (
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
+          {tokens}
+        </pre>
+      ) : null}
+      {tools.map((ev) => (
+        <div
+          key={ev.id}
+          className={`rounded px-2 py-1 text-xs ${
+            ev.kind === "tool_call"
+              ? "border border-amber-700/60 bg-amber-950/40 text-amber-100"
+              : "border border-zinc-700 bg-zinc-900 text-zinc-300"
+          }`}
+        >
+          <span className="font-medium uppercase">{ev.kind.replace("_", " ")}</span>{" "}
+          {String(ev.payload?.name ?? "")}
+          {eventText(ev) ? <span className="block text-zinc-400">{eventText(ev)}</span> : null}
+        </div>
+      ))}
+      {logs.map((ev) => (
+        <pre key={ev.id} className="text-[11px] text-zinc-500">
+          {eventText(ev)}
+        </pre>
+      ))}
+    </div>
+  );
+}
+
 function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -1193,6 +1325,15 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
   useEffect(() => {
     void refresh().catch((e) => setError(formatError(e)));
   }, [taskId, projectId]);
+
+  useEffect(() => {
+    const active = (detail?.runs ?? []).some((r) => r.status === "pending" || r.status === "running");
+    if (!active) return;
+    const id = window.setInterval(() => {
+      void refresh().catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [detail?.runs, taskId, projectId]);
 
   const human = members.find((m) => m.kind === "human");
   const bots = members.filter((m) => m.kind === "bot");
@@ -1287,6 +1428,7 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
           {(detail?.runs ?? []).map((r) => (
             <li key={r.id} className="rounded border border-zinc-800 px-3 py-2 text-sm">
               <span className="text-amber-300">{r.status}</span> {r.detail}
+              <RunTranscript runId={r.id} status={r.status} />
             </li>
           ))}
           {detail && detail.runs.length === 0 ? (

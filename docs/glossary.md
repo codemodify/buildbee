@@ -27,7 +27,7 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | **Task** | A unit of work owned by a Member. |
 | **Handoff** | Transfer of a Task (or context for a Task) between Members. |
 | **Artifact** | A file or output produced while doing work (code, logs, reports). |
-| **Run** | One execution of a Bot in a Sandbox. |
+| **Run** | One execution of a Bot in a Sandbox. Incremental ACP output is stored as RunEvents on that Run; the rolled-up transcript is an Artifact. |
 | **Decision** | A single recorded choice; the Decisions surface collects them. |
 
 ## Platform
