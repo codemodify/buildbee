@@ -1,9 +1,107 @@
+const SERVER_URL_KEY = "buildbee.server_url";
+const DEFAULT_DESKTOP_SERVER = "http://127.0.0.1:8080";
+
+type TauriCore = {
+  invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+};
+
+function tauriCore(): TauriCore | undefined {
+  const w = window as unknown as { __TAURI__?: { core?: TauriCore } };
+  return w.__TAURI__?.core;
+}
+
+export function isDesktopShell(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    ("__TAURI_INTERNALS__" in window || "__TAURI__" in window)
+  );
+}
+
+function readStoredOrigin(): string | null {
+  try {
+    return localStorage.getItem(SERVER_URL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function defaultOrigin(): string {
+  return isDesktopShell() ? DEFAULT_DESKTOP_SERVER : "";
+}
+
+let serverOrigin = (readStoredOrigin() ?? defaultOrigin()).replace(/\/$/, "");
+
+export function getServerOrigin(): string {
+  return serverOrigin;
+}
+
+export function apiUrl(path: string): string {
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+  return `${serverOrigin}${path}`;
+}
+
+export function setServerOrigin(url: string): string {
+  serverOrigin = url.trim().replace(/\/$/, "");
+  try {
+    if (serverOrigin) {
+      localStorage.setItem(SERVER_URL_KEY, serverOrigin);
+    } else {
+      localStorage.removeItem(SERVER_URL_KEY);
+    }
+  } catch {
+    /* ignore quota / private mode */
+  }
+  return serverOrigin;
+}
+
+export async function hydrateServerOrigin(): Promise<string> {
+  const core = tauriCore();
+  if (core) {
+    try {
+      const settings = await core.invoke<{ server_url?: string }>("get_settings");
+      if (settings?.server_url) {
+        setServerOrigin(settings.server_url);
+      }
+    } catch {
+      /* keep localStorage / default */
+    }
+  } else if (isDesktopShell() && !readStoredOrigin()) {
+    setServerOrigin(DEFAULT_DESKTOP_SERVER);
+  }
+  return serverOrigin;
+}
+
+export async function persistServerOrigin(url: string): Promise<string> {
+  const next = setServerOrigin(url);
+  const core = tauriCore();
+  if (core) {
+    await core.invoke("set_server_url", { url: next || DEFAULT_DESKTOP_SERVER });
+  }
+  return getServerOrigin();
+}
+
+export async function pingServer(origin = getServerOrigin()): Promise<boolean> {
+  const base = (origin || window.location.origin).replace(/\/$/, "");
+  const res = await fetch(`${base}/healthz`, { credentials: "omit" });
+  if (!res.ok) return false;
+  const body = (await res.json()) as { status?: string };
+  return body.status === "ok";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(path, { credentials: "include", ...init, headers });
+  const url = apiUrl(path);
+  const cross = Boolean(serverOrigin);
+  const res = await fetch(url, {
+    credentials: cross ? "omit" : "include",
+    ...init,
+    headers,
+  });
   const text = await res.text();
   if (!res.ok) {
     throw new Error(text || res.statusText);

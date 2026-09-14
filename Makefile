@@ -1,7 +1,7 @@
 export GOTOOLCHAIN ?= local
 ROOT := $(CURDIR)
 
-.PHONY: web embed-web server build run test
+.PHONY: web embed-web server build run test desktop-check
 
 web:
 	cd web && npm ci && npm run build
@@ -25,3 +25,7 @@ run: web
 
 test:
 	./scripts/ci-local.sh
+
+# Compiles the Tauri host without bundling installers (needs WebKit/GTK on Linux).
+desktop-check:
+	cd desktop/src-tauri && cargo check && cargo test

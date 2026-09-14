@@ -52,6 +52,22 @@ func TestUnknownPath(t *testing.T) {
 	}
 }
 
+func TestCORSEchoesDesktopOrigin(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/v1/projects", nil)
+	req.Header.Set("Origin", "http://tauri.localhost")
+	NewMux().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://tauri.localhost" {
+		t.Fatalf("Allow-Origin: %q", got)
+	}
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("expected credentials allowed for desktop Origin")
+	}
+}
+
 func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var rdr io.Reader

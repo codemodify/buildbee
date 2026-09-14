@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { api } from "./api";
+import {
+  api,
+  getServerOrigin,
+  hydrateServerOrigin,
+  isDesktopShell,
+  persistServerOrigin,
+  pingServer,
+} from "./api";
 import type {
   AuthMe,
   Channel,
@@ -47,7 +54,8 @@ type Route =
   | { page: "home" }
   | { page: "project"; projectId: string; channelId?: string }
   | { page: "task"; projectId: string; taskId: string }
-  | { page: "invite"; token: string };
+  | { page: "invite"; token: string }
+  | { page: "settings" };
 
 function parseHash(): Route {
   const pathParts = window.location.pathname.split("/").filter(Boolean);
@@ -58,6 +66,9 @@ function parseHash(): Route {
   const parts = raw.split("/").filter(Boolean);
   if (parts[0] === "invite" && parts[1]) {
     return { page: "invite", token: parts[1] };
+  }
+  if (parts[0] === "settings") {
+    return { page: "settings" };
   }
   if (parts[0] === "projects" && parts[1] && parts[2] === "tasks" && parts[3]) {
     return { page: "task", projectId: parts[1], taskId: parts[3] };
@@ -74,12 +85,32 @@ function parseHash(): Route {
 
 export default function App() {
   const [route, setRoute] = useState<Route>(parseHash);
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  useEffect(() => {
+    void hydrateServerOrigin().finally(() => setReady(true));
+  }, []);
 
+  if (!ready) {
+    return (
+      <main className="min-h-screen bg-zinc-950 px-6 py-16 text-sm text-zinc-400">
+        Connecting to Server…
+      </main>
+    );
+  }
+
+  if (route.page === "settings") {
+    return (
+      <>
+        <Chrome />
+        <SettingsPage />
+      </>
+    );
+  }
   if (route.page === "invite") {
     return (
       <>
@@ -130,13 +161,19 @@ function Chrome() {
           <span>Signed in as {me.identity?.github_login ?? me.identity?.display_name}</span>
         ) : (
           <a
-            href="/v1/auth/github"
+            href={`${getServerOrigin()}/v1/auth/github`}
             className="rounded bg-zinc-100 px-3 py-1 font-medium text-zinc-950"
           >
             Sign in with GitHub
           </a>
         )}
       </div>
+      {isDesktopShell() ? (
+        <span className="hidden text-xs text-amber-400 sm:inline">Desktop</span>
+      ) : null}
+      <a href="#/settings" className="text-xs text-zinc-400 hover:text-zinc-200">
+        Settings
+      </a>
       <PrefsBar />
       <InboxBell />
     </div>
@@ -317,6 +354,79 @@ function InboxBell() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function SettingsPage() {
+  const [url, setUrl] = useState(getServerOrigin() || "http://127.0.0.1:8080");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function onSave(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const saved = await persistServerOrigin(url);
+      setUrl(saved);
+      const ok = await pingServer(saved);
+      setStatus(
+        ok
+          ? `Saved. Server at ${saved || window.location.origin} is reachable.`
+          : `Saved ${saved || "(same origin)"}. /healthz did not return ok — is the Server running?`,
+      );
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-zinc-950 px-6 py-16 text-zinc-100">
+      <div className="mx-auto max-w-xl">
+        <a href="#/" className="text-sm text-amber-400">
+          BuildBee
+        </a>
+        <h1 className="mt-2 text-3xl font-semibold">Settings</h1>
+        <p className="mt-3 text-sm text-zinc-400">
+          The desktop shell loads this web UI and talks to a local or remote{" "}
+          <span className="text-zinc-200">Server</span>. Hash routes such as{" "}
+          <code className="text-zinc-300">#/invite/…</code> keep working.
+          The Server (and Postgres, if you use it) run separately — they are
+          not bundled in this app.
+        </p>
+        <form onSubmit={onSave} className="mt-8 space-y-3">
+          <label className="block text-sm text-zinc-300">
+            Server URL
+            <input
+              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="http://127.0.0.1:8080"
+              autoComplete="off"
+            />
+          </label>
+          <p className="text-xs text-zinc-500">
+            Default is <code>http://127.0.0.1:8080</code> in the desktop app.
+            In a browser the UI stays same-origin unless you set a URL here.
+            Settings persist in local storage
+            {isDesktopShell() ? " and the desktop config directory" : ""}.
+          </p>
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded-md bg-amber-400 px-4 py-2 font-medium text-zinc-950 disabled:opacity-50"
+          >
+            {busy ? "Saving…" : "Save and ping Server"}
+          </button>
+        </form>
+        {status ? <p className="mt-3 text-sm text-emerald-300">{status}</p> : null}
+        {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
+      </div>
+    </main>
   );
 }
 
