@@ -779,3 +779,186 @@ func TestMemberInvites(t *testing.T) {
 		t.Fatalf("oauth invite: %d %s", unauth.Code, unauth.Body.String())
 	}
 }
+
+func TestCrossProjectIdentity(t *testing.T) {
+	h := NewMux()
+	a := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Alpha"}))
+	b := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Beta"}))
+	invA := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+a["id"].(string)+"/invites", map[string]string{
+		"github_login": "Ada", "role": "member",
+	}))
+	invB := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+b["id"].(string)+"/invites", map[string]string{
+		"github_login": "ada", "role": "admin",
+	}))
+	memA := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/invites/"+invA["token"].(string)+"/accept", map[string]string{
+		"display_name": "Ada", "github_login": "ada",
+	}))
+	memB := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/invites/"+invB["token"].(string)+"/accept", map[string]string{
+		"display_name": "Ada Lovelace", "github_login": "ADA",
+	}))
+	ida := memA["member"].(map[string]any)
+	idb := memB["member"].(map[string]any)
+	if ida["identity"] == "" || ida["identity"] != idb["identity"] {
+		t.Fatalf("expected shared Identity, got %#v vs %#v", ida, idb)
+	}
+	if ida["display_name"] != idb["display_name"] {
+		t.Fatalf("expected reused display name: %#v %#v", ida, idb)
+	}
+	if ida["github_login"] != "ada" || idb["github_login"] != "ada" {
+		t.Fatalf("login normalize: %#v %#v", ida, idb)
+	}
+}
+
+func TestDecisionAssigneeNotify(t *testing.T) {
+	h := NewMux()
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Assign"})
+	var proj struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Role string `json:"role"`
+		} `json:"members"`
+	}
+	proj = decode[struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Role string `json:"role"`
+		} `json:"members"`
+	}](t, created)
+	var owner string
+	for _, m := range proj.Members {
+		if m.Role == "owner" {
+			owner = m.ID
+		}
+	}
+	bob := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/members", map[string]string{
+		"display_name": "Bob", "kind": "human", "role": "member",
+	}))
+	bobID := bob["id"].(string)
+
+	dec := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/decisions", map[string]any{
+		"prompt": "Only Bob?", "options": []string{"yes"}, "assignee_id": bobID,
+	})
+	if dec.Code != http.StatusCreated {
+		t.Fatalf("decision: %d %s", dec.Code, dec.Body.String())
+	}
+	d := decode[map[string]any](t, dec)
+	if d["assignee_id"] != bobID {
+		t.Fatalf("assignee: %#v", d)
+	}
+
+	ownerInbox := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/notifications?member_id="+owner, nil))
+	for _, n := range ownerInbox.Items {
+		if n["kind"] == "decision" {
+			t.Fatalf("owner should not get assigned Decision: %#v", ownerInbox.Items)
+		}
+	}
+	bobInbox := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/notifications?member_id="+bobID, nil))
+	found := false
+	for _, n := range bobInbox.Items {
+		if n["kind"] == "decision" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("bob should get Decision: %#v", bobInbox.Items)
+	}
+
+	mine := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/projects/"+proj.ID+"/decisions?inbox=1&mine=1&member_id="+bobID, nil))
+	if len(mine.Items) != 1 {
+		t.Fatalf("bob inbox: %#v", mine.Items)
+	}
+	other := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/projects/"+proj.ID+"/decisions?inbox=1&mine=1&member_id="+owner, nil))
+	if len(other.Items) != 0 {
+		t.Fatalf("owner mine inbox should skip Bob's Decision: %#v", other.Items)
+	}
+}
+
+func TestNotificationPreferences(t *testing.T) {
+	h := NewMux()
+	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Prefs"})
+	var proj struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"members"`
+		Channels []struct {
+			ID string `json:"id"`
+		} `json:"channels"`
+	}
+	proj = decode[struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"members"`
+		Channels []struct {
+			ID string `json:"id"`
+		} `json:"channels"`
+	}](t, created)
+	var human string
+	for _, m := range proj.Members {
+		if m.Kind == "human" {
+			human = m.ID
+		}
+	}
+	got := doJSON(t, h, http.MethodGet, "/v1/me/preferences?member_id="+human, nil)
+	if got.Code != http.StatusOK {
+		t.Fatalf("get prefs: %d %s", got.Code, got.Body.String())
+	}
+	patch := doJSON(t, h, http.MethodPatch, "/v1/me/preferences?member_id="+human, map[string]any{
+		"mute_mentions": true, "mute_routines": true,
+	})
+	if patch.Code != http.StatusOK {
+		t.Fatalf("patch prefs: %d %s", patch.Code, patch.Body.String())
+	}
+	p := decode[map[string]any](t, patch)
+	if p["mute_mentions"] != true || p["mute_routines"] != true {
+		t.Fatalf("prefs: %#v", p)
+	}
+
+	msg := doJSON(t, h, http.MethodPost, "/v1/channels/"+proj.Channels[0].ID+"/messages", map[string]string{
+		"body": "@Scout please", "member_id": human,
+	})
+	if msg.Code != http.StatusCreated {
+		t.Fatalf("mention: %d %s", msg.Code, msg.Body.String())
+	}
+	inbox := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/notifications?member_id="+human, nil))
+	for _, n := range inbox.Items {
+		if n["kind"] == "mention" {
+			t.Fatalf("muted mention leaked: %#v", inbox.Items)
+		}
+	}
+
+	rts := decode[struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/projects/"+proj.ID+"/routines", nil))
+	if len(rts.Items) < 1 {
+		t.Fatal("expected routine")
+	}
+	doJSON(t, h, http.MethodPost, "/v1/routines/"+rts.Items[0].ID+"/run", map[string]string{})
+	after := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/notifications?member_id="+human, nil))
+	for _, n := range after.Items {
+		if n["kind"] == "routine" {
+			t.Fatalf("muted routine leaked: %#v", after.Items)
+		}
+	}
+}

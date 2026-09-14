@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +30,9 @@ type Memory struct {
 	memories      map[string]models.DecisionMemory
 	notifications map[string]models.Notification
 	invites       map[string]models.Invite
+	identities    map[string]models.Identity // id → record
+	loginIndex    map[string]string          // lower github login → identity id
+	prefs         map[string]models.Preferences
 }
 
 func NewMemory() *Memory {
@@ -48,6 +52,9 @@ func NewMemory() *Memory {
 		memories:      map[string]models.DecisionMemory{},
 		notifications: map[string]models.Notification{},
 		invites:       map[string]models.Invite{},
+		identities:    map[string]models.Identity{},
+		loginIndex:    map[string]string{},
+		prefs:         map[string]models.Preferences{},
 	}
 }
 
@@ -164,6 +171,13 @@ func (m *Memory) AddMember(_ context.Context, in models.Member) (*models.Member,
 	}
 	in.ID = uuid.NewString()
 	in.CreatedAt = now()
+	if in.Kind == "human" && strings.TrimSpace(in.GitHubLogin) != "" {
+		ident := m.upsertHumanLocked(in.GitHubLogin, in.GitHubID, in.DisplayName)
+		in.Identity = ident.ID
+		in.GitHubLogin = ident.GitHubLogin
+		in.GitHubID = ident.GitHubID
+		in.DisplayName = ident.DisplayName
+	}
 	if in.Identity == "" {
 		if in.Kind == "bot" {
 			in.Identity = "bot:" + uuid.NewString()
@@ -373,7 +387,7 @@ func (m *Memory) ListDecisions(_ context.Context, projectID string) ([]models.De
 	return out, nil
 }
 
-func (m *Memory) CreateDecision(_ context.Context, projectID, prompt, recommendation string, options []string) (*models.Decision, error) {
+func (m *Memory) CreateDecision(_ context.Context, projectID, prompt, recommendation string, options []string, assigneeMemberID string) (*models.Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.projects[projectID]; !ok {
@@ -384,7 +398,7 @@ func (m *Memory) CreateDecision(_ context.Context, projectID, prompt, recommenda
 	}
 	d := models.Decision{
 		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
-		Options: options, Recommendation: recommendation, CreatedAt: now(),
+		Options: options, Recommendation: recommendation, AssigneeMemberID: assigneeMemberID, CreatedAt: now(),
 	}
 	d.Fingerprint = models.DecisionFingerprint(prompt)
 	m.decisions[d.ID] = d
@@ -392,7 +406,7 @@ func (m *Memory) CreateDecision(_ context.Context, projectID, prompt, recommenda
 	return &d, nil
 }
 
-func (m *Memory) CreateReusedDecision(_ context.Context, projectID, prompt, recommendation string, options []string, answer string) (*models.Decision, error) {
+func (m *Memory) CreateReusedDecision(_ context.Context, projectID, prompt, recommendation string, options []string, answer, assigneeMemberID string) (*models.Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.projects[projectID]; !ok {
@@ -406,7 +420,7 @@ func (m *Memory) CreateReusedDecision(_ context.Context, projectID, prompt, reco
 		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
 		Options: options, Recommendation: recommendation, Answer: answer,
 		Reused: true, Fingerprint: models.DecisionFingerprint(prompt),
-		CreatedAt: t, AnsweredAt: &t,
+		AssigneeMemberID: assigneeMemberID, CreatedAt: t, AnsweredAt: &t,
 	}
 	m.decisions[d.ID] = d
 	m.addActivity(projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "reuse", "answer": answer, "fingerprint": d.Fingerprint})
@@ -950,4 +964,66 @@ func (m *Memory) RevokeInvite(_ context.Context, id string) (*models.Invite, err
 	m.invites[id] = inv
 	m.addActivity(inv.ProjectID, models.TypeInvite, map[string]any{"id": inv.ID, "action": "revoke"})
 	return &inv, nil
+}
+
+func (m *Memory) upsertHumanLocked(login, githubID, displayName string) models.Identity {
+	key := strings.ToLower(strings.TrimSpace(login))
+	if id, ok := m.loginIndex[key]; ok {
+		ident := m.identities[id]
+		if ident.GitHubID == "" && githubID != "" {
+			ident.GitHubID = githubID
+			m.identities[id] = ident
+		}
+		return ident
+	}
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		name = login
+	}
+	ident := models.Identity{
+		ID: uuid.NewString(), Kind: "human", DisplayName: name,
+		GitHubLogin: key, GitHubID: githubID, CreatedAt: now(),
+	}
+	m.identities[ident.ID] = ident
+	m.loginIndex[key] = ident.ID
+	return ident
+}
+
+func (m *Memory) UpsertHumanIdentity(_ context.Context, login, githubID, displayName string) (*models.Identity, error) {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return nil, fmt.Errorf("%w: github_login", ErrNotFound)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ident := m.upsertHumanLocked(login, githubID, displayName)
+	return &ident, nil
+}
+
+func (m *Memory) GetHumanIdentityByLogin(_ context.Context, login string) (*models.Identity, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.loginIndex[strings.ToLower(strings.TrimSpace(login))]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	ident := m.identities[id]
+	return &ident, nil
+}
+
+func (m *Memory) GetPreferences(_ context.Context, identity string) (*models.Preferences, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p, ok := m.prefs[identity]; ok {
+		return &p, nil
+	}
+	return &models.Preferences{Identity: identity}, nil
+}
+
+func (m *Memory) SetPreferences(_ context.Context, in models.Preferences) (*models.Preferences, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	in.UpdatedAt = now()
+	m.prefs[in.Identity] = in
+	return &in, nil
 }

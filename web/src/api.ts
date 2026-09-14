@@ -91,17 +91,23 @@ export const api = {
       }),
     });
   },
-  listDecisions: (projectId: string) =>
-    request<{ items: import("./types").Decision[] }>(
-      `/v1/projects/${projectId}/decisions`,
-    ),
+  listDecisions: (projectId: string, opts?: { inbox?: boolean; mine?: boolean; memberId?: string }) => {
+    const q = new URLSearchParams();
+    if (opts?.inbox) q.set("inbox", "1");
+    if (opts?.mine) q.set("mine", "1");
+    if (opts?.memberId) q.set("member_id", opts.memberId);
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return request<{ items: import("./types").Decision[] }>(
+      `/v1/projects/${projectId}/decisions${suffix}`,
+    );
+  },
   listDecisionMemories: (projectId: string) =>
     request<{ items: { fingerprint: string; prompt: string; answer: string }[] }>(
       `/v1/projects/${projectId}/decisions/memories`,
     ),
   createDecision: (
     projectId: string,
-    body: { prompt: string; options: string[]; recommendation: string },
+    body: { prompt: string; options: string[]; recommendation: string; assignee_id?: string },
   ) =>
     request(`/v1/projects/${projectId}/decisions`, {
       method: "POST",
@@ -111,6 +117,11 @@ export const api = {
     request(`/v1/decisions/${id}/answer`, {
       method: "POST",
       body: JSON.stringify({ answer }),
+    }),
+  startRun: (taskId: string) =>
+    request<import("./types").Run>(`/v1/tasks/${taskId}/runs`, {
+      method: "POST",
+      body: "{}",
     }),
   getTaskDetail: (taskId: string) =>
     request<import("./types").TaskDetail>(`/v1/tasks/${taskId}/detail`),
@@ -170,4 +181,13 @@ export const api = {
     ),
   revokeInvite: (id: string) =>
     request<import("./types").Invite>(`/v1/invites/${id}`, { method: "DELETE" }),
+  getPreferences: (memberId: string) =>
+    request<import("./types").Preferences>(
+      `/v1/me/preferences?member_id=${encodeURIComponent(memberId)}`,
+    ),
+  patchPreferences: (memberId: string, body: { mute_mentions?: boolean; mute_routines?: boolean }) =>
+    request<import("./types").Preferences>(
+      `/v1/me/preferences?member_id=${encodeURIComponent(memberId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
 };

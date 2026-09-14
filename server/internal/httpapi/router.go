@@ -104,6 +104,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{projectID}/routines", s.createRoutine)
 	mux.HandleFunc("POST /v1/routines/{routineID}/run", s.fireRoutine)
 
+	mux.HandleFunc("GET /v1/me/preferences", s.getPreferences)
+	mux.HandleFunc("PATCH /v1/me/preferences", s.patchPreferences)
+
 	mux.HandleFunc("GET /v1/notifications", s.listNotifications)
 	mux.HandleFunc("POST /v1/notifications/read-all", s.readAllNotifications)
 	mux.HandleFunc("POST /v1/notifications/{notificationID}/read", s.readNotification)
@@ -132,7 +135,7 @@ func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications", "invites",
+			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications", "invites", "preferences",
 		},
 	})
 }

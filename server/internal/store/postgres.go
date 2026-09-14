@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/codemodify/buildbee/server/internal/migrate"
@@ -215,6 +216,16 @@ func (p *Postgres) AddMember(ctx context.Context, in models.Member) (*models.Mem
 	}
 	in.ID = uuid.NewString()
 	in.CreatedAt = time.Now().UTC()
+	if in.Kind == "human" && strings.TrimSpace(in.GitHubLogin) != "" {
+		ident, err := p.UpsertHumanIdentity(ctx, in.GitHubLogin, in.GitHubID, in.DisplayName)
+		if err != nil {
+			return nil, err
+		}
+		in.Identity = ident.ID
+		in.GitHubLogin = ident.GitHubLogin
+		in.GitHubID = ident.GitHubID
+		in.DisplayName = ident.DisplayName
+	}
 	if in.Identity == "" {
 		if in.Kind == "bot" {
 			in.Identity = "bot:" + uuid.NewString()
@@ -459,7 +470,7 @@ func (p *Postgres) ListDecisions(ctx context.Context, projectID string) ([]model
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at, COALESCE(assignee_member_id::text, '')
 		FROM decisions WHERE project_id=$1 ORDER BY created_at DESC`, projectID)
 	if err != nil {
 		return nil, err
@@ -476,7 +487,7 @@ func (p *Postgres) ListDecisions(ctx context.Context, projectID string) ([]model
 	return out, rows.Err()
 }
 
-func (p *Postgres) CreateDecision(ctx context.Context, projectID, prompt, recommendation string, options []string) (*models.Decision, error) {
+func (p *Postgres) CreateDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, assigneeMemberID string) (*models.Decision, error) {
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
@@ -489,17 +500,21 @@ func (p *Postgres) CreateDecision(ctx context.Context, projectID, prompt, recomm
 	}
 	d := models.Decision{
 		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
-		Options: options, Recommendation: recommendation, CreatedAt: time.Now().UTC(),
+		Options: options, Recommendation: recommendation, AssigneeMemberID: assigneeMemberID, CreatedAt: time.Now().UTC(),
 	}
-	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.CreatedAt); err != nil {
+	var assignee any
+	if assigneeMemberID != "" {
+		assignee = assigneeMemberID
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, created_at, assignee_member_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.CreatedAt, assignee); err != nil {
 		return nil, err
 	}
 	_ = p.addActivity(ctx, projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "create"})
 	return &d, nil
 }
 
-func (p *Postgres) CreateReusedDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, answer string) (*models.Decision, error) {
+func (p *Postgres) CreateReusedDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, answer, assigneeMemberID string) (*models.Decision, error) {
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
@@ -515,10 +530,14 @@ func (p *Postgres) CreateReusedDecision(ctx context.Context, projectID, prompt, 
 		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
 		Options: options, Recommendation: recommendation, Answer: answer,
 		Reused: true, Fingerprint: models.DecisionFingerprint(prompt),
-		CreatedAt: t, AnsweredAt: &t,
+		AssigneeMemberID: assigneeMemberID, CreatedAt: t, AnsweredAt: &t,
 	}
-	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, answer, answered_at, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.Answer, d.AnsweredAt, d.CreatedAt); err != nil {
+	var assignee any
+	if assigneeMemberID != "" {
+		assignee = assigneeMemberID
+	}
+	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, answer, answered_at, created_at, assignee_member_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.Answer, d.AnsweredAt, d.CreatedAt, assignee); err != nil {
 		return nil, err
 	}
 	_ = p.addActivity(ctx, projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "reuse", "answer": answer, "fingerprint": d.Fingerprint})
@@ -593,7 +612,7 @@ func (p *Postgres) ListDecisionMemories(ctx context.Context, projectID string) (
 }
 
 func (p *Postgres) getDecision(ctx context.Context, id string) (*models.Decision, error) {
-	row := p.pool.QueryRow(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at FROM decisions WHERE id=$1`, id)
+	row := p.pool.QueryRow(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at, COALESCE(assignee_member_id::text, '') FROM decisions WHERE id=$1`, id)
 	d, err := scanDecision(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -612,7 +631,7 @@ func scanDecision(row scannable) (models.Decision, error) {
 	var d models.Decision
 	var raw []byte
 	var answered *time.Time
-	err := row.Scan(&d.ID, &d.ProjectID, &d.Prompt, &raw, &d.Recommendation, &d.Answer, &d.CreatedAt, &answered)
+	err := row.Scan(&d.ID, &d.ProjectID, &d.Prompt, &raw, &d.Recommendation, &d.Answer, &d.CreatedAt, &answered, &d.AssigneeMemberID)
 	if err != nil {
 		return d, err
 	}
@@ -1189,4 +1208,73 @@ func scanInvite(row scannable) (models.Invite, error) {
 		inv.AcceptedMemberID = *acceptedID
 	}
 	return inv, err
+}
+
+func (p *Postgres) UpsertHumanIdentity(ctx context.Context, login, githubID, displayName string) (*models.Identity, error) {
+	login = strings.ToLower(strings.TrimSpace(login))
+	if login == "" {
+		return nil, fmt.Errorf("%w: github_login", ErrNotFound)
+	}
+	if existing, err := p.GetHumanIdentityByLogin(ctx, login); err == nil && existing != nil {
+		if existing.GitHubID == "" && githubID != "" {
+			_, _ = p.pool.Exec(ctx, `UPDATE identities SET github_id=$2 WHERE id=$1`, existing.ID, githubID)
+			existing.GitHubID = githubID
+		}
+		return existing, nil
+	}
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		name = login
+	}
+	ident := models.Identity{
+		ID: uuid.NewString(), Kind: "human", DisplayName: name,
+		GitHubLogin: login, GitHubID: githubID, CreatedAt: time.Now().UTC(),
+	}
+	_, err := p.pool.Exec(ctx, `INSERT INTO identities (id, kind, display_name, github_login, github_id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`, ident.ID, ident.Kind, ident.DisplayName, ident.GitHubLogin, ident.GitHubID, ident.CreatedAt)
+	if err != nil {
+		if existing, e2 := p.GetHumanIdentityByLogin(ctx, login); e2 == nil {
+			return existing, nil
+		}
+		return nil, err
+	}
+	return &ident, nil
+}
+
+func (p *Postgres) GetHumanIdentityByLogin(ctx context.Context, login string) (*models.Identity, error) {
+	var ident models.Identity
+	err := p.pool.QueryRow(ctx, `SELECT id, kind, display_name, github_login, github_id, created_at FROM identities WHERE lower(github_login)=lower($1)`, strings.TrimSpace(login)).
+		Scan(&ident.ID, &ident.Kind, &ident.DisplayName, &ident.GitHubLogin, &ident.GitHubID, &ident.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ident, nil
+}
+
+func (p *Postgres) GetPreferences(ctx context.Context, identity string) (*models.Preferences, error) {
+	var pref models.Preferences
+	err := p.pool.QueryRow(ctx, `SELECT identity, mute_mentions, mute_routines, updated_at FROM member_preferences WHERE identity=$1`, identity).
+		Scan(&pref.Identity, &pref.MuteMentions, &pref.MuteRoutines, &pref.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &models.Preferences{Identity: identity}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pref, nil
+}
+
+func (p *Postgres) SetPreferences(ctx context.Context, in models.Preferences) (*models.Preferences, error) {
+	in.UpdatedAt = time.Now().UTC()
+	_, err := p.pool.Exec(ctx, `INSERT INTO member_preferences (identity, mute_mentions, mute_routines, updated_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (identity) DO UPDATE SET mute_mentions=$2, mute_routines=$3, updated_at=$4`,
+		in.Identity, in.MuteMentions, in.MuteRoutines, in.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &in, nil
 }

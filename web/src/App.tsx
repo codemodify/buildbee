@@ -8,6 +8,7 @@ import type {
   Message,
   Invite,
   Notification,
+  Preferences,
   Project,
   Routine,
   Task,
@@ -136,7 +137,66 @@ function Chrome() {
           </a>
         )}
       </div>
+      <PrefsBar />
       <InboxBell />
+    </div>
+  );
+}
+
+function PrefsBar() {
+  const [memberId, setMemberId] = useState("");
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const projs = await api.listProjects();
+        for (const p of projs.items) {
+          const m = await api.listMembers(p.id);
+          const human = m.items.find((x) => x.kind === "human");
+          if (human) {
+            setMemberId(human.id);
+            setPrefs(await api.getPreferences(human.id));
+            return;
+          }
+        }
+      } catch (e) {
+        setError(formatError(e));
+      }
+    })();
+  }, []);
+
+  if (!memberId || !prefs) {
+    return error ? <span className="text-xs text-red-400">{error}</span> : null;
+  }
+
+  async function patch(next: Partial<Preferences>) {
+    try {
+      setPrefs(await api.patchPreferences(memberId, next));
+    } catch (e) {
+      setError(formatError(e));
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-zinc-400">
+      <label className="flex items-center gap-1">
+        <input
+          type="checkbox"
+          checked={prefs.mute_mentions}
+          onChange={(e) => void patch({ mute_mentions: e.target.checked })}
+        />
+        mute mentions
+      </label>
+      <label className="flex items-center gap-1">
+        <input
+          type="checkbox"
+          checked={prefs.mute_routines}
+          onChange={(e) => void patch({ mute_routines: e.target.checked })}
+        />
+        mute routines
+      </label>
     </div>
   );
 }
@@ -367,6 +427,8 @@ function ProjectPage({
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteGithub, setInviteGithub] = useState("");
   const [inviteRole, setInviteRole] = useState("member");
+  const [assigneeId, setAssigneeId] = useState("");
+  const [mineOnly, setMineOnly] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
 
@@ -382,11 +444,15 @@ function ProjectPage({
   async function loadProject() {
     const p = await api.getProject(projectId);
     setProject(p);
-    const [m, c, t, d, rts, plist, act, inv] = await Promise.all([
-      api.listMembers(projectId),
+    const m = await api.listMembers(projectId);
+    const me = m.items.find((x) => x.kind === "human");
+    const [c, t, d, rts, plist, act, inv] = await Promise.all([
       api.listChannels(projectId),
       api.listTasks(projectId),
-      api.listDecisions(projectId),
+      api.listDecisions(
+        projectId,
+        mineOnly && me?.id ? { mine: true, memberId: me.id } : undefined,
+      ),
       api.listRoutines(projectId),
       api.listProjects(),
       api.listActivity(projectId),
@@ -405,7 +471,7 @@ function ProjectPage({
 
   useEffect(() => {
     void loadProject().catch((e) => setError(formatError(e)));
-  }, [projectId]);
+  }, [projectId, mineOnly]);
 
   useEffect(() => {
     if (!activeChannel) return;
@@ -496,6 +562,7 @@ function ProjectPage({
         prompt: prompt.trim(),
         options: opts,
         recommendation: opts[0] ?? "",
+        assignee_id: assigneeId || undefined,
       });
       setPrompt("");
       const d = await api.listDecisions(projectId);
@@ -645,9 +712,14 @@ function ProjectPage({
                 type="button"
                 className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200"
                 onClick={() => {
-                  void api.syncIssues(projectId).then(async () => {
-                    setTasks((await api.listTasks(projectId)).items);
-                  });
+                  void api
+                    .syncIssues(projectId)
+                    .then(async () => {
+                      setTasks((await api.listTasks(projectId)).items);
+                      setToast("Issues synced");
+                      setError("");
+                    })
+                    .catch((err) => setError(formatError(err)));
                 }}
               >
                 Sync Issues
@@ -720,7 +792,17 @@ function ProjectPage({
           </section>
 
           <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <h2 className="text-sm font-medium text-zinc-400">Decisions</h2>
+            <h2 className="flex items-center justify-between text-sm font-medium text-zinc-400">
+              Decisions
+              <label className="flex items-center gap-1 text-xs font-normal">
+                <input
+                  type="checkbox"
+                  checked={mineOnly}
+                  onChange={(e) => setMineOnly(e.target.checked)}
+                />
+                mine
+              </label>
+            </h2>
             <form onSubmit={addDecision} className="mt-2 space-y-1">
               <input
                 className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm"
@@ -734,6 +816,21 @@ function ProjectPage({
                 onChange={(e) => setOptions(e.target.value)}
                 placeholder="options, comma separated"
               />
+              <select
+                className="w-full rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs"
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                aria-label="Decision assignee"
+              >
+                <option value="">All humans (no assignee)</option>
+                {members
+                  .filter((m) => m.kind === "human")
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.display_name}
+                    </option>
+                  ))}
+              </select>
               <button
                 className="rounded bg-zinc-800 px-2 py-1 text-sm"
                 type="submit"
@@ -749,7 +846,14 @@ function ProjectPage({
               ) : null}
               {decisions.map((d) => (
                 <li key={d.id} className="text-sm">
-                  <p className="font-medium">{d.prompt}</p>
+                    <p className="font-medium">
+                      {d.prompt}
+                      {d.assignee_id ? (
+                        <span className="ml-1 text-xs text-zinc-500">
+                          → {members.find((m) => m.id === d.assignee_id)?.display_name ?? "assigned"}
+                        </span>
+                      ) : null}
+                    </p>
                   {d.answer ? (
                     <p className="text-emerald-400">
                       Answer: {d.answer}
@@ -910,7 +1014,11 @@ function ProjectPage({
                   {a.payload?.name ? String(a.payload.name) : ""}
                 </li>
               ))}
-              {activity.length === 0 ? <li>No Activity yet</li> : null}
+              {activity.length === 0 ? (
+                <li>
+                  <Empty>No Activity yet.</Empty>
+                </li>
+              ) : null}
             </ul>
           </section>
 
@@ -932,9 +1040,14 @@ function ProjectPage({
                     type="button"
                     className="rounded bg-zinc-800 px-2 py-0.5 text-xs"
                     onClick={() => {
-                      void api.fireRoutine(rt.id).then(async () => {
-                        setTasks((await api.listTasks(projectId)).items);
-                      });
+                      void api
+                        .fireRoutine(rt.id)
+                        .then(async () => {
+                          setTasks((await api.listTasks(projectId)).items);
+                          setToast("Routine started");
+                          setError("");
+                        })
+                        .catch((err) => setError(formatError(err)));
                     }}
                   >
                     Run
@@ -956,6 +1069,7 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
   const [note, setNote] = useState("");
   const [autorun, setAutorun] = useState(false);
   const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
 
   async function refresh() {
     const [d, m] = await Promise.all([
@@ -996,6 +1110,24 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
       </a>
       <h1 className="mt-3 text-2xl font-semibold">{detail?.title ?? "Task"}</h1>
       <p className="text-sm text-zinc-500">status {detail?.status}</p>
+      {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
+      {toast ? <p className="mt-2 text-sm text-emerald-400">{toast}</p> : null}
+      <button
+        type="button"
+        className="mt-3 rounded bg-zinc-800 px-3 py-1 text-sm"
+        onClick={() => {
+          void api
+            .startRun(taskId)
+            .then(async () => {
+              setToast("Run started");
+              setError("");
+              await refresh();
+            })
+            .catch((err) => setError(formatError(err)));
+        }}
+      >
+        Start Run
+      </button>
       {detail?.issue_url ? (
         <p className="mt-1 text-sm">
           Issues{" "}
@@ -1004,7 +1136,6 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
           </a>
         </p>
       ) : null}
-      {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
 
       <form onSubmit={handoff} className="mt-6 flex flex-wrap items-end gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
         <label className="text-xs text-zinc-400">
