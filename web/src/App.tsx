@@ -433,9 +433,10 @@ function SettingsPage() {
 }
 
 function HomePage() {
-  const [name, setName] = useState("My Project");
+  const [name, setName] = useState("");
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState("");
+  const canCreate = name.trim().length > 0;
 
   async function refresh() {
     try {
@@ -452,9 +453,11 @@ function HomePage() {
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
+    const title = name.trim();
+    if (!title) return;
     setError("");
     try {
-      const p = await api.createProject(name.trim());
+      const p = await api.createProject(title);
       window.location.hash = `#/projects/${p.id}`;
     } catch (err) {
       setError(formatError(err));
@@ -481,7 +484,8 @@ function HomePage() {
           />
           <button
             type="submit"
-            className="rounded-md bg-amber-400 px-4 py-2 font-medium text-zinc-950"
+            disabled={!canCreate}
+            className="rounded-md bg-amber-400 px-4 py-2 font-medium text-zinc-950 disabled:opacity-50"
           >
             Create
           </button>
