@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -125,7 +126,16 @@ func TestNewRefusesRealAgentsUnlessAllowed(t *testing.T) {
 	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"claude"}}); !errors.Is(err, ErrHostAgentsDisabled) {
 		t.Fatalf("got %v", err)
 	}
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"claude"}, AllowHostAgents: true}); err != nil {
+	t.Setenv("PATH", t.TempDir())
+	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"claude"}, AllowHostAgents: true}); !errors.Is(err, acp.ErrNoAgent) {
+		t.Fatalf("an agent whose ACP command is missing: %v", err)
+	}
+	sh, err := exec.LookPath("/bin/sh")
+	if err != nil {
+		t.Skip("no /bin/sh")
+	}
+	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"claude"}, AllowHostAgents: true,
+		Commands: map[string][]string{"claude": {sh}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []Config{{Slots: 1, Agents: []string{"fake"}}, {Name: "w", Agents: []string{"fake"}}, {Name: "w", Slots: 1}, {Name: "w", Slots: 1, Agents: []string{"hal"}}} {
@@ -245,5 +255,15 @@ func TestSlotsBoundParallelRuns(t *testing.T) {
 	}
 	if p := peak.Load(); p != slots {
 		t.Fatalf("peak parallel runs %d, want %d", p, slots)
+	}
+}
+
+func TestRunTimeoutFailsTheRun(t *testing.T) {
+	s := newStack(t)
+	r := s.queue("Slow job")
+	s.start(Config{RunTimeout: 100 * time.Millisecond, Exec: blockingExec(make(chan string, 1))})
+	got := s.wait(r.ID, finished)
+	if got.Status != models.RunFailed || !strings.Contains(got.Detail, "time limit of 100ms") {
+		t.Fatalf("run: %+v", got)
 	}
 }

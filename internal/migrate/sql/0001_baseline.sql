@@ -169,7 +169,7 @@ CREATE TABLE run_events (
     id UUID PRIMARY KEY,
     run_id UUID NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
     seq INTEGER NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('token', 'tool_call', 'tool_result', 'status', 'log')),
+    kind TEXT NOT NULL CHECK (kind IN ('token', 'thought', 'plan', 'tool_call', 'tool_result', 'usage', 'status', 'log')),
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (run_id, seq)

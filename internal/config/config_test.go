@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) Getenv { return func(k string) string { return m[k] } }
@@ -39,24 +40,27 @@ func TestLoadServerRejectsBadInput(t *testing.T) {
 
 func TestLoadWorker(t *testing.T) {
 	c, err := LoadWorker(env(map[string]string{"BUILDBEE_URL": "http://buildbee.lan:8080/",
-		"BUILDBEE_WORKER_NAME": "gpu-box", "BUILDBEE_WORKER_AGENTS": " Claude, codex,claude ", "BUILDBEE_WORKER_SLOTS": "12"}))
+		"BUILDBEE_WORKER_NAME": "gpu-box", "BUILDBEE_WORKER_AGENTS": " Claude, codex,claude ", "BUILDBEE_WORKER_SLOTS": "12",
+		"BUILDBEE_AGENT_CLAUDE": "npx -y @agentclientprotocol/claude-agent-acp", "BUILDBEE_WORKER_RUN_TIMEOUT": "45m"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.ServerURL != "http://buildbee.lan:8080" || c.Name != "gpu-box" || c.Slots != 12 ||
-		!slices.Equal(c.Agents, []string{"claude", "codex"}) || c.AllowHostAgents {
+		!slices.Equal(c.Agents, []string{"claude", "codex"}) || c.AllowHostAgents || c.RunTimeout != 45*time.Minute ||
+		!slices.Equal(c.AgentCommands["claude"], []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp"}) {
 		t.Fatalf("worker: %+v", c)
 	}
 	for _, bad := range []map[string]string{
 		{"BUILDBEE_URL": "buildbee.lan"},
 		{"BUILDBEE_WORKER_SLOTS": "0"},
 		{"BUILDBEE_WORKER_SLOTS": "many"},
+		{"BUILDBEE_WORKER_RUN_TIMEOUT": "5s"},
 	} {
 		if _, err := LoadWorker(env(bad)); err == nil {
 			t.Fatalf("expected an error for %v", bad)
 		}
 	}
-	if c, err := LoadWorker(env(nil)); err != nil || c.Slots != 4 || c.Agents != nil {
+	if c, err := LoadWorker(env(nil)); err != nil || c.Slots != 4 || c.Agents != nil || c.RunTimeout != 2*time.Hour {
 		t.Fatalf("defaults: %+v %v", c, err)
 	}
 }

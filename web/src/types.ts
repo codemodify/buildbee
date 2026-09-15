@@ -93,7 +93,7 @@ export type RunEvent = {
   id: string;
   run_id: string;
   seq: number;
-  kind: "token" | "tool_call" | "tool_result" | "status" | "log" | string;
+  kind: "token" | "thought" | "plan" | "tool_call" | "tool_result" | "usage" | "status" | "log" | string;
   payload: Record<string, unknown>;
   created_at: string;
 };

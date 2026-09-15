@@ -49,7 +49,7 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | [`internal/httpapi`](internal/httpapi) | Thin HTTP handlers, identity resolution, middleware |
 | [`internal/ws`](internal/ws) | WebSocket hub with cursor replay |
 | [`internal/store`](internal/store) | Postgres persistence; [`internal/migrate`](internal/migrate) holds the schema |
-| [`internal/worker`](internal/worker) | claim loop, heartbeats and reporting; [`acp`](internal/worker/acp) agent driver |
+| [`internal/worker`](internal/worker) | claim loop, heartbeats and reporting; [`acp`](internal/worker/acp) Agent Client Protocol client |
 | [`internal/config`](internal/config) | Validated configuration for each binary |
 | [`internal/testdb`](internal/testdb) | Per-test Postgres databases |
 | [`web/`](web/) | Vite + React + TypeScript + Tailwind UI |
@@ -73,6 +73,8 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_WORKER_AGENTS` | worker | detected | agents to offer, comma-separated ([workers.md](docs/workers.md)) |
 | `BUILDBEE_WORKER_SLOTS` | worker | `4` | Runs executed at once |
 | `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` | worker | `0` | `1` lets real agent CLIs run on the worker host (see below) |
+| `BUILDBEE_WORKER_RUN_TIMEOUT` | worker | `2h` | Run time limit |
+| `BUILDBEE_AGENT_<NAME>` | worker | built in | command that starts an agent over ACP |
 | `BUILDBEE_TEST_DATABASE_URL` | tests | throwaway container | Postgres for `go test` |
 
 Each binary validates its configuration at startup and refuses to start on bad input.

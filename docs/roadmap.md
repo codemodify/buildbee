@@ -32,6 +32,14 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Only the claiming worker writes to a Run; each Run carries its agent and prompt; Bots have an `agent`; Projects have `repo_url` and `default_branch`
 - Workers open no port and run N slots; the CLI queues Runs and `--follow`s them; the push-style worker endpoint and the command Sandbox are gone
 
+## Phase 3c — ACP client (done)
+
+- Agents run over the Agent Client Protocol: `claude-agent-acp`, `codex-acp`, `grok agent stdio`, `opencode acp`, `goose acp`, each using its CLI's own login on the worker
+- Replies, reasoning, plans, tool calls and results and usage stream as RunEvents, merged so a Run posts a few events per second
+- Unattended sessions: permission-skipping mode when offered, otherwise one-time approvals, each logged; login-required errors say what to do
+- Cancel sends `session/cancel`, then kills the agent's process group; Runs have a time limit
+- The fake agent is an in-process ACP agent, so tests exercise the same client code as real agents
+
 ## Phase 2 — Chat UX
 
 - Channels, threads, direct messages, @people and @agents, unread counts, presence
@@ -41,7 +49,7 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 ## Phase 3 — Agent harness
 
 - Per-Run container: repo worktree at a pinned commit, agent CLI inside, only the credentials that Run needs, no Docker socket, resource and output limits, process-group kill
-- ACP over stdio for `claude-agent-acp`, `goose acp` and `codex-acp`: tool events, permission requests become Decisions, answers flow back to the agent, mid-turn steering
+- Permission requests as Decisions for Projects that want them, answers flowing back to the agent; mid-turn steering from chat
 - Output: pushed branch, diff Artifact and PR; logs in object storage
 
 ## Phase 4 — Autonomy

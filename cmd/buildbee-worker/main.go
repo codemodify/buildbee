@@ -33,8 +33,8 @@ func run() error {
 	switch {
 	case len(agents) > 0:
 	case cfg.AllowHostAgents:
-		if agents = acp.Installed(); len(agents) == 0 {
-			return errors.New("no agent CLI is on PATH; install one or set BUILDBEE_WORKER_AGENTS=fake")
+		if agents = acp.Installed(cfg.AgentCommands); len(agents) == 0 {
+			return errors.New("no agent's ACP command is on PATH (see docs/workers.md); install one or set BUILDBEE_WORKER_AGENTS=fake")
 		}
 	default:
 		agents = []string{"fake"}
@@ -43,8 +43,8 @@ func run() error {
 	if cfg.AllowHostAgents {
 		slog.Warn("BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1: agent CLIs run on this host with its files and logins")
 	}
-	w, err := worker.New(worker.Config{Server: cfg.ServerURL, Name: cfg.Name, Agents: agents,
-		Slots: cfg.Slots, AllowHostAgents: cfg.AllowHostAgents})
+	w, err := worker.New(worker.Config{Server: cfg.ServerURL, Name: cfg.Name, Agents: agents, Slots: cfg.Slots,
+		AllowHostAgents: cfg.AllowHostAgents, Commands: cfg.AgentCommands, RunTimeout: cfg.RunTimeout})
 	if err != nil {
 		return err
 	}

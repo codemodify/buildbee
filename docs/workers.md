@@ -33,8 +33,28 @@ buildbee-worker
 | `BUILDBEE_WORKER_AGENTS` | see below | comma-separated agents to offer |
 | `BUILDBEE_WORKER_SLOTS` | `4` | Runs executed at once (1–256) |
 | `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` | `0` | `1` lets real agent CLIs run on this host |
+| `BUILDBEE_WORKER_RUN_TIMEOUT` | `2h` | a Run that takes longer is stopped and failed |
+| `BUILDBEE_AGENT_<NAME>` | see below | command that starts an agent, e.g. `BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp"` |
 
-Without `BUILDBEE_WORKER_AGENTS`, a worker allowed to run host agents offers every supported agent CLI on its `PATH`; otherwise it offers only `fake`. A worker refuses to start if asked to offer a real agent without `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`.
+Without `BUILDBEE_WORKER_AGENTS`, a worker allowed to run host agents offers every agent whose command is on its `PATH`; otherwise it offers only `fake`. A worker refuses to start if asked to offer a real agent without `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`, or one whose command is missing.
+
+## Agents
+
+Workers talk to agents over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), the same way Zed and Block's Buzz do: one agent process per Run, JSON-RPC over its stdin and stdout.
+
+| Agent | Command | Notes |
+| --- | --- | --- |
+| `claude` | `claude-agent-acp` | adapter for Claude Code: `npm install -g @agentclientprotocol/claude-agent-acp` |
+| `codex` | `codex-acp` | adapter for Codex: `npm install -g @zed-industries/codex-acp` |
+| `grok` | `grok agent --always-approve --no-leader stdio` | built into the Grok CLI |
+| `opencode` | `opencode acp` | built in |
+| `goose` | `goose acp` | built in |
+
+For each Run the worker starts the agent in the Run's directory, opens a session, sends the prompt, and streams what the agent does as RunEvents: its reply (`token`), reasoning (`thought`), `plan`, `tool_call` and `tool_result`, context `usage`, and its stderr as `log`. Reply chunks are merged, so a Run posts a few events per second rather than one per token.
+
+Agents run unattended. The worker switches the session to a mode that skips permission prompts when the agent offers one (for example `bypassPermissions`), and approves, once, any permission the agent still asks for; each approval is logged on the Run. Canceling a Run sends `session/cancel`, waits 10 seconds, then kills the agent and every process it started.
+
+If an agent answers that it needs a login, the Run fails with a message saying so: log in to that CLI on the worker machine, as the worker's user.
 
 The compose file's `worker` profile starts a worker that offers only `fake`, for demos and the smoke test.
 

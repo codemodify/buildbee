@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 3a (Run queue)
+## Unreleased — LAN rebuild, Phase 3c (ACP client)
+
+### Breaking
+- Workers run agents over the Agent Client Protocol instead of one-shot CLI calls: Claude Code needs `claude-agent-acp`, Codex needs `codex-acp` (see [docs/workers.md](docs/workers.md))
+- New RunEvent kinds `thought`, `plan` and `usage`; recreate the database
+
+### Added
+- `BUILDBEE_AGENT_<NAME>` launch overrides and `BUILDBEE_WORKER_RUN_TIMEOUT`
+- Unattended sessions (permission-skipping mode or logged one-time approvals), cancel with process-group kill, login-required errors that say what to do
+
+## LAN rebuild, Phase 3a (Run queue)
 
 ### Breaking
 - Workers pull Runs: `POST /v1/worker/claim` and `POST /v1/runs/{id}/heartbeat`. The worker's `POST /runs` endpoint, `BUILDBEE_WORKER_ADDR`, `BUILDBEE_FAKE_SANDBOX` and the command Sandbox are gone

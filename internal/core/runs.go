@@ -182,7 +182,7 @@ func (w *work) runEvent(ctx context.Context, runID, kind string, payload map[str
 func (s *Service) AppendRunEvent(ctx context.Context, a Actor, runID, kind string, payload map[string]any) (*models.RunEvent, error) {
 	k := models.NormalizeRunEventKind(kind)
 	if k == "" {
-		return nil, invalid("kind must be token, tool_call, tool_result, status or log")
+		return nil, invalid("kind must be token, thought, plan, tool_call, tool_result, usage, status or log")
 	}
 	var out *models.RunEvent
 	err := s.tx(ctx, func(w *work) error {

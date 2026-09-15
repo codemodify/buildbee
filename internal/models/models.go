@@ -28,11 +28,16 @@ const (
 	TypeMemory   = "memory"
 )
 
-// RunEvent kinds streamed during a Run (ACP tokens, tools, status, logs).
+// RunEvent kinds streamed during a Run: the agent's reply (token), its
+// reasoning (thought), its plan, tool calls and their results, token usage,
+// status changes and logs.
 const (
 	RunEventToken      = "token"
+	RunEventThought    = "thought"
+	RunEventPlan       = "plan"
 	RunEventToolCall   = "tool_call"
 	RunEventToolResult = "tool_result"
+	RunEventUsage      = "usage"
 	RunEventStatus     = "status"
 	RunEventLog        = "log"
 )
@@ -41,7 +46,7 @@ const (
 func NormalizeRunEventKind(kind string) string {
 	k := strings.ToLower(strings.TrimSpace(kind))
 	switch k {
-	case RunEventToken, RunEventToolCall, RunEventToolResult, RunEventStatus, RunEventLog:
+	case RunEventToken, RunEventThought, RunEventPlan, RunEventToolCall, RunEventToolResult, RunEventUsage, RunEventStatus, RunEventLog:
 		return k
 	default:
 		return ""

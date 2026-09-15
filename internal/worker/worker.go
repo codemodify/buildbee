@@ -22,7 +22,7 @@ import (
 )
 
 // Exec runs agent on prompt in workDir, calling emit for each piece of
-// output, and returns the whole transcript.
+// output, and returns the transcript.
 type Exec func(ctx context.Context, agent, workDir, prompt string, emit acp.Handler) (string, error)
 
 // Config describes one worker process.
@@ -34,8 +34,12 @@ type Config struct {
 	// AllowHostAgents lets real agent CLIs run directly on this host, with
 	// its files and logins. Off by default; the fake agent needs nothing.
 	AllowHostAgents bool
-	Exec            Exec // nil runs the agent CLI (acp.Stream)
-	Log             *slog.Logger
+	// Commands overrides how agents are started (see acp.Launch).
+	Commands map[string][]string
+	// RunTimeout stops a Run that takes longer (default 2h).
+	RunTimeout time.Duration
+	Exec       Exec // nil runs the agent over ACP
+	Log        *slog.Logger
 }
 
 // ErrHostAgentsDisabled refuses real agents on a worker that has not opted in.
@@ -73,23 +77,39 @@ func New(cfg Config) (*Worker, error) {
 		if a == "" || !models.ValidAgent(a) {
 			return nil, fmt.Errorf("worker: unknown agent %q (known: %v)", a, models.Agents)
 		}
-		if a != "fake" && !cfg.AllowHostAgents {
+		if a == "fake" {
+			continue
+		}
+		if !cfg.AllowHostAgents {
 			return nil, fmt.Errorf("worker: agent %s: %w", a, ErrHostAgentsDisabled)
 		}
+		if cfg.Exec == nil {
+			if _, err := acp.Command(a, cfg.Commands); err != nil {
+				return nil, fmt.Errorf("worker: %w", err)
+			}
+		}
+	}
+	if cfg.RunTimeout <= 0 {
+		cfg.RunTimeout = 2 * time.Hour
 	}
 	if cfg.Exec == nil {
-		cfg.Exec = hostExec
+		commands := cfg.Commands
+		cfg.Exec = func(ctx context.Context, agent, workDir, prompt string, emit acp.Handler) (string, error) {
+			var argv []string
+			if agent != "fake" {
+				var err error
+				if argv, err = acp.Command(agent, commands); err != nil {
+					return "", err
+				}
+			}
+			return acp.Run(ctx, acp.Config{Agent: agent, Command: argv, WorkDir: workDir}, prompt, emit)
+		}
 	}
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}
 	return &Worker{cfg: cfg, api: newAPI(cfg.Server, cfg.Name), heartbeat: heartbeatEvery,
 		log: cfg.Log.With("worker", cfg.Name)}, nil
-}
-
-func hostExec(ctx context.Context, agent, workDir, prompt string, emit acp.Handler) (string, error) {
-	_, out, err := acp.Stream(ctx, acp.Config{Agent: agent, WorkDir: workDir}, prompt, emit)
-	return out, err
 }
 
 // Run executes Runs in cfg.Slots parallel loops until ctx ends. A Run in
@@ -128,6 +148,11 @@ type errStopped struct{ status models.RunStatus }
 
 func (e errStopped) Error() string { return "run was " + string(e.status) + " on the server" }
 
+// errTimeout means the Run took longer than the worker allows.
+type errTimeout struct{ limit time.Duration }
+
+func (e errTimeout) Error() string { return "the run exceeded its time limit of " + e.limit.String() }
+
 func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	run := c.Run
 	agent := run.Agent
@@ -142,6 +167,8 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 
 	runCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
+	runCtx, cancelTimeout := context.WithTimeoutCause(runCtx, w.cfg.RunTimeout, errTimeout{w.cfg.RunTimeout})
+	defer cancelTimeout()
 	go w.keepAlive(runCtx, run.ID, stop, log)
 
 	out, err := w.runAgent(runCtx, run, agent)
@@ -160,9 +187,12 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 		return
 	}
 	status, detail := models.RunSucceeded, "agent "+agent+" finished"
+	var timeout errTimeout
 	switch {
 	case ctx.Err() != nil:
 		status, detail = models.RunFailed, "worker "+w.cfg.Name+" stopped during the run"
+	case errors.As(context.Cause(runCtx), &timeout):
+		status, detail = models.RunFailed, timeout.Error()
 	case err != nil:
 		status, detail = models.RunFailed, err.Error()
 	}

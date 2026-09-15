@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Getenv matches os.Getenv so tests can pass a map lookup.
@@ -77,7 +78,14 @@ type Worker struct {
 	Agents          []string // BUILDBEE_WORKER_AGENTS, comma-separated; empty = decided by the worker
 	Slots           int      // BUILDBEE_WORKER_SLOTS: Runs executed at once (default 4)
 	AllowHostAgents bool     // BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1: run real agent CLIs on this host
+	// AgentCommands overrides how an agent is started, from
+	// BUILDBEE_AGENT_<NAME>, e.g. BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp".
+	AgentCommands map[string][]string
+	RunTimeout    time.Duration // BUILDBEE_WORKER_RUN_TIMEOUT (default 2h)
 }
+
+// agentNames are the agents a BUILDBEE_AGENT_<NAME> override may name.
+var agentNames = []string{"claude", "codex", "grok", "opencode", "goose"}
 
 // LoadWorker reads the worker configuration.
 func LoadWorker(getenv Getenv) (Worker, error) {
@@ -87,6 +95,15 @@ func LoadWorker(getenv Getenv) (Worker, error) {
 		Name:            value(getenv, "BUILDBEE_WORKER_NAME", host),
 		Slots:           4,
 		AllowHostAgents: value(getenv, "BUILDBEE_WORKER_ALLOW_HOST_AGENTS", "") == "1",
+		RunTimeout:      2 * time.Hour,
+	}
+	for _, a := range agentNames {
+		if argv := strings.Fields(getenv("BUILDBEE_AGENT_" + strings.ToUpper(a))); len(argv) > 0 {
+			if c.AgentCommands == nil {
+				c.AgentCommands = map[string][]string{}
+			}
+			c.AgentCommands[a] = argv
+		}
 	}
 	var errs []error
 	if u, err := url.Parse(c.ServerURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -105,6 +122,13 @@ func LoadWorker(getenv Getenv) (Worker, error) {
 			errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_SLOTS must be 1-256, got %q", v))
 		} else {
 			c.Slots = n
+		}
+	}
+	if v := value(getenv, "BUILDBEE_WORKER_RUN_TIMEOUT", ""); v != "" {
+		if d, err := time.ParseDuration(v); err != nil || d < time.Minute {
+			errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_RUN_TIMEOUT must be a duration of at least 1m, got %q", v))
+		} else {
+			c.RunTimeout = d
 		}
 	}
 	return c, errors.Join(errs...)
