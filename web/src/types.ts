@@ -52,6 +52,8 @@ export type Message = {
   reply_count?: number;
   last_reply_at?: string;
   task_id?: string;
+  edited_at?: string;
+  deleted_at?: string;
   created_at: string;
 };
 

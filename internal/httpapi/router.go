@@ -86,6 +86,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/channels/{id}/messages", s.postMessage)
 	mux.HandleFunc("POST /v1/channels/{id}/read", s.markChannelRead)
 	mux.HandleFunc("GET /v1/messages/{id}/thread", s.getThread)
+	mux.HandleFunc("PATCH /v1/messages/{id}", s.editMessage)
+	mux.HandleFunc("DELETE /v1/messages/{id}", s.deleteMessage)
 	mux.HandleFunc("POST /v1/messages/{id}/replies", s.postReply)
 	mux.HandleFunc("GET /v1/dms", s.listDirect)
 	mux.HandleFunc("POST /v1/dms", s.openDirect)

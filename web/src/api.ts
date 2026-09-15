@@ -104,6 +104,8 @@ export const api = {
   postMessage: (channelId: string, body: string) =>
     request<Posted>(`/v1/channels/${channelId}/messages`, post({ body })),
   thread: (messageId: string) => request<Thread>(`/v1/messages/${messageId}/thread${q({ limit: 500 })}`),
+  editMessage: (id: string, body: string) => request<Message>(`/v1/messages/${id}`, patch({ body })),
+  deleteMessage: (id: string) => request<unknown>(`/v1/messages/${id}`, { method: "DELETE" }),
   reply: (messageId: string, body: string) => request<Posted>(`/v1/messages/${messageId}/replies`, post({ body })),
 
   tasks: (projectId: string) => request<Items<Task>>(`/v1/projects/${projectId}/tasks`),

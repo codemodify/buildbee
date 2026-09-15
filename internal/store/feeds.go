@@ -64,12 +64,22 @@ func paged[T any](ctx context.Context, q querier, base string, args []any, p Pag
 // --- messages ---
 
 const messageCols = `id, seq, channel_id, project_id, member_id, body, COALESCE(thread_id::text, ''), reply_count, last_reply_at,
-	COALESCE(task_id::text, ''), created_at`
+	COALESCE(task_id::text, ''), edited_at, deleted_at, created_at`
+
+// EditMessage replaces a message's body.
+func (s *Store) EditMessage(ctx context.Context, id, body string, at time.Time) error {
+	return one(s.q.Exec(ctx, `UPDATE messages SET body=$2, edited_at=$3 WHERE id=$1 AND deleted_at IS NULL`, id, body, at))
+}
+
+// DeleteMessage empties a message and marks it deleted; its thread stays.
+func (s *Store) DeleteMessage(ctx context.Context, id string, at time.Time) error {
+	return one(s.q.Exec(ctx, `UPDATE messages SET body='', deleted_at=$2 WHERE id=$1 AND deleted_at IS NULL`, id, at))
+}
 
 func scanMessage(row pgx.Rows) (models.Message, error) {
 	var m models.Message
 	err := row.Scan(&m.ID, &m.Seq, &m.ChannelID, &m.ProjectID, &m.MemberID, &m.Body, &m.ThreadID, &m.ReplyCount, &m.LastReplyAt,
-		&m.TaskID, &m.CreatedAt)
+		&m.TaskID, &m.EditedAt, &m.DeletedAt, &m.CreatedAt)
 	return m, err
 }
 

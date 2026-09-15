@@ -385,3 +385,41 @@ func TestDeletingADMDeletesItForEveryone(t *testing.T) {
 		t.Fatalf("ada is told: %+v", n[0])
 	}
 }
+
+func TestPeopleEditAndDeleteTheirOwnMessages(t *testing.T) {
+	f := newFixture(t)
+	ada, bob := f.person("Ada"), f.person("Bob")
+	p := f.project(ada, "Edits")
+	ch := p.Channels[0].ID
+	posted, err := f.s.PostMessage(f.ctx, ada, ch, "helo")
+	f.must(err)
+	_, err = f.s.Reply(f.ctx, bob, posted.ID, "you mean hello")
+	f.must(err)
+	before := len(f.pub.topic("channel:" + ch))
+	m, err := f.s.EditMessage(f.ctx, ada, posted.ID, "hello @Builder")
+	f.must(err)
+	if m.Body != "hello @Builder" || m.EditedAt == nil {
+		t.Fatalf("edited: %+v", m)
+	}
+	if tasks, _ := f.s.Tasks(f.ctx, p.ID); len(tasks) != 0 {
+		t.Fatalf("an edit starts nothing: %+v", tasks)
+	}
+	if evs := f.pub.topic("channel:" + ch); len(evs) != before+1 || evs[len(evs)-1].Type != "message_edited" {
+		t.Fatalf("viewers hear of the edit: %+v", evs[before:])
+	}
+	if _, err := f.s.EditMessage(f.ctx, bob, posted.ID, "mine now"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("only the author edits: %v", err)
+	}
+	if err := f.s.DeleteMessage(f.ctx, bob, posted.ID); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("only the author deletes: %v", err)
+	}
+	f.must(f.s.DeleteMessage(f.ctx, ada, posted.ID))
+	th, err := f.s.Thread(f.ctx, ada, posted.ID, store.Page{})
+	f.must(err)
+	if th.Root.Body != "" || th.Root.DeletedAt == nil || len(th.Replies) != 1 {
+		t.Fatalf("deleted, thread kept: %+v", th)
+	}
+	if _, err := f.s.EditMessage(f.ctx, ada, posted.ID, "back"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("a deleted message stays deleted: %v", err)
+	}
+}

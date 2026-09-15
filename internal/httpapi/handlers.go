@@ -182,6 +182,22 @@ func (s *Server) listDMs(w http.ResponseWriter, r *http.Request) {
 	respondItems(s, w, list, err)
 }
 
+func (s *Server) editMessage(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Body string `json:"body"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	m, err := s.core.EditMessage(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Body)
+	respond(s, w, http.StatusOK, m, err)
+}
+
+func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request) {
+	err := s.core.DeleteMessage(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, map[string]bool{"deleted": true}, err)
+}
+
 func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	err := s.core.RemoveMember(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
 	respond(s, w, http.StatusOK, map[string]bool{"removed": true}, err)

@@ -1,9 +1,10 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { api } from "../api";
 import { go, parse } from "../route";
 import { Markdown, ago, clock } from "../text";
 import type { Message } from "../types";
 import { mentionNames, useCtx } from "./context";
-import { Avatar, Pill, cx, taskLabel, taskTone } from "./kit";
+import { Avatar, Button, Confirm, Pill, cx, inputClass, taskLabel, taskTone } from "./kit";
 
 /** MessageList renders messages with day dividers, grouping consecutive posts by one author. */
 export function MessageList({
@@ -65,10 +66,13 @@ export function MessageItem({
   compactThread?: boolean;
   hideTask?: boolean;
 }) {
-  const { members, tasks, online } = useCtx();
+  const { members, tasks, online, myMember } = useCtx();
   const author = members.get(m.member_id);
   const names = useMemo(() => mentionNames(members), [members]);
   const task = m.task_id && !hideTask ? tasks.get(m.task_id) : undefined;
+  const mine = !!myMember && m.member_id === myMember.id && !m.deleted_at;
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   return (
     <div className={cx("group relative flex gap-3 px-4 hover:bg-bb-hover/60", grouped ? "py-0.5" : "pt-2 pb-1")}>
       <div className="w-8 shrink-0">
@@ -87,9 +91,20 @@ export function MessageItem({
             </span>
           </div>
         )}
-        <div className="text-[14px] leading-relaxed text-bb-fg">
-          <Markdown text={m.body} mentions={names} />
-        </div>
+        {editing ? (
+          <EditBox message={m} onDone={() => setEditing(false)} />
+        ) : m.deleted_at ? (
+          <p className="text-[13.5px] text-bb-subtle italic">Message deleted</p>
+        ) : (
+          <div className="text-[14px] leading-relaxed text-bb-fg">
+            <Markdown text={m.body} mentions={names} />
+            {m.edited_at && (
+              <span className="ml-1 text-[11px] text-bb-subtle" title={`Edited ${new Date(m.edited_at).toLocaleString()}`}>
+                (edited)
+              </span>
+            )}
+          </div>
+        )}
         {task && <TaskCard taskId={task.id} />}
         {!compactThread && (m.reply_count ?? 0) > 0 && onOpenThread && (
           <button
@@ -102,15 +117,71 @@ export function MessageItem({
           </button>
         )}
       </div>
-      {onOpenThread && !compactThread && (
-        <button
-          type="button"
-          onClick={() => onOpenThread(m)}
-          className="absolute top-1 right-3 hidden rounded-md border border-bb-border bg-bb-surface px-2 py-0.5 text-[12px] text-bb-muted shadow-sm group-hover:block"
-        >
-          Reply
-        </button>
+      {!editing && ((onOpenThread && !compactThread) || mine) && (
+        <div className="absolute top-1 right-3 hidden overflow-hidden rounded-md border border-bb-border bg-bb-surface text-[12px] text-bb-muted shadow-sm group-focus-within:flex group-hover:flex">
+          {onOpenThread && !compactThread && <Action onClick={() => onOpenThread(m)}>Reply</Action>}
+          {mine && <Action onClick={() => setEditing(true)}>Edit</Action>}
+          {mine && <Action onClick={() => setDeleting(true)}>Delete</Action>}
+        </div>
       )}
+      {deleting && (
+        <Confirm title="Delete message" action="Delete" onClose={() => setDeleting(false)} onConfirm={() => api.deleteMessage(m.id).then(() => undefined)}>
+          It is deleted for everyone. Replies to it stay.
+        </Confirm>
+      )}
+    </div>
+  );
+}
+
+function Action({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} className="px-2 py-0.5 hover:bg-bb-hover hover:text-bb-fg">
+      {children}
+    </button>
+  );
+}
+
+/** EditBox edits a message in place: Enter saves, Escape cancels. */
+function EditBox({ message, onDone }: { message: Message; onDone: () => void }) {
+  const [text, setText] = useState(message.body);
+  const [err, setErr] = useState("");
+  async function save() {
+    if (!text.trim() || text === message.body) return onDone();
+    try {
+      await api.editMessage(message.id, text);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+  return (
+    <div className="mt-1 space-y-1">
+      <textarea
+        className={cx(inputClass, "min-h-16 text-[14px]")}
+        autoFocus
+        value={text}
+        aria-label="Edit message"
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onDone();
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void save();
+          }
+        }}
+      />
+      <div className="flex items-center gap-2 text-[12px] text-bb-subtle">
+        <span>Enter saves · Esc cancels</span>
+        {err && <span className="text-bb-danger">{err}</span>}
+        <span className="ml-auto flex gap-1.5">
+          <Button size="sm" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button size="sm" tone="primary" onClick={() => void save()}>
+            Save
+          </Button>
+        </span>
+      </div>
     </div>
   );
 }

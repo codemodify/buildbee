@@ -362,6 +362,83 @@ func (s *Service) DMs(ctx context.Context, a Actor, projectID string) ([]models.
 	return s.st.ListDMs(ctx, projectID, m.ID)
 }
 
+// EditMessage changes the text of the acting Person's own message. Mentions
+// in the new text start nothing: a message does its work when posted.
+func (s *Service) EditMessage(ctx context.Context, a Actor, id, body string) (*models.Message, error) {
+	b, err := text("body", body, true, 32000)
+	if err != nil {
+		return nil, err
+	}
+	var out *models.Message
+	err = s.tx(ctx, func(w *work) error {
+		m, err := w.ownMessage(ctx, a, id)
+		if err != nil {
+			return err
+		}
+		if err := w.st.EditMessage(ctx, m.ID, b, w.now); err != nil {
+			return err
+		}
+		if out, err = w.st.GetMessage(ctx, m.ID); err != nil {
+			return err
+		}
+		w.emit("channel:"+out.ChannelID, 0, "message_edited", out) // live only: edits have no cursor of their own
+		return nil
+	})
+	return out, err
+}
+
+// DeleteMessage deletes the acting Person's own message. Its row stays with
+// an empty body, so replies keep their thread.
+func (s *Service) DeleteMessage(ctx context.Context, a Actor, id string) error {
+	return s.tx(ctx, func(w *work) error {
+		m, err := w.ownMessage(ctx, a, id)
+		if err != nil {
+			return err
+		}
+		if err := w.st.DeleteMessage(ctx, m.ID, w.now); err != nil {
+			return err
+		}
+		out, err := w.st.GetMessage(ctx, m.ID)
+		if err != nil {
+			return err
+		}
+		w.emit("channel:"+out.ChannelID, 0, "message_deleted", out)
+		return nil
+	})
+}
+
+// ownMessage returns a message the acting Person wrote and may still change.
+func (w *work) ownMessage(ctx context.Context, a Actor, id string) (*models.Message, error) {
+	if !a.IsPerson() {
+		return nil, ErrNoActor
+	}
+	m, err := w.st.GetMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := w.st.GetChannel(ctx, m.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.openSpace(ctx, ch.ProjectID); err != nil {
+		return nil, err
+	}
+	if ch.ArchivedAt != nil {
+		return nil, fmt.Errorf("%w: channel #%s is archived", store.ErrConflict, ch.Name)
+	}
+	me, err := w.st.MemberForPerson(ctx, ch.ProjectID, a.PersonID)
+	if err != nil || !ch.Allows(me.ID) {
+		return nil, store.ErrNotFound
+	}
+	if m.MemberID != me.ID {
+		return nil, fmt.Errorf("%w: only its author can change a message", store.ErrConflict)
+	}
+	if m.DeletedAt != nil {
+		return nil, fmt.Errorf("%w: the message was deleted", store.ErrConflict)
+	}
+	return m, nil
+}
+
 // NewDirect is whom to message: people, anywhere on the Server.
 type NewDirect struct {
 	PersonIDs []string `json:"person_ids"`

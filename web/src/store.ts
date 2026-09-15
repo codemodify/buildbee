@@ -120,6 +120,11 @@ export function useChannel(channelId: string | undefined) {
     };
   }, [channelId]);
   useTopic(channelId && cursor !== null ? `channel:${channelId}` : null, cursor, (f) => {
+    if (f.type === "message_edited" || f.type === "message_deleted") {
+      const m = f.data as Message;
+      setMessages((ms) => ms.map((x) => (x.id === m.id ? { ...x, ...m } : x)));
+      return;
+    }
     if (f.type !== "message") return;
     const m = f.data as Posted & { root?: Message };
     if (m.thread_id) {
@@ -159,6 +164,13 @@ export function useThread(rootId: string | undefined) {
   }, [rootId]);
   const cursor = thread ? Math.max(thread.root.seq, ...thread.replies.map((r) => r.seq)) : null;
   useTopic(thread ? `channel:${thread.root.channel_id}` : null, cursor, (f) => {
+    if (f.type === "message_edited" || f.type === "message_deleted") {
+      const m = f.data as Message;
+      setThread((t) =>
+        t && { ...t, root: t.root.id === m.id ? { ...t.root, ...m } : t.root, replies: t.replies.map((r) => (r.id === m.id ? { ...r, ...m } : r)) },
+      );
+      return;
+    }
     if (f.type !== "message") return;
     const m = f.data as Posted & { root?: Message };
     setThread((t) => {

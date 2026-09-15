@@ -5,5 +5,6 @@ package migrate
 // schema changes ship as a new file (0002_..., 0003_...), whose checksum is
 // added here in the same commit. TestMigrationsAreFrozen enforces both.
 var frozen = map[string]string{
+	"0002_message_edits.sql": "91953d3fc97f8769c0c52a188ac9b066b8283c5d4680c15019ece7b41fcacc16",
 	"0001_baseline.sql": "f271834b3828e0e2dcc7df52bbd02494e481922691f6604034f91a9264c022bc",
 }

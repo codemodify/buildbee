@@ -11,6 +11,9 @@
 - Your settings (next to notifications): name (`PATCH /v1/me`), theme, rounded or sharp corners, notifications
 - New Projects start with you and `#tasks`, no Bots (`default_bots: true` on `POST /v1/projects` adds the autopilot's four)
 
+### Added (chat)
+- Edit and delete your own messages (`PATCH`/`DELETE /v1/messages/{id}`): "(edited)" marks edits, a deleted message keeps its thread
+
 ### Added (managing)
 - Rename and archive channels from the channel's ⋯ menu; unarchive in the Project's Settings
 - Remove people and Bots from a Project (`DELETE /v1/members/{id}`): a removed Bot's Runs stop and it takes no more work

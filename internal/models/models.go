@@ -393,6 +393,8 @@ type Message struct {
 	ReplyCount  int        `json:"reply_count,omitempty"`
 	LastReplyAt *time.Time `json:"last_reply_at,omitempty"`
 	TaskID      string     `json:"task_id,omitempty"`
+	EditedAt    *time.Time `json:"edited_at,omitempty"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"` // the body is gone
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
