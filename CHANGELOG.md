@@ -12,6 +12,7 @@
 - New Projects start with you and `#tasks`, no Bots (`default_bots: true` on `POST /v1/projects` adds the autopilot's four)
 
 ### Changed
+- The database baseline is frozen: schema changes ship as new migrations, and a test pins every released file's checksum
 - DMs are between people only: no DMs with Bots; `POST /v1/projects/{id}/dms` is gone
 - A worker in a container offers only the agents its user is logged in to
 - The sidebar: pinned `# status` and `# decisions`, DMs, then Projects with only their channels; `+` (channel) and Settings sit on the Project's row

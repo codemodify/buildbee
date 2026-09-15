@@ -28,3 +28,22 @@ func TestLoadIsSorted(t *testing.T) {
 		t.Fatalf("migrations: %+v", migs)
 	}
 }
+
+func TestMigrationsAreFrozen(t *testing.T) {
+	migs, err := load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migs {
+		want, ok := frozen[m.name]
+		switch {
+		case !ok:
+			t.Errorf("%s is not in frozen.go; add %q: %q", m.name, m.name, m.sum)
+		case want != m.sum:
+			t.Errorf("%s changed after release (checksum %s, was %s); put the change in a new migration", m.name, m.sum, want)
+		}
+	}
+	if len(frozen) != len(migs) {
+		t.Errorf("frozen.go lists %d migrations, sql/ ships %d", len(frozen), len(migs))
+	}
+}

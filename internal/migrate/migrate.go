@@ -114,8 +114,9 @@ func appliedVersions(ctx context.Context, conn *pgx.Conn) (map[string]string, er
 	return out, rows.Err()
 }
 
-// errRecreate explains the only fix for a mismatched pre-release database.
-var errRecreate = errors.New("recreate the database (docker compose down -v)")
+// errRecreate explains the fix for a database from another build: one made
+// before the baseline was frozen, or by a newer BuildBee (upgrade instead).
+var errRecreate = errors.New("run the BuildBee that created this database, or recreate it (docker compose down -v)")
 
 // check refuses a database whose recorded migrations this build does not
 // ship (an older or newer BuildBee created it) or whose files changed after

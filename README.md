@@ -36,6 +36,8 @@ make smoke       # build both images and exercise the compose stack
 
 Go tests run against a real Postgres. With `BUILDBEE_TEST_DATABASE_URL` set they use that server; otherwise each test package starts a throwaway `postgres:17-alpine` container. Every test gets its own database cloned from a migrated template.
 
+Schema changes ship as new migrations in `internal/migrate/sql` (`0002_...sql`, and so on). Released migrations are frozen: `internal/migrate/frozen.go` pins each file's checksum, a test fails if one changes, and the Server refuses a database whose applied migrations differ from the files. Upgrading applies the new files in order at startup, in one transaction each.
+
 For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1` and `/healthz` (WebSocket included) to `127.0.0.1:8080`.
 
 ## Layout
