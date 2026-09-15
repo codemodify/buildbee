@@ -40,6 +40,12 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Cancel sends `session/cancel`, then kills the agent's process group; Runs have a time limit
 - The fake agent is an in-process ACP agent, so tests exercise the same client code as real agents
 
+## Phase 3d — Repos and pull requests (done)
+
+- Each Run gets a git worktree of the Project's repo on its own branch, from a per-repo bare mirror on the worker; parallel Runs never share a checkout
+- The worker commits leftovers, uploads `changes.diff`, pushes with its own git credentials and opens a PR with its own `gh` login; a failed push keeps the branch on the worker
+- Repo URLs that git could read as options or remote helpers are refused
+
 ## Phase 2 — Chat UX
 
 - Channels, threads, direct messages, @people and @agents, unread counts, presence
@@ -50,7 +56,8 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 
 - Per-Run container: repo worktree at a pinned commit, agent CLI inside, only the credentials that Run needs, no Docker socket, resource and output limits, process-group kill
 - Permission requests as Decisions for Projects that want them, answers flowing back to the agent; mid-turn steering from chat
-- Output: pushed branch, diff Artifact and PR; logs in object storage
+- Logs and large Artifacts in object storage
+- Retire the Server-side single-file draft PR endpoint (`POST /v1/tasks/{id}/pr`) in favour of worker PRs
 
 ## Phase 4 — Autonomy
 

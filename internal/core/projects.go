@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -324,15 +325,22 @@ func (s *Service) UpdateMember(ctx context.Context, a Actor, id string, patch Me
 	return out, err
 }
 
-// validRepoURL accepts URLs and scp-style addresses git can clone.
+// scpRepo matches git's scp-style address, user@host:path.
+var scpRepo = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+$`)
+
+// validRepoURL accepts the URLs and scp-style addresses git clones over
+// its safe transports. It refuses anything git could read as an option
+// or a remote helper (such as ext::), since workers pass it to git.
 func validRepoURL(u string) bool {
-	switch {
-	case strings.HasPrefix(u, "https://"), strings.HasPrefix(u, "http://"), strings.HasPrefix(u, "ssh://"),
-		strings.HasPrefix(u, "git://"), strings.HasPrefix(u, "file://"), strings.HasPrefix(u, "/"):
-		return !strings.ContainsAny(u, " \t\n")
+	if strings.ContainsAny(u, " \t\r\n") || strings.HasPrefix(u, "-") || strings.Contains(u, "::") {
+		return false
 	}
-	at, colon := strings.Index(u, "@"), strings.Index(u, ":")
-	return at > 0 && colon > at && !strings.ContainsAny(u, " \t\n")
+	for _, prefix := range []string{"https://", "http://", "ssh://", "git://", "file://", "/"} {
+		if strings.HasPrefix(u, prefix) {
+			return len(u) > len(prefix)
+		}
+	}
+	return scpRepo.MatchString(u)
 }
 
 // --- channels ---

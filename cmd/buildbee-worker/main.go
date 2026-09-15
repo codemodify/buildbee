@@ -44,7 +44,8 @@ func run() error {
 		slog.Warn("BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1: agent CLIs run on this host with its files and logins")
 	}
 	w, err := worker.New(worker.Config{Server: cfg.ServerURL, Name: cfg.Name, Agents: agents, Slots: cfg.Slots,
-		AllowHostAgents: cfg.AllowHostAgents, Commands: cfg.AgentCommands, RunTimeout: cfg.RunTimeout})
+		AllowHostAgents: cfg.AllowHostAgents, Commands: cfg.AgentCommands, RunTimeout: cfg.RunTimeout,
+		Dir: cfg.Dir, OpenPRs: cfg.OpenPRs})
 	if err != nil {
 		return err
 	}

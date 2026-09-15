@@ -235,3 +235,23 @@ func TestHeartbeatSeesCancelAndReaperFailsSilentWorkers(t *testing.T) {
 		t.Fatalf("a reaped Run stays failed: %v", err)
 	}
 }
+
+func TestRepoURLValidation(t *testing.T) {
+	for u, ok := range map[string]bool{
+		"https://github.com/acme/app.git": true,
+		"git@github.com:acme/app.git":     true,
+		"ssh://git@host:2222/acme/app":    true,
+		"/srv/git/app.git":                true,
+		"file:///srv/git/app.git":         true,
+		"-oProxyCommand=touch@x:y":        false,
+		"ext::sh -c touch% /tmp/pwned":    false,
+		"fd::17":                          false,
+		"git@host:app;rm":                 false,
+		"https://":                        false,
+		"app":                             false,
+	} {
+		if validRepoURL(u) != ok {
+			t.Errorf("validRepoURL(%q) = %v, want %v", u, !ok, ok)
+		}
+	}
+}

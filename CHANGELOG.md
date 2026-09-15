@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 3c (ACP client)
+## Unreleased — LAN rebuild, Phase 3d (repos and pull requests)
+
+### Added
+- Runs on a Project with `repo_url` work in their own git worktree on branch `buildbee/<task>-<run>`; the worker commits, uploads `changes.diff`, pushes with its own git credentials and opens a PR with `gh`
+- `BUILDBEE_WORKER_DIR`, `BUILDBEE_WORKER_OPEN_PRS`
+
+### Security
+- Repo URLs starting with `-` or using remote helpers (`ext::`, `fd::`) are refused; workers run git without prompts over file, git, http(s) and ssh only
+
+## LAN rebuild, Phase 3c (ACP client)
 
 ### Breaking
 - Workers run agents over the Agent Client Protocol instead of one-shot CLI calls: Claude Code needs `claude-agent-acp`, Codex needs `codex-acp` (see [docs/workers.md](docs/workers.md))

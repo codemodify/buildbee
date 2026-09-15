@@ -34,6 +34,8 @@ buildbee-worker
 | `BUILDBEE_WORKER_SLOTS` | `4` | Runs executed at once (1–256) |
 | `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` | `0` | `1` lets real agent CLIs run on this host |
 | `BUILDBEE_WORKER_RUN_TIMEOUT` | `2h` | a Run that takes longer is stopped and failed |
+| `BUILDBEE_WORKER_DIR` | `~/.cache/buildbee-worker` | repo mirrors and Run checkouts |
+| `BUILDBEE_WORKER_OPEN_PRS` | `1` | `0` pushes branches without opening pull requests |
 | `BUILDBEE_AGENT_<NAME>` | see below | command that starts an agent, e.g. `BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp"` |
 
 Without `BUILDBEE_WORKER_AGENTS`, a worker allowed to run host agents offers every agent whose command is on its `PATH`; otherwise it offers only `fake`. A worker refuses to start if asked to offer a real agent without `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`, or one whose command is missing.
@@ -58,10 +60,23 @@ If an agent answers that it needs a login, the Run fails with a message saying s
 
 The compose file's `worker` profile starts a worker that offers only `fake`, for demos and the smoke test.
 
+## Repos, branches and pull requests
+
+When a Project has a `repo_url` (`PATCH /v1/projects/{id}`), every Run works in a fresh checkout of it:
+
+1. The worker keeps one bare mirror per repo in `BUILDBEE_WORKER_DIR`, fetches it, and adds a git worktree for the Run on a new branch `buildbee/<task-title>-<run-id>`, starting from the tip of the Project's `default_branch` (or the repo's default).
+2. The agent works in that checkout. Parallel Runs on one repo each have their own.
+3. When the agent finishes, the worker commits anything it left uncommitted, uploads `changes.diff` as an Artifact, and pushes the branch.
+4. For GitHub repos, it opens a pull request with the GitHub CLI (`gh pr create`) and records it as a `pr` Artifact.
+
+The worker pushes with its own git credentials (SSH keys, credential helper) and opens pull requests with its own `gh` login, the same way agents use their own logins. If the push fails, the Run fails and the branch stays in the worker's mirror so nothing is lost. A Run that changes nothing succeeds without a branch.
+
+Git runs without prompts and only over `file`, `git`, `http`, `https` and `ssh`. The Server refuses repo URLs git could read as an option or a remote helper.
+
 ## Agent logins
 
 BuildBee stores no agent credentials or API keys. An agent uses whatever login its CLI already has on the worker machine (for example `~/.claude`, `~/.codex`), exactly as when you run it yourself. Parallel Runs on one login share that subscription's usage limits.
 
 ## Current limits
 
-Host agents run as the worker's user, in an empty temporary directory per Run, with that user's files and logins. Until Runs execute in per-Run containers with a checkout of the Project's repo (roadmap Phase 3), run workers with host agents only on machines and accounts you are comfortable handing to an agent.
+Host agents run as the worker's user, with that user's files and logins; the checkout is only where they start. Until Runs execute in per-Run containers (roadmap Phase 3b), run workers with host agents only on machines and accounts you are comfortable handing to an agent.

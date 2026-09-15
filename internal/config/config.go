@@ -82,6 +82,8 @@ type Worker struct {
 	// BUILDBEE_AGENT_<NAME>, e.g. BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp".
 	AgentCommands map[string][]string
 	RunTimeout    time.Duration // BUILDBEE_WORKER_RUN_TIMEOUT (default 2h)
+	Dir           string        // BUILDBEE_WORKER_DIR: repo mirrors and Run checkouts
+	OpenPRs       bool          // BUILDBEE_WORKER_OPEN_PRS=0 pushes branches without opening PRs
 }
 
 // agentNames are the agents a BUILDBEE_AGENT_<NAME> override may name.
@@ -96,6 +98,8 @@ func LoadWorker(getenv Getenv) (Worker, error) {
 		Slots:           4,
 		AllowHostAgents: value(getenv, "BUILDBEE_WORKER_ALLOW_HOST_AGENTS", "") == "1",
 		RunTimeout:      2 * time.Hour,
+		Dir:             value(getenv, "BUILDBEE_WORKER_DIR", ""),
+		OpenPRs:         value(getenv, "BUILDBEE_WORKER_OPEN_PRS", "1") != "0",
 	}
 	for _, a := range agentNames {
 		if argv := strings.Fields(getenv("BUILDBEE_AGENT_" + strings.ToUpper(a))); len(argv) > 0 {

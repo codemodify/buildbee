@@ -67,7 +67,8 @@ func (a *api) artifact(ctx context.Context, taskID string, in newArtifact) error
 type newArtifact struct {
 	Kind  string `json:"kind"`
 	Name  string `json:"name"`
-	Body  string `json:"body"`
+	Body  string `json:"body,omitempty"`
+	URL   string `json:"url,omitempty"`
 	RunID string `json:"run_id"`
 }
 

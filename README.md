@@ -74,6 +74,8 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_WORKER_SLOTS` | worker | `4` | Runs executed at once |
 | `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` | worker | `0` | `1` lets real agent CLIs run on the worker host (see below) |
 | `BUILDBEE_WORKER_RUN_TIMEOUT` | worker | `2h` | Run time limit |
+| `BUILDBEE_WORKER_DIR` | worker | `~/.cache/buildbee-worker` | repo mirrors and Run checkouts |
+| `BUILDBEE_WORKER_OPEN_PRS` | worker | `1` | open a PR with `gh` after pushing |
 | `BUILDBEE_AGENT_<NAME>` | worker | built in | command that starts an agent over ACP |
 | `BUILDBEE_TEST_DATABASE_URL` | tests | throwaway container | Postgres for `go test` |
 

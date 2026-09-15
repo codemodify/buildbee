@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,8 +40,12 @@ type Config struct {
 	Commands map[string][]string
 	// RunTimeout stops a Run that takes longer (default 2h).
 	RunTimeout time.Duration
-	Exec       Exec // nil runs the agent over ACP
-	Log        *slog.Logger
+	// Dir holds repo mirrors and Run checkouts (default: the user cache dir).
+	Dir string
+	// OpenPRs opens a pull request with the gh CLI after pushing to GitHub.
+	OpenPRs bool
+	Exec    Exec // nil runs the agent over ACP
+	Log     *slog.Logger
 }
 
 // ErrHostAgentsDisabled refuses real agents on a worker that has not opted in.
@@ -60,6 +66,7 @@ type Worker struct {
 	api       *api
 	log       *slog.Logger
 	heartbeat time.Duration
+	repos     *repos
 }
 
 // New checks cfg and returns a Worker.
@@ -108,7 +115,14 @@ func New(cfg Config) (*Worker, error) {
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}
-	return &Worker{cfg: cfg, api: newAPI(cfg.Server, cfg.Name), heartbeat: heartbeatEvery,
+	if cfg.Dir == "" {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			return nil, fmt.Errorf("worker: no directory for checkouts: %w", err)
+		}
+		cfg.Dir = filepath.Join(cache, "buildbee-worker")
+	}
+	return &Worker{cfg: cfg, api: newAPI(cfg.Server, cfg.Name), heartbeat: heartbeatEvery, repos: newRepos(cfg.Dir),
 		log: cfg.Log.With("worker", cfg.Name)}, nil
 }
 
@@ -171,7 +185,19 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	defer cancelTimeout()
 	go w.keepAlive(runCtx, run.ID, stop, log)
 
-	out, err := w.runAgent(runCtx, run, agent)
+	emit := func(ev acp.Event) error { return w.api.event(runCtx, run.ID, ev.Kind, ev.Payload) }
+	say := func(format string, args ...any) {
+		_ = emit(acp.Event{Kind: models.RunEventLog, Payload: map[string]any{"text": fmt.Sprintf(format, args...) + "\n"}})
+	}
+	out, ws, err := w.runAgent(runCtx, c, agent, emit, say)
+	detail := "agent " + agent + " finished"
+	keep := false
+	if ws != nil {
+		if err == nil && runCtx.Err() == nil {
+			detail, keep, err = w.deliver(runCtx, c, ws, agent, say)
+		}
+		defer ws.close(context.WithoutCancel(ctx), keep)
+	}
 
 	// Report with a fresh context so a stopping worker still records the outcome.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reportTimeout)
@@ -186,7 +212,7 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 		log.Info("run stopped on the server", "status", stopped.status)
 		return
 	}
-	status, detail := models.RunSucceeded, "agent "+agent+" finished"
+	status := models.RunSucceeded
 	var timeout errTimeout
 	switch {
 	case ctx.Err() != nil:
@@ -203,23 +229,72 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	log.Info("run finished", "status", status)
 }
 
-func (w *Worker) runAgent(ctx context.Context, run models.Run, agent string) (string, error) {
+// runAgent prepares the Run's directory (a checkout of the Project's repo
+// when it has one) and runs the agent in it.
+func (w *Worker) runAgent(ctx context.Context, c *models.Claim, agent string, emit acp.Handler, say func(string, ...any)) (string, *workspace, error) {
+	say("worker %s starting agent %s", w.cfg.Name, agent)
+	var ws *workspace
 	workDir := ""
-	if agent != "fake" {
-		// An empty directory until Runs get a checkout of the Project's repo.
+	switch {
+	case c.Project.RepoURL != "":
+		say("checking out %s", c.Project.RepoURL)
+		var err error
+		if ws, err = w.repos.prepare(ctx, c.Project, branchName(c.Task.Title, c.Run.ID), c.Run.ID); err != nil {
+			return "", nil, err
+		}
+		say("working on branch %s, from %s at %.12s", ws.branch, ws.start, ws.base)
+		workDir = ws.dir
+	case agent != "fake":
+		// The Project has no repo: the agent gets an empty directory.
 		dir, err := os.MkdirTemp("", "buildbee-run-*")
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		defer os.RemoveAll(dir)
 		workDir = dir
 	}
-	emit := func(ev acp.Event) error { return w.api.event(ctx, run.ID, ev.Kind, ev.Payload) }
-	if err := emit(acp.Event{Kind: models.RunEventLog, Payload: map[string]any{
-		"text": fmt.Sprintf("worker %s starting agent %s\n", w.cfg.Name, agent)}}); err != nil {
-		return "", err
+	out, err := w.cfg.Exec(ctx, agent, workDir, c.Run.Prompt, emit)
+	return out, ws, err
+}
+
+// deliver turns the agent's work into a pushed branch and, for GitHub
+// repos, a pull request. keep reports that the branch must stay on this
+// worker because it could not be pushed.
+func (w *Worker) deliver(ctx context.Context, c *models.Claim, ws *workspace, agent string, say func(string, ...any)) (detail string, keep bool, err error) {
+	author := "BuildBee"
+	if c.Bot != nil {
+		author = c.Bot.DisplayName + " (BuildBee)"
 	}
-	return w.cfg.Exec(ctx, agent, workDir, run.Prompt, emit)
+	changed, err := ws.commit(ctx, author, c.Task.Title+"\n\nBuildBee Run "+c.Run.ID)
+	if err != nil {
+		return "", false, fmt.Errorf("committing the agent's work: %w", err)
+	}
+	if !changed {
+		return "agent " + agent + " finished without changing the repo", false, nil
+	}
+	if diff, err := ws.diff(ctx); err == nil {
+		if err := w.api.artifact(ctx, c.Task.ID, newArtifact{Kind: "diff", Name: "changes.diff", Body: diff, RunID: c.Run.ID}); err != nil {
+			say("uploading the diff failed: %v", err)
+		}
+	}
+	if err := ws.push(ctx); err != nil {
+		return "", true, fmt.Errorf("pushing %s failed (the work stays on worker %s): %w", ws.branch, w.cfg.Name, err)
+	}
+	say("pushed %s", ws.branch)
+	repo := githubRepo(ws.repo)
+	if repo == "" || !w.cfg.OpenPRs {
+		return "pushed " + ws.branch, false, nil
+	}
+	body := fmt.Sprintf("%s\n\nOpened by BuildBee: Task %s, Run %s, agent %s.", c.Task.Body, c.Task.ID, c.Run.ID, agent)
+	url, err := openPR(ctx, repo, ws.branch, ws.start, c.Task.Title, strings.TrimSpace(body))
+	if err != nil {
+		say("could not open a pull request: %v", err)
+		return "pushed " + ws.branch + "; no pull request: " + err.Error(), false, nil
+	}
+	if err := w.api.artifact(ctx, c.Task.ID, newArtifact{Kind: "pr", Name: "Pull request", URL: url, RunID: c.Run.ID}); err != nil {
+		say("recording the pull request failed: %v", err)
+	}
+	return "opened " + url, false, nil
 }
 
 // keepAlive renews the claim until ctx ends, and stops the Run when the
