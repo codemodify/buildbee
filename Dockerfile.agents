@@ -1,0 +1,31 @@
+# BuildBee agents image: the ACP commands a worker starts in per-Run
+# containers (BUILDBEE_WORKER_ISOLATION=container, the default).
+#
+#   docker build -f Dockerfile.agents -t buildbee-agents .
+#
+# Each Run's container runs as the worker's user with HOME=/home/agent,
+# sees only its checkout and its agent's login, and has no Docker socket.
+# Projects that need more tools (Go, Rust, a database client...) extend
+# this image and point BUILDBEE_WORKER_IMAGE at theirs.
+FROM node:24-bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates git openssh-client curl ripgrep jq python3 build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG CLAUDE_AGENT_ACP=0.77.0
+ARG CODEX_ACP=0.16.0
+ARG OPENCODE=1.18.31
+ARG GROK=1.0.30
+RUN npm install -g --no-fund --no-audit \
+        @agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP} \
+        @zed-industries/codex-acp@${CODEX_ACP} \
+        opencode-ai@${OPENCODE} \
+        @xai-official/grok@${GROK} \
+    && npm cache clean --force
+
+# Any UID may use HOME; each Run mounts its own directory here.
+RUN mkdir -p /home/agent && chmod 1777 /home/agent
+ENV HOME=/home/agent
+WORKDIR /home/agent

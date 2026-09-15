@@ -18,13 +18,14 @@ A Run names an agent (`claude`, `codex`, `opencode`, `goose`, `grok`, or `fake`)
 
 ## Running a worker
 
-On a machine where your agent CLIs are installed and logged in:
+On a machine with Docker, where your agent CLIs are logged in:
 
 ```bash
-BUILDBEE_URL=http://buildbee.lan:8080 \
-BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1 \
-buildbee-worker
+make agents-image   # docker build -f Dockerfile.agents -t buildbee-agents .
+BUILDBEE_URL=http://buildbee.lan:8080 buildbee-worker
 ```
+
+The worker finds the agents in the image, and each Run gets a container of its own (see [Isolation](#isolation)). To run agents directly on the machine instead, as Buzz does, set `BUILDBEE_WORKER_ISOLATION=host`; the agents' ACP commands must then be on the worker's `PATH`.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -32,13 +33,16 @@ buildbee-worker
 | `BUILDBEE_WORKER_NAME` | hostname | must be unique on the LAN; Runs are owned by name |
 | `BUILDBEE_WORKER_AGENTS` | see below | comma-separated agents to offer |
 | `BUILDBEE_WORKER_SLOTS` | `4` | Runs executed at once (1–256) |
-| `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` | `0` | `1` lets real agent CLIs run on this host |
+| `BUILDBEE_WORKER_ISOLATION` | `container` | `container`: one container per Run; `host`: agents run on this machine as the worker's user |
+| `BUILDBEE_WORKER_IMAGE` | `buildbee-agents` | image with the agents' ACP commands |
+| `BUILDBEE_WORKER_MEMORY`, `BUILDBEE_WORKER_CPUS` | `8g`, `4` | limits per Run container |
+| `BUILDBEE_WORKER_NETWORK` | Docker's default | network for Run containers |
 | `BUILDBEE_WORKER_RUN_TIMEOUT` | `2h` | a Run that takes longer is stopped and failed |
 | `BUILDBEE_WORKER_DIR` | `~/.cache/buildbee-worker` | repo mirrors and Run checkouts |
 | `BUILDBEE_WORKER_OPEN_PRS` | `1` | `0` pushes branches without opening pull requests |
 | `BUILDBEE_AGENT_<NAME>` | see below | command that starts an agent, e.g. `BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp"` |
 
-Without `BUILDBEE_WORKER_AGENTS`, a worker allowed to run host agents offers every agent whose command is on its `PATH`; otherwise it offers only `fake`. A worker refuses to start if asked to offer a real agent without `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`, or one whose command is missing.
+Without `BUILDBEE_WORKER_AGENTS`, a worker offers every agent whose ACP command it finds: in the image, or on its `PATH` in host isolation. It refuses to start when an agent it is asked to offer is missing. `BUILDBEE_WORKER_AGENTS=fake` needs neither Docker nor agents.
 
 ## Agents
 
@@ -60,6 +64,20 @@ If an agent answers that it needs a login, the Run fails with a message saying s
 
 The compose file's `worker` profile starts a worker that offers only `fake`, for demos and the smoke test.
 
+## Isolation
+
+With `BUILDBEE_WORKER_ISOLATION=container` (the default), each Run's agent runs in a fresh container started from `BUILDBEE_WORKER_IMAGE`, and talks ACP over the container's stdin and stdout. The container:
+
+- runs as the worker's user, with every capability dropped, `no-new-privileges`, and memory, CPU and process limits;
+- sees the Run's checkout and its repo mirror (at their host paths), a scratch home directory, and the login files of that Run's agent only (for example `~/.claude` and `~/.claude.json` for Claude Code, `~/.codex` for Codex);
+- has no Docker socket, and is removed when the Run ends, is canceled, or the worker restarts.
+
+Logins are mounted read-write because agents refresh their tokens. An agent can use and change its own login, but nothing else of the worker user's.
+
+`Dockerfile.agents` builds an image with `claude-agent-acp`, `codex-acp`, OpenCode and Grok on Node 24 with git, Python and a C toolchain. Projects that need more (Go, Rust, database clients) extend it and set `BUILDBEE_WORKER_IMAGE`.
+
+With `BUILDBEE_WORKER_ISOLATION=host`, agents run directly on the machine as the worker's user, with that user's files, tools and logins, like Buzz. Use it on machines and accounts you are comfortable handing to an agent.
+
 ## Repos, branches and pull requests
 
 When a Project has a `repo_url` (`PATCH /v1/projects/{id}`), every Run works in a fresh checkout of it:
@@ -79,4 +97,5 @@ BuildBee stores no agent credentials or API keys. An agent uses whatever login i
 
 ## Current limits
 
-Host agents run as the worker's user, with that user's files and logins; the checkout is only where they start. Until Runs execute in per-Run containers (roadmap Phase 3b), run workers with host agents only on machines and accounts you are comfortable handing to an agent.
+- Containers get network access (agents need their model APIs); restrict it with `BUILDBEE_WORKER_NETWORK` and your firewall.
+- One image serves all Projects on a worker.

@@ -23,9 +23,18 @@ import (
 	"github.com/codemodify/buildbee/internal/worker/acp"
 )
 
-// Exec runs agent on prompt in workDir, calling emit for each piece of
-// output, and returns the transcript.
-type Exec func(ctx context.Context, agent, workDir, prompt string, emit acp.Handler) (string, error)
+// Job is one agent session for a Run.
+type Job struct {
+	RunID  string
+	Agent  string
+	Dir    string // where the agent works; "" for the fake agent without a repo
+	GitDir string // the repo mirror Dir's checkout belongs to, if any
+	Prompt string
+}
+
+// Exec runs a Job, calling emit for each piece of output, and returns the
+// transcript.
+type Exec func(ctx context.Context, job Job, emit acp.Handler) (string, error)
 
 // Config describes one worker process.
 type Config struct {
@@ -33,9 +42,11 @@ type Config struct {
 	Name   string   // unique on the LAN; owns the Runs this worker claims
 	Agents []string // agents this worker offers, e.g. claude, codex, fake
 	Slots  int      // Runs executed at once
-	// AllowHostAgents lets real agent CLIs run directly on this host, with
-	// its files and logins. Off by default; the fake agent needs nothing.
-	AllowHostAgents bool
+	// Isolation is where agents run: IsolationContainer (default), a
+	// container per Run, or IsolationHost, directly on this machine as the
+	// worker's user. The fake agent always runs in-process.
+	Isolation string
+	Container Container // settings for IsolationContainer
 	// Commands overrides how agents are started (see acp.Launch).
 	Commands map[string][]string
 	// RunTimeout stops a Run that takes longer (default 2h).
@@ -48,9 +59,11 @@ type Config struct {
 	Log     *slog.Logger
 }
 
-// ErrHostAgentsDisabled refuses real agents on a worker that has not opted in.
-var ErrHostAgentsDisabled = errors.New("real agents would run directly on this worker host; " +
-	"set BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1 to allow it, or offer only the fake agent")
+// Isolation modes.
+const (
+	IsolationContainer = "container"
+	IsolationHost      = "host"
+)
 
 const (
 	claimWait = 25 * time.Second // long-poll per claim request
@@ -80,6 +93,13 @@ func New(cfg Config) (*Worker, error) {
 	if len(cfg.Agents) == 0 {
 		return nil, errors.New("worker: offer at least one agent")
 	}
+	if cfg.Isolation == "" {
+		cfg.Isolation = IsolationContainer
+	}
+	if cfg.Isolation != IsolationContainer && cfg.Isolation != IsolationHost {
+		return nil, fmt.Errorf("worker: isolation must be %s or %s, got %q", IsolationContainer, IsolationHost, cfg.Isolation)
+	}
+	real := false
 	for _, a := range cfg.Agents {
 		if a == "" || !models.ValidAgent(a) {
 			return nil, fmt.Errorf("worker: unknown agent %q (known: %v)", a, models.Agents)
@@ -87,10 +107,8 @@ func New(cfg Config) (*Worker, error) {
 		if a == "fake" {
 			continue
 		}
-		if !cfg.AllowHostAgents {
-			return nil, fmt.Errorf("worker: agent %s: %w", a, ErrHostAgentsDisabled)
-		}
-		if cfg.Exec == nil {
+		real = true
+		if cfg.Exec == nil && cfg.Isolation == IsolationHost {
 			if _, err := acp.Command(a, cfg.Commands); err != nil {
 				return nil, fmt.Errorf("worker: %w", err)
 			}
@@ -99,17 +117,23 @@ func New(cfg Config) (*Worker, error) {
 	if cfg.RunTimeout <= 0 {
 		cfg.RunTimeout = 2 * time.Hour
 	}
+	if cfg.Exec == nil && real && cfg.Isolation == IsolationContainer {
+		if err := cfg.Container.defaults(); err != nil {
+			return nil, fmt.Errorf("worker: %w", err)
+		}
+		cfg.Exec = cfg.Container.exec(cfg.Name, cfg.Commands)
+	}
 	if cfg.Exec == nil {
 		commands := cfg.Commands
-		cfg.Exec = func(ctx context.Context, agent, workDir, prompt string, emit acp.Handler) (string, error) {
+		cfg.Exec = func(ctx context.Context, job Job, emit acp.Handler) (string, error) {
 			var argv []string
-			if agent != "fake" {
+			if job.Agent != "fake" {
 				var err error
-				if argv, err = acp.Command(agent, commands); err != nil {
+				if argv, err = acp.Command(job.Agent, commands); err != nil {
 					return "", err
 				}
 			}
-			return acp.Run(ctx, acp.Config{Agent: agent, Command: argv, WorkDir: workDir}, prompt, emit)
+			return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: argv, WorkDir: job.Dir}, job.Prompt, emit)
 		}
 	}
 	if cfg.Log == nil {
@@ -244,7 +268,7 @@ func (w *Worker) runAgent(ctx context.Context, c *models.Claim, agent string, em
 		}
 		say("working on branch %s, from %s at %.12s", ws.branch, ws.start, ws.base)
 		workDir = ws.dir
-	case agent != "fake":
+	case agent != "fake" && w.cfg.Isolation == IsolationHost:
 		// The Project has no repo: the agent gets an empty directory.
 		dir, err := os.MkdirTemp("", "buildbee-run-*")
 		if err != nil {
@@ -253,7 +277,11 @@ func (w *Worker) runAgent(ctx context.Context, c *models.Claim, agent string, em
 		defer os.RemoveAll(dir)
 		workDir = dir
 	}
-	out, err := w.cfg.Exec(ctx, agent, workDir, c.Run.Prompt, emit)
+	job := Job{RunID: c.Run.ID, Agent: agent, Dir: workDir, Prompt: c.Run.Prompt}
+	if ws != nil {
+		job.GitDir = ws.mirror
+	}
+	out, err := w.cfg.Exec(ctx, job, emit)
 	return out, ws, err
 }
 

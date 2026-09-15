@@ -46,15 +46,23 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - The worker commits leftovers, uploads `changes.diff`, pushes with its own git credentials and opens a PR with its own `gh` login; a failed push keeps the branch on the worker
 - Repo URLs that git could read as options or remote helpers are refused
 
+## Phase 3b — Per-Run containers (done)
+
+- Default isolation: each Run's agent in its own container (`docker run -i` carrying ACP), as the worker's user, capabilities dropped, resource limits, no Docker socket, removed on finish, cancel or worker restart
+- Only the Run's checkout, its mirror and that agent's login are mounted
+- `Dockerfile.agents` with `claude-agent-acp`, `codex-acp`, OpenCode and Grok; workers probe the image for agents
+- Host isolation stays as the Buzz-style opt-in (`BUILDBEE_WORKER_ISOLATION=host`)
+- Agents that want an explicit ACP `authenticate` (Grok) get one, reusing their CLI's login
+
 ## Phase 2 — Chat UX
 
 - Channels, threads, direct messages, @people and @agents, unread counts, presence
 - Agent output streamed live into threads
 - A client state layer fed by the single WebSocket, replacing polling loops
 
-## Phase 3 — Agent harness
+## Phase 3 — Agent harness, remaining
 
-- Per-Run container: repo worktree at a pinned commit, agent CLI inside, only the credentials that Run needs, no Docker socket, resource and output limits, process-group kill
+- Per-Project images
 - Permission requests as Decisions for Projects that want them, answers flowing back to the agent; mid-turn steering from chat
 - Logs and large Artifacts in object storage
 - Retire the Server-side single-file draft PR endpoint (`POST /v1/tasks/{id}/pr`) in favour of worker PRs

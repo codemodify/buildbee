@@ -2,7 +2,7 @@ export GOTOOLCHAIN ?= local
 
 BIN := bin
 
-.PHONY: all web embed-web build run test vet fmt-check smoke clean
+.PHONY: all web embed-web build run test vet fmt-check smoke agents-image clean
 
 all: build
 
@@ -39,6 +39,10 @@ test: fmt-check vet
 # Build both images and exercise the compose stack end to end.
 smoke:
 	./scripts/smoke-compose.sh
+
+# Agents image for per-Run containers (BUILDBEE_WORKER_IMAGE).
+agents-image:
+	docker build -f Dockerfile.agents -t buildbee-agents .
 
 clean:
 	rm -rf $(BIN) web/dist

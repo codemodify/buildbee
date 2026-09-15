@@ -46,7 +46,7 @@ func TestLoadWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.ServerURL != "http://buildbee.lan:8080" || c.Name != "gpu-box" || c.Slots != 12 ||
-		!slices.Equal(c.Agents, []string{"claude", "codex"}) || c.AllowHostAgents || c.RunTimeout != 45*time.Minute ||
+		!slices.Equal(c.Agents, []string{"claude", "codex"}) || c.Isolation != "container" || c.Image != "buildbee-agents" || c.RunTimeout != 45*time.Minute ||
 		!slices.Equal(c.AgentCommands["claude"], []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp"}) {
 		t.Fatalf("worker: %+v", c)
 	}
@@ -55,6 +55,8 @@ func TestLoadWorker(t *testing.T) {
 		{"BUILDBEE_WORKER_SLOTS": "0"},
 		{"BUILDBEE_WORKER_SLOTS": "many"},
 		{"BUILDBEE_WORKER_RUN_TIMEOUT": "5s"},
+		{"BUILDBEE_WORKER_ISOLATION": "vm"},
+		{"BUILDBEE_WORKER_ALLOW_HOST_AGENTS": "1"},
 	} {
 		if _, err := LoadWorker(env(bad)); err == nil {
 			t.Fatalf("expected an error for %v", bad)

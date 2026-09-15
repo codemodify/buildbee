@@ -40,7 +40,8 @@ func runFake(ctx context.Context, cfg Config, prompt string, emit Handler) (stri
 
 // fakeOptions tune the fake agent for tests.
 var fakeOptions struct {
-	noBypass bool // offer no permission-skipping mode, so it asks for approval
+	noBypass     bool // offer no permission-skipping mode, so it asks for approval
+	authenticate bool // refuse session/new until authenticate is called
 }
 
 // ServeFake is an ACP agent that pretends to work on the prompt: it plans,
@@ -56,6 +57,7 @@ type fakeAgent struct {
 	conn       *conn
 	mu         sync.Mutex
 	bypass     bool
+	authed     bool
 	cancelOnce sync.Once
 	cancel     chan struct{}
 }
@@ -67,9 +69,20 @@ func (f *fakeAgent) handle(method string, params json.RawMessage) (any, *RPCErro
 			"protocolVersion":   protocolVersion,
 			"agentInfo":         map[string]string{"name": "buildbee-fake-agent", "version": "1"},
 			"agentCapabilities": map[string]any{},
-			"authMethods":       []any{},
+			"authMethods":       []map[string]string{{"id": "cached", "name": "Use the CLI's login"}},
 		}, nil
+	case "authenticate":
+		f.mu.Lock()
+		f.authed = true
+		f.mu.Unlock()
+		return map[string]any{}, nil
 	case "session/new":
+		f.mu.Lock()
+		authed := f.authed
+		f.mu.Unlock()
+		if fakeOptions.authenticate && !authed {
+			return nil, &RPCError{Code: codeAuthRequired, Message: "Authentication required"}
+		}
 		res := map[string]any{"sessionId": "fake-session"}
 		if !fakeOptions.noBypass {
 			res["modes"] = map[string]any{"currentModeId": "default", "availableModes": []map[string]string{

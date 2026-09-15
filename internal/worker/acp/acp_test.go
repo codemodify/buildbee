@@ -144,6 +144,14 @@ func TestPermissionRequestsAreApproved(t *testing.T) {
 	}
 }
 
+func TestAuthenticatesWhenTheAgentAsks(t *testing.T) {
+	fakeOptions.authenticate = true
+	t.Cleanup(func() { fakeOptions.authenticate = false })
+	if _, err := Run(context.Background(), Config{Agent: "fake"}, "Task: x", nil); err != nil {
+		t.Fatalf("an agent that wants authenticate with its cached login: %v", err)
+	}
+}
+
 func TestCancelStopsTheTurn(t *testing.T) {
 	prev := StreamStep
 	StreamStep = 50 * time.Millisecond

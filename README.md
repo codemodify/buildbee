@@ -72,7 +72,8 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_WORKER_NAME` | worker | hostname | unique worker name; Runs are owned by it |
 | `BUILDBEE_WORKER_AGENTS` | worker | detected | agents to offer, comma-separated ([workers.md](docs/workers.md)) |
 | `BUILDBEE_WORKER_SLOTS` | worker | `4` | Runs executed at once |
-| `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` | worker | `0` | `1` lets real agent CLIs run on the worker host (see below) |
+| `BUILDBEE_WORKER_ISOLATION` | worker | `container` | `host` runs agents directly on the worker machine (see below) |
+| `BUILDBEE_WORKER_IMAGE` | worker | `buildbee-agents` | agents image, built from `Dockerfile.agents` |
 | `BUILDBEE_WORKER_RUN_TIMEOUT` | worker | `2h` | Run time limit |
 | `BUILDBEE_WORKER_DIR` | worker | `~/.cache/buildbee-worker` | repo mirrors and Run checkouts |
 | `BUILDBEE_WORKER_OPEN_PRS` | worker | `1` | open a PR with `gh` after pushing |
@@ -88,4 +89,4 @@ BuildBee trusts the network it runs on. Anyone who can reach the Server can read
 - State-changing requests from another site's page are refused, and WebSockets only accept same-origin pages, so a website a LAN user visits cannot drive the Server through their browser.
 - Only the Server port is published by compose. Postgres stays on the compose network, and workers open no port.
 - Only the worker that claimed a Run can write to it.
-- Workers refuse to run real agent CLIs (`claude`, `codex`, …) on their host unless `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`. Until Runs execute in per-Run containers (roadmap Phase 3), an allowed agent runs as the worker's user, with its files and logins, in an empty temporary directory.
+- By default each Run's agent runs in its own container that sees only the Run's checkout and that agent's login, with no Docker socket. `BUILDBEE_WORKER_ISOLATION=host` runs agents directly on the worker machine instead, with the worker user's files and logins.

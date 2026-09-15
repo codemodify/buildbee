@@ -73,11 +73,14 @@ func LoadServer(getenv Getenv) (Server, error) {
 
 // Worker is the buildbee-worker configuration.
 type Worker struct {
-	ServerURL       string   // BUILDBEE_URL
-	Name            string   // BUILDBEE_WORKER_NAME, default the hostname; unique per worker
-	Agents          []string // BUILDBEE_WORKER_AGENTS, comma-separated; empty = decided by the worker
-	Slots           int      // BUILDBEE_WORKER_SLOTS: Runs executed at once (default 4)
-	AllowHostAgents bool     // BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1: run real agent CLIs on this host
+	ServerURL    string   // BUILDBEE_URL
+	Name         string   // BUILDBEE_WORKER_NAME, default the hostname; unique per worker
+	Agents       []string // BUILDBEE_WORKER_AGENTS, comma-separated; empty = decided by the worker
+	Slots        int      // BUILDBEE_WORKER_SLOTS: Runs executed at once (default 4)
+	Isolation    string   // BUILDBEE_WORKER_ISOLATION: container (default) or host
+	Image        string   // BUILDBEE_WORKER_IMAGE: agent image for container isolation
+	Memory, CPUs string   // BUILDBEE_WORKER_MEMORY, BUILDBEE_WORKER_CPUS: per-Run container limits
+	Network      string   // BUILDBEE_WORKER_NETWORK: per-Run container network
 	// AgentCommands overrides how an agent is started, from
 	// BUILDBEE_AGENT_<NAME>, e.g. BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp".
 	AgentCommands map[string][]string
@@ -93,13 +96,17 @@ var agentNames = []string{"claude", "codex", "grok", "opencode", "goose"}
 func LoadWorker(getenv Getenv) (Worker, error) {
 	host, _ := os.Hostname()
 	c := Worker{
-		ServerURL:       strings.TrimRight(value(getenv, "BUILDBEE_URL", "http://127.0.0.1:8080"), "/"),
-		Name:            value(getenv, "BUILDBEE_WORKER_NAME", host),
-		Slots:           4,
-		AllowHostAgents: value(getenv, "BUILDBEE_WORKER_ALLOW_HOST_AGENTS", "") == "1",
-		RunTimeout:      2 * time.Hour,
-		Dir:             value(getenv, "BUILDBEE_WORKER_DIR", ""),
-		OpenPRs:         value(getenv, "BUILDBEE_WORKER_OPEN_PRS", "1") != "0",
+		ServerURL:  strings.TrimRight(value(getenv, "BUILDBEE_URL", "http://127.0.0.1:8080"), "/"),
+		Name:       value(getenv, "BUILDBEE_WORKER_NAME", host),
+		Slots:      4,
+		Isolation:  value(getenv, "BUILDBEE_WORKER_ISOLATION", "container"),
+		Image:      value(getenv, "BUILDBEE_WORKER_IMAGE", "buildbee-agents"),
+		Memory:     value(getenv, "BUILDBEE_WORKER_MEMORY", "8g"),
+		CPUs:       value(getenv, "BUILDBEE_WORKER_CPUS", "4"),
+		Network:    value(getenv, "BUILDBEE_WORKER_NETWORK", ""),
+		RunTimeout: 2 * time.Hour,
+		Dir:        value(getenv, "BUILDBEE_WORKER_DIR", ""),
+		OpenPRs:    value(getenv, "BUILDBEE_WORKER_OPEN_PRS", "1") != "0",
 	}
 	for _, a := range agentNames {
 		if argv := strings.Fields(getenv("BUILDBEE_AGENT_" + strings.ToUpper(a))); len(argv) > 0 {
@@ -112,6 +119,12 @@ func LoadWorker(getenv Getenv) (Worker, error) {
 	var errs []error
 	if u, err := url.Parse(c.ServerURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		errs = append(errs, fmt.Errorf("BUILDBEE_URL must be an http(s) URL, got %q", c.ServerURL))
+	}
+	if c.Isolation != "container" && c.Isolation != "host" {
+		errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_ISOLATION must be container or host, got %q", c.Isolation))
+	}
+	if getenv("BUILDBEE_WORKER_ALLOW_HOST_AGENTS") != "" {
+		errs = append(errs, errors.New("BUILDBEE_WORKER_ALLOW_HOST_AGENTS is gone; set BUILDBEE_WORKER_ISOLATION=host to run agents on this machine"))
 	}
 	if c.Name == "" {
 		errs = append(errs, errors.New("BUILDBEE_WORKER_NAME is required (the hostname is unknown)"))

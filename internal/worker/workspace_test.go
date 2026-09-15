@@ -61,11 +61,11 @@ func (s *stack) useRepo(url string) {
 
 // writeFile is an agent that adds a file to its checkout.
 func writeFile(name, body string) Exec {
-	return func(_ context.Context, _, dir, _ string, _ acp.Handler) (string, error) {
-		if dir == "" {
+	return func(_ context.Context, job Job, _ acp.Handler) (string, error) {
+		if job.Dir == "" || job.GitDir == "" {
 			return "", os.ErrInvalid
 		}
-		return "wrote " + name, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644)
+		return "wrote " + name, os.WriteFile(filepath.Join(job.Dir, name), []byte(body), 0o644)
 	}
 }
 
@@ -121,8 +121,8 @@ func TestRunsStartFromTheLatestDefaultBranch(t *testing.T) {
 	dir := t.TempDir()
 	var mu sync.Mutex
 	var seen []string
-	s.start(Config{Dir: dir, Slots: 1, Exec: func(_ context.Context, _, wd, _ string, _ acp.Handler) (string, error) {
-		readme, err := os.ReadFile(filepath.Join(wd, "README.md"))
+	s.start(Config{Dir: dir, Slots: 1, Exec: func(_ context.Context, job Job, _ acp.Handler) (string, error) {
+		readme, err := os.ReadFile(filepath.Join(job.Dir, "README.md"))
 		mu.Lock()
 		seen = append(seen, string(readme))
 		mu.Unlock()

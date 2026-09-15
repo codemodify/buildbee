@@ -27,6 +27,9 @@ import (
 // protocolVersion is the ACP major version BuildBee speaks.
 const protocolVersion = 1
 
+// authTimeout bounds an authenticate call, which should only reuse a login.
+const authTimeout = 30 * time.Second
+
 // Event is one piece of agent output, posted as a RunEvent.
 type Event struct {
 	Kind    string
@@ -192,6 +195,10 @@ func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"agentInfo"`
+		AuthMethods []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"authMethods"`
 	}
 	if err := c.call(ctx, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
@@ -219,7 +226,27 @@ func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 		} `json:"modes"`
 		ConfigOptions []configOption `json:"configOptions"`
 	}
-	if err := c.call(ctx, "session/new", map[string]any{"cwd": s.cfg.WorkDir, "mcpServers": []any{}}, &sess); err != nil {
+	newSession := map[string]any{"cwd": s.cfg.WorkDir, "mcpServers": []any{}}
+	err := c.call(ctx, "session/new", newSession, &sess)
+	var rerr *RPCError
+	if errors.As(err, &rerr) && rerr.Code == codeAuthRequired {
+		// Some agents (Grok) want an explicit authenticate, which uses the
+		// login their CLI already has. Only agent-handled methods: a
+		// terminal method would wait for a person.
+		for _, m := range init.AuthMethods {
+			if m.Type != "" && m.Type != "agent" {
+				continue
+			}
+			actx, cancel := context.WithTimeout(ctx, authTimeout)
+			aerr := c.call(actx, "authenticate", map[string]string{"methodId": m.ID}, nil)
+			cancel()
+			if aerr == nil {
+				err = c.call(ctx, "session/new", newSession, &sess)
+			}
+			break
+		}
+	}
+	if err != nil {
 		return s.explain(ctx, err)
 	}
 	s.id = sess.SessionID

@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 3d (repos and pull requests)
+## Unreleased — LAN rebuild, Phase 3b (per-Run containers)
+
+### Breaking
+- Workers run each agent in its own container by default; `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` is replaced by `BUILDBEE_WORKER_ISOLATION=host`
+
+### Added
+- `Dockerfile.agents` (claude-agent-acp, codex-acp, OpenCode, Grok); `BUILDBEE_WORKER_IMAGE`, `_MEMORY`, `_CPUS`, `_NETWORK`
+- Workers probe the image for agents and remove containers left by a previous run
+- `buildbee-worker fake-agent` speaks ACP on stdio, for trying container isolation without a real agent
+- ACP `authenticate` is called when an agent asks for it, reusing the CLI's login
+
+## LAN rebuild, Phase 3d (repos and pull requests)
 
 ### Added
 - Runs on a Project with `repo_url` work in their own git worktree on branch `buildbee/<task>-<run>`; the worker commits, uploads `changes.diff`, pushes with its own git credentials and opens a PR with `gh`

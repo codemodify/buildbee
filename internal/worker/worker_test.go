@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,11 +55,16 @@ func newStack(t *testing.T) *stack {
 
 func (s *stack) queue(title string) *models.Run {
 	s.t.Helper()
+	return s.queueFor(title, "fake")
+}
+
+func (s *stack) queueFor(title, agent string) *models.Run {
+	s.t.Helper()
 	tc, err := s.svc.CreateTask(s.ctx, s.ada, s.project, core.NewTask{Title: title, HandoffRole: "none"})
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	r, err := s.svc.CreateRun(s.ctx, s.ada, tc.ID, core.NewRun{Agent: "fake"})
+	r, err := s.svc.CreateRun(s.ctx, s.ada, tc.ID, core.NewRun{Agent: agent})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -70,7 +74,10 @@ func (s *stack) queue(title string) *models.Run {
 // start runs a worker until the test ends (or stop is called).
 func (s *stack) start(cfg Config) (stop func()) {
 	s.t.Helper()
-	cfg.Server, cfg.Agents = s.url, []string{"fake"}
+	cfg.Server = s.url
+	if cfg.Agents == nil {
+		cfg.Agents = []string{"fake"}
+	}
 	if cfg.Name == "" {
 		cfg.Name = "w1"
 	}
@@ -114,31 +121,40 @@ func finished(r *models.Run) bool { return r.Status.Terminal() }
 
 // blockingExec runs until its context ends, reporting when it starts.
 func blockingExec(started chan<- string) Exec {
-	return func(ctx context.Context, _, _, prompt string, emit acp.Handler) (string, error) {
+	return func(ctx context.Context, job Job, emit acp.Handler) (string, error) {
 		_ = emit(acp.Event{Kind: "token", Payload: map[string]any{"text": "working"}})
-		started <- prompt
+		started <- job.Prompt
 		<-ctx.Done()
 		return "partial transcript", ctx.Err()
 	}
 }
 
-func TestNewRefusesRealAgentsUnlessAllowed(t *testing.T) {
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"claude"}}); !errors.Is(err, ErrHostAgentsDisabled) {
-		t.Fatalf("got %v", err)
+func TestNewChecksIsolationAndAgents(t *testing.T) {
+	claude := []string{"claude"}
+	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude}); err == nil || !strings.Contains(err.Error(), "needs an image") {
+		t.Fatalf("container isolation without an image: %v", err)
 	}
-	t.Setenv("PATH", t.TempDir())
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"claude"}, AllowHostAgents: true}); !errors.Is(err, acp.ErrNoAgent) {
-		t.Fatalf("an agent whose ACP command is missing: %v", err)
-	}
-	sh, err := exec.LookPath("/bin/sh")
-	if err != nil {
-		t.Skip("no /bin/sh")
-	}
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"claude"}, AllowHostAgents: true,
-		Commands: map[string][]string{"claude": {sh}}}); err != nil {
+	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude, Container: Container{Image: "agents"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []Config{{Slots: 1, Agents: []string{"fake"}}, {Name: "w", Agents: []string{"fake"}}, {Name: "w", Slots: 1}, {Name: "w", Slots: 1, Agents: []string{"hal"}}} {
+	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"fake"}}); err != nil {
+		t.Fatalf("the fake agent needs no container: %v", err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude, Isolation: IsolationHost}); !errors.Is(err, acp.ErrNoAgent) {
+		t.Fatalf("a host agent whose ACP command is missing: %v", err)
+	}
+	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude, Isolation: IsolationHost,
+		Commands: map[string][]string{"claude": {"/bin/sh"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []Config{
+		{Slots: 1, Agents: []string{"fake"}},
+		{Name: "w", Agents: []string{"fake"}},
+		{Name: "w", Slots: 1},
+		{Name: "w", Slots: 1, Agents: []string{"hal"}},
+		{Name: "w", Slots: 1, Agents: []string{"fake"}, Isolation: "vm"},
+	} {
 		if _, err := New(bad); err == nil {
 			t.Fatalf("expected an error for %+v", bad)
 		}
@@ -162,7 +178,7 @@ func TestWorkerRunsTheFakeAgent(t *testing.T) {
 func TestAgentFailureFailsTheRun(t *testing.T) {
 	s := newStack(t)
 	r := s.queue("Break it")
-	s.start(Config{Exec: func(context.Context, string, string, string, acp.Handler) (string, error) {
+	s.start(Config{Exec: func(context.Context, Job, acp.Handler) (string, error) {
 		return "", errors.New("agent crashed: exit 2")
 	}})
 	got := s.wait(r.ID, finished)
@@ -228,7 +244,7 @@ func TestSlotsBoundParallelRuns(t *testing.T) {
 	for i := range runs {
 		ids = append(ids, s.queue("job "+string(rune('a'+i))).ID)
 	}
-	s.start(Config{Slots: slots, Exec: func(ctx context.Context, _, _, _ string, _ acp.Handler) (string, error) {
+	s.start(Config{Slots: slots, Exec: func(ctx context.Context, _ Job, _ acp.Handler) (string, error) {
 		n := running.Add(1)
 		for {
 			p := peak.Load()
