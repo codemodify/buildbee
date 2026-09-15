@@ -111,6 +111,7 @@ type ProjectPatch struct {
 	Instructions  *string `json:"instructions"`
 	RepoURL       *string `json:"repo_url"`
 	DefaultBranch *string `json:"default_branch"`
+	AgentImage    *string `json:"agent_image"`
 	Archived      *bool   `json:"archived"`
 }
 
@@ -180,6 +181,13 @@ func (s *Service) UpdateProject(ctx context.Context, a Actor, id string, patch P
 				return err
 			}
 			changes["default_branch"], p.DefaultBranch = b, b
+		}
+		if patch.AgentImage != nil {
+			img := strings.TrimSpace(*patch.AgentImage)
+			if img != "" && !imageRef.MatchString(img) {
+				return invalid("agent_image must be an image reference such as ghcr.io/acme/agents:1.2")
+			}
+			changes["agent_image"], p.AgentImage = img, img
 		}
 		action := "updated"
 		if patch.Archived != nil {
@@ -432,6 +440,11 @@ func (s *Service) UpdateMember(ctx context.Context, a Actor, id string, patch Me
 
 // scpRepo matches git's scp-style address, user@host:path.
 var scpRepo = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+$`)
+
+// imageRef is a container image reference: registry/name[:tag][@digest].
+// It must start with a letter or digit, so it can never read as a docker
+// option.
+var imageRef = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*(:[0-9]{1,5})?(/[a-z0-9][a-z0-9._-]*)*(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?(@sha256:[a-f0-9]{64})?$`)
 
 // validRepoURL accepts the URLs and scp-style addresses git clones over
 // its safe transports. It refuses anything git could read as an option

@@ -92,7 +92,7 @@ When the Run ends, a token the agent refreshed is written back to the host, if i
 
 The worker never runs git in the agent's repo once the agent has started. It records the agent's files into a worktree of its own (`git --work-tree`) and commits, diffs and pushes from there, so hooks, config or a redirected `.git` the agent wrote are never used. The agent's own commits are not kept; its files are, as one commit per build. Host git also runs with hooks and file-system monitors disabled.
 
-`Dockerfile.agents` builds an image with `claude-agent-acp`, `codex-acp`, OpenCode and Grok on Node 24 with git, Python and a C toolchain. Projects that need more (Go, Rust, database clients) extend it and set `BUILDBEE_WORKER_IMAGE`.
+`Dockerfile.agents` builds an image with `claude-agent-acp`, `codex-acp`, OpenCode and Grok on Node 24 with git, Python and a C toolchain. A Project that needs more (Go, Rust, database clients) gets its own image: build one `FROM buildbee-agents`, push it where workers can pull, and set it as the Project's agent image (Settings → Repository, or `agent_image` on `PATCH /v1/projects/{id}`). A worker pulls a Project's image the first time it needs it and checks that the Run's agent is in it; a Run whose image cannot be pulled or lacks its agent fails and says so. `BUILDBEE_WORKER_IMAGE` stays the default for Projects without one.
 
 With `BUILDBEE_WORKER_ISOLATION=host`, agents run directly on the machine as the worker's user, with that user's files, tools and logins, like Buzz. Use it on machines and accounts you are comfortable handing to an agent.
 

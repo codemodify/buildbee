@@ -65,7 +65,7 @@ type Items<T> = { items: T[] };
 type Page<T> = { items: T[]; has_more: boolean };
 
 export type ProjectPatch = Partial<
-  Pick<Project, "name" | "auto_run" | "merge_policy" | "max_runs" | "instructions" | "repo_url" | "default_branch">
+  Pick<Project, "name" | "auto_run" | "merge_policy" | "max_runs" | "instructions" | "repo_url" | "default_branch" | "agent_image">
 > & { archived?: boolean };
 
 export const api = {

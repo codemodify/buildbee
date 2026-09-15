@@ -26,7 +26,7 @@ func TestContainerArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := Job{RunID: "r1", Agent: "claude", Dir: "/w/runs/r1/work", Objects: "/w/mirrors/m.git/objects"}
-	args := strings.Join(c.args("box", job, "/tmp/h", []string{"claude-agent-acp"}), " ")
+	args := strings.Join(c.args("box", job, "/tmp/h", []string{"claude-agent-acp"}, c.Image), " ")
 	for _, want := range []string{
 		"run --rm -i --init --name buildbee-run-r1",
 		"--label buildbee.worker=box --label buildbee.run=r1",
@@ -223,5 +223,53 @@ func TestLoggedInNeedsTheAgentsLogin(t *testing.T) {
 	}
 	if strings.Join(got, ",") != "claude,goose,fake" {
 		t.Fatalf("logged in: %v", got)
+	}
+}
+
+// fakeDocker writes a docker stand-in that logs its arguments; images in
+// have are present, pull brings any other, and run answers a probe with
+// the agents named in agents.
+func fakeDocker(t *testing.T, have, agents string) (docker, log string) {
+	t.Helper()
+	dir := t.TempDir()
+	log = filepath.Join(dir, "calls")
+	script := `#!/bin/sh
+echo "$*" >> ` + log + `
+case "$1 $2" in
+"image inspect") case " ` + have + ` " in *" $5 "*) exit 0;; esac; test -f ` + dir + `/pulled && exit 0; exit 1;;
+"pull --quiet") touch ` + dir + `/pulled; exit 0;;
+esac
+if [ "$1" = run ]; then for a in ` + agents + `; do echo $a; done; fi
+`
+	docker = filepath.Join(dir, "docker")
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return docker, log
+}
+
+func TestProjectImagesArePulledAndChecked(t *testing.T) {
+	docker, log := fakeDocker(t, "", "claude")
+	c := Container{Image: "buildbee-agents", Home: t.TempDir(), Docker: docker}
+	ctx := context.Background()
+	if err := c.ready(ctx, "ghcr.io/acme/agents:2", "claude", []string{"claude-agent-acp"}); err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "pull --quiet ghcr.io/acme/agents:2") || !strings.Contains(string(calls), "run --rm --entrypoint sh ghcr.io/acme/agents:2") {
+		t.Fatalf("pulled and probed:\n%s", calls)
+	}
+	before := len(calls)
+	if err := c.ready(ctx, "ghcr.io/acme/agents:2", "claude", []string{"claude-agent-acp"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ = os.ReadFile(log); len(calls) != before {
+		t.Fatal("a checked image is remembered")
+	}
+	if err := c.ready(ctx, "ghcr.io/acme/agents:2", "codex", []string{"codex-acp"}); err == nil || !strings.Contains(err.Error(), "has no codex-acp") {
+		t.Fatalf("an agent missing from the image: %v", err)
+	}
+	if err := c.ready(ctx, "--privileged", "claude", []string{"claude-agent-acp"}); err == nil {
+		t.Fatal("an image that reads as an option is refused")
 	}
 }

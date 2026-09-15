@@ -28,7 +28,7 @@ DELETE /v1/me                            → forget this browser's Person
 | --- | --- |
 | `GET/POST /v1/projects` | list (`?archived=1` includes archived) / create `{name, auto_run}`: you and `#tasks`, no Bots. `default_bots: true` also adds Scout, Builder, Sentry and Pulse, running `agent` (`""` = any) |
 | `GET /v1/bot-templates` | the autopilot's Bots (`name`, `role`, `instructions`), to add with `POST /v1/projects/{id}/members` |
-| `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, merge_policy: auto\|approval, max_runs, instructions, repo_url, default_branch, archived}`; `auto_run` is [autopilot](autopilot.md) |
+| `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, merge_policy: auto\|approval, max_runs, instructions, repo_url, default_branch, agent_image, archived}`; `auto_run` is [autopilot](autopilot.md); `agent_image` is the container image its agents run in (`""` = the worker's) |
 | `POST /v1/projects/{id}/join`, `POST /v1/projects/{id}/leave` | join as `member` / leave (messages keep your name; writing again rejoins). Both show in `GET /v1/members` |
 | `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions, agent}` |
 | `PATCH /v1/members/{id}` | `{display_name, instructions, agent}`; `agent` applies to Bots |

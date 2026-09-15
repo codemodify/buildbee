@@ -35,6 +35,7 @@ export type Project = {
   instructions?: string;
   repo_url?: string;
   default_branch?: string;
+  agent_image?: string;
   kind?: "project" | "direct" | string; // direct: the space for DMs between people
   archived_at?: string;
   members?: Member[];

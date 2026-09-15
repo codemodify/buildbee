@@ -27,6 +27,7 @@ import (
 type Job struct {
 	RunID string
 	Agent string
+	Image string // the Project's agent image; "" = the worker's
 	Dir   string // where the agent works; "" for the fake agent without a repo
 	// Objects is the mirror object store Dir's repo borrows from, if any;
 	// a container mounts it read-only.
@@ -338,7 +339,7 @@ func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit a
 	listenCtx, stopListening := context.WithCancel(ctx)
 	defer stopListening()
 	go w.listen(listenCtx, run.ID, c.Seq, steer)
-	job := Job{RunID: run.ID, Agent: agent, Dir: workDir, Prompt: run.Prompt, Steer: steer}
+	job := Job{RunID: run.ID, Agent: agent, Image: c.Project.AgentImage, Dir: workDir, Prompt: run.Prompt, Steer: steer}
 	if ws != nil {
 		job.Objects = ws.objects
 	}

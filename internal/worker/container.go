@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,7 +86,7 @@ func (c *Container) defaults() error {
 
 // args builds the docker run arguments for job, whose agent is started
 // with argv inside the container. home is the Run's scratch HOME.
-func (c *Container) args(worker string, job Job, home string, argv []string) []string {
+func (c *Container) args(worker string, job Job, home string, argv []string, image string) []string {
 	args := []string{"run", "--rm", "-i", "--init",
 		"--name", containerName(job.RunID),
 		"--label", "buildbee.worker=" + worker, "--label", "buildbee.run=" + job.RunID,
@@ -113,8 +114,7 @@ func (c *Container) args(worker string, job Job, home string, argv []string) []s
 	if c.Network != "" {
 		args = append(args, "--network", c.Network)
 	}
-	args = append(args, c.Image)
-	return append(args, argv...)
+	return append(append(args, image), argv...)
 }
 
 func containerName(runID string) string { return "buildbee-run-" + runID }
@@ -152,9 +152,16 @@ func (c *Container) exec(worker string, commands map[string][]string) Exec {
 			}
 			defer os.RemoveAll(job.Dir)
 		}
+		image := c.Image
+		if job.Image != "" && job.Image != c.Image {
+			if err := c.ready(ctx, job.Image, job.Agent, argv); err != nil {
+				return "", err
+			}
+			image = job.Image
+		}
 		// Stopping the docker client does not stop the container; remove it.
 		defer c.remove(containerName(job.RunID))
-		cmd := append([]string{c.Docker}, c.args(worker, job, home, argv)...)
+		cmd := append([]string{c.Docker}, c.args(worker, job, home, argv, image)...)
 		return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: cmd, WorkDir: job.Dir, Steer: job.Steer}, job.Prompt, emit)
 	}
 }
@@ -185,17 +192,56 @@ func (c *Container) RemoveLeftovers(ctx context.Context, worker string) error {
 // safeCommand matches command names that can be probed in a shell as is.
 var safeCommand = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// ready makes sure a Project's image is here (pulling it if not) and has
+// the agent's command. A good answer is remembered for the worker's life.
+func (c *Container) ready(ctx context.Context, image, agent string, argv []string) error {
+	if strings.HasPrefix(image, "-") { // never a docker option, whatever the Server sent
+		return fmt.Errorf("bad agent image %q", image)
+	}
+	key := image + "\x00" + agent
+	if _, ok := readyImages.Load(key); ok {
+		return nil
+	}
+	if err := c.defaults(); err != nil {
+		return err
+	}
+	if exec.CommandContext(ctx, c.Docker, "image", "inspect", "--format", "{{.Id}}", image).Run() != nil {
+		pullCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		out, err := exec.CommandContext(pullCtx, c.Docker, "pull", "--quiet", image).CombinedOutput()
+		cancel()
+		if err != nil {
+			return fmt.Errorf("the Project's agent image %s could not be pulled: %s", image, strings.TrimSpace(string(out)))
+		}
+	}
+	found, err := c.probe(ctx, image, []string{agent}, map[string][]string{agent: argv})
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(found, agent) {
+		return fmt.Errorf("%w: the Project's agent image %s has no %s command for %s", acp.ErrNoAgent, image, argv[0], agent)
+	}
+	readyImages.Store(key, true)
+	return nil
+}
+
+// readyImages remembers Project images known to carry an agent.
+var readyImages sync.Map
+
 // Probe reports which agents' commands exist in the image.
 func (c *Container) Probe(ctx context.Context, agents []string, commands map[string][]string) ([]string, error) {
 	if err := c.defaults(); err != nil {
 		return nil, err
 	}
+	return c.probe(ctx, c.Image, agents, commands)
+}
+
+func (c *Container) probe(ctx context.Context, image string, agents []string, commands map[string][]string) ([]string, error) {
 	if _, err := exec.LookPath(c.Docker); err != nil {
 		return nil, fmt.Errorf("%w: %s is not installed; install Docker or set BUILDBEE_WORKER_ISOLATION=host", ErrNoDocker, c.Docker)
 	}
-	if out, err := exec.CommandContext(ctx, c.Docker, "image", "inspect", "--format", "{{.Id}}", c.Image).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, c.Docker, "image", "inspect", "--format", "{{.Id}}", image).CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("%w: image %s is not available (%s); build it with: docker build -f Dockerfile.agents -t %s .",
-			ErrNoImage, c.Image, strings.TrimSpace(string(out)), c.Image)
+			ErrNoImage, image, strings.TrimSpace(string(out)), image)
 	}
 	var script strings.Builder
 	for _, a := range agents {
@@ -208,10 +254,10 @@ func (c *Container) Probe(ctx context.Context, agents []string, commands map[str
 		}
 	}
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.Docker, "run", "--rm", "--entrypoint", "sh", c.Image, "-c", script.String()+"true")
+	cmd := exec.CommandContext(ctx, c.Docker, "run", "--rm", "--entrypoint", "sh", image, "-c", script.String()+"true")
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("probing image %s: %v: %s", c.Image, err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("probing image %s: %v: %s", image, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.Fields(stdout.String()), nil
 }

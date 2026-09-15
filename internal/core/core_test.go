@@ -693,3 +693,30 @@ func TestRenameChangesTheNameEverywhere(t *testing.T) {
 		t.Fatalf("activity: %+v", acts[0])
 	}
 }
+
+func TestAgentImageNames(t *testing.T) {
+	for _, ok := range []string{"buildbee-agents", "ghcr.io/acme/agents:1.2", "registry.lan:5000/team/agents:latest",
+		"agents@sha256:" + strings.Repeat("a", 64), "localhost:5000/x"} {
+		if !imageRef.MatchString(ok) {
+			t.Errorf("refused %q", ok)
+		}
+	}
+	for _, bad := range []string{"-v", "--privileged", "agents x", "Agents", "a:b:c:d", "../x", ""} {
+		if imageRef.MatchString(bad) {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Img")
+	img := "ghcr.io/acme/agents:2"
+	got, err := f.s.UpdateProject(f.ctx, ada, p.ID, ProjectPatch{AgentImage: &img})
+	f.must(err)
+	if got.AgentImage != img {
+		t.Fatalf("saved: %+v", got)
+	}
+	bad := "--privileged"
+	if _, err := f.s.UpdateProject(f.ctx, ada, p.ID, ProjectPatch{AgentImage: &bad}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("bad image: %v", err)
+	}
+}

@@ -183,7 +183,8 @@ type Project struct {
 	Instructions  string     `json:"instructions,omitempty"`
 	RepoURL       string     `json:"repo_url,omitempty"`
 	DefaultBranch string     `json:"default_branch,omitempty"`
-	Kind          string     `json:"kind"` // ProjectKind or DirectSpace
+	AgentImage    string     `json:"agent_image,omitempty"` // container image for its agents; "" = the worker's
+	Kind          string     `json:"kind"`                  // ProjectKind or DirectSpace
 	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 }

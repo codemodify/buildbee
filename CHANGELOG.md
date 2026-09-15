@@ -19,6 +19,9 @@
 - Desktop notifications, from Your settings (browsers allow them on HTTPS or localhost)
 - Edit and delete your own messages (`PATCH`/`DELETE /v1/messages/{id}`): "(edited)" marks edits, a deleted message keeps its thread
 
+### Added (agents)
+- Per-Project agent images (`agent_image`, migration 0005): workers pull them on first use and check the Run's agent is in them
+
 ### Added (managing)
 - Rename and archive channels from the channel's ⋯ menu; unarchive in the Project's Settings
 - Remove people and Bots from a Project (`DELETE /v1/members/{id}`): a removed Bot's Runs stop and it takes no more work

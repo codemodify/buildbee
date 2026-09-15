@@ -103,6 +103,8 @@ export function Settings({ header }: { header: ReactNode }) {
       <Card title="Repository">
         <TextSetting label="Repo URL" value={p.repo_url ?? ""} placeholder="git@github.com:acme/app.git" onSave={(v) => save({ repo_url: v })} />
         <TextSetting label="Default branch" value={p.default_branch ?? ""} placeholder="main" onSave={(v) => save({ default_branch: v })} />
+        <TextSetting label="Agent image" value={p.agent_image ?? ""} placeholder="the worker's image" onSave={(v) => save({ agent_image: v })} />
+        <p className="text-[12px] text-bb-subtle">An image with this Project's toolchain and the agents (build on Dockerfile.agents). Workers pull it; agents run on a machine without Docker ignore it.</p>
       </Card>
 
       <Card title="Instructions" subtitle="Read by every agent.">
