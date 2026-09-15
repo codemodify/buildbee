@@ -557,6 +557,14 @@ type Run struct {
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 }
 
+// RunRow is a Run on the Server's dashboard, with what it is about.
+type RunRow struct {
+	Run
+	TaskTitle   string `json:"task_title"`
+	ProjectName string `json:"project_name"`
+	BotName     string `json:"bot_name,omitempty"`
+}
+
 // RunKind is what a Run is for.
 type RunKind string
 

@@ -64,6 +64,35 @@ func (s *Service) UploadFile(ctx context.Context, a Actor, channelID, fileName s
 	return &f, nil
 }
 
+// Swept is what one round of housekeeping removed.
+type Swept struct {
+	Uploads       int `json:"uploads"`
+	RunEvents     int `json:"run_events"`
+	Notifications int `json:"notifications"`
+}
+
+// Sweep is the Server's housekeeping: uploads nobody posted, and, with
+// RetentionDays set, the event streams of long-finished Runs and read
+// notifications. It removes at most a few thousand rows per round, so a
+// first sweep of an old database is spread over several.
+func (s *Service) Sweep(ctx context.Context) (Swept, error) {
+	var out Swept
+	var err error
+	if out.Uploads, err = s.SweepUploads(ctx); err != nil {
+		return out, err
+	}
+	if s.keepDays <= 0 {
+		return out, nil
+	}
+	const batch = 5000
+	before := s.now().AddDate(0, 0, -s.keepDays)
+	if out.RunEvents, err = s.st.DeleteOldRunEvents(ctx, before, batch); err != nil {
+		return out, err
+	}
+	out.Notifications, err = s.st.DeleteOldNotifications(ctx, before, batch)
+	return out, err
+}
+
 // SweepUploads deletes uploads nobody posted within a day, bytes included.
 func (s *Service) SweepUploads(ctx context.Context) (int, error) {
 	keys, err := s.st.DeleteUnattached(ctx, s.now().Add(-24*time.Hour))

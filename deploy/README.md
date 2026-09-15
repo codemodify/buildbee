@@ -35,19 +35,20 @@ Workers that run real agents run on machines where the agent CLIs are installed 
 
 ## Backups
 
-Everything lives in the `postgres_data` volume. Back it up with `pg_dump` before every upgrade:
+Two things hold state: the database (`postgres_data`) and the files (`server_data`: attachments and large Artifacts). One script takes both:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
-  pg_dump -U buildbee -Fc buildbee > buildbee-$(date +%F).dump
+scripts/backup.sh                 # into ./backups/<date>
+scripts/restore.sh backups/2026-09-15-120000
 ```
 
-Restore into an empty database:
+The backup is a `pg_dump` archive plus a tar of the files volume; restoring replaces both and restarts the Server. The smoke test backs up and restores on every run, so the scripts stay honest. Back up before every upgrade, and keep a copy off the machine.
 
-```bash
-docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
-  pg_restore -U buildbee -d buildbee --clean --if-exists < buildbee-2026-09-15.dump
-```
+## Monitoring
+
+`GET /metrics` is Prometheus text: Runs by status, Runs running and queued per agent, workers online and their slots, people online, and request counts and latency. `# status` shows the same at a glance: agents, what is running, and what failed today.
+
+Finished Runs' event streams (the agents' token-by-token output) and read notifications are deleted after `BUILDBEE_RETENTION_DAYS` (90 by default; 0 keeps them). The Runs themselves, their summaries, Artifacts and messages are never swept.
 
 ## Files
 

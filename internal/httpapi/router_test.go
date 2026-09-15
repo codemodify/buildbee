@@ -380,3 +380,31 @@ func TestFilesDownloadSafely(t *testing.T) {
 		t.Fatalf("no length: %d", rec.Code)
 	}
 }
+
+func TestMetrics(t *testing.T) {
+	s := newStack(t, Options{})
+	p := s.project("Ada", "Metrics")
+	task := ok[obj](t, s.call(http.MethodPost, "/v1/projects/"+p.ID+"/tasks", "Ada", obj{"title": "work", "handoff_role": "none"}), http.StatusCreated)
+	ok[obj](t, s.call(http.MethodPost, "/v1/tasks/"+task["id"].(string)+"/runs", "Ada", obj{"agent": "claude"}), http.StatusCreated)
+	s.call(http.MethodGet, "/v1/nope", "Ada", nil)
+	rec := s.call(http.MethodGet, "/metrics", "", nil)
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain; version=0.0.4") {
+		t.Fatalf("%d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`buildbee_runs{status="pending"} 1`,
+		`buildbee_agent_runs{agent="claude",state="queued"} 1`,
+		`buildbee_agent_workers{agent="claude"} 0`,
+		"buildbee_workers_online 0",
+		"buildbee_people_online 0",
+		`buildbee_http_requests_total{method="POST",code="201"} 3`,
+		`buildbee_http_requests_total{method="GET",code="404"} 1`,
+		`buildbee_http_request_duration_seconds_bucket{le="+Inf"} 4`,
+		"buildbee_http_request_duration_seconds_count 4",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in:\n%s", want, body)
+		}
+	}
+}

@@ -19,6 +19,7 @@ build: embed-web
 	go build -trimpath -o $(BIN)/buildbee-server ./cmd/buildbee-server
 	go build -trimpath -o $(BIN)/buildbee-worker ./cmd/buildbee-worker
 	go build -trimpath -o $(BIN)/buildbee ./cmd/buildbee
+	go build -trimpath -o $(BIN)/buildbee-loadtest ./cmd/buildbee-loadtest
 
 # Dev: serve the Vite build from disk instead of the embed.
 run: web

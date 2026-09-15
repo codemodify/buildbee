@@ -6,7 +6,7 @@ import { signal } from "../signals";
 import { useLoad } from "../store";
 import { ago } from "../text";
 import type { AgentLoad, Person, Presence, Project, Roster } from "../types";
-import { Avatar, Button, ErrorNote, Field, Pill, Sheet, cx, inputClass } from "./kit";
+import { Avatar, Button, ErrorNote, Field, Pill, Sheet, cx, inputClass, runTone } from "./kit";
 import { ProjectScope } from "./scope";
 import { AddBot } from "./AddBot";
 import { UsagePanel } from "./Settings";
@@ -39,6 +39,8 @@ export function Status({ me, projects, presence, header }: { me: Person; project
         <div className="mx-auto max-w-3xl space-y-6 px-4 py-5">
           <ErrorNote>{error}</ErrorNote>
           <Agents presence={presence} bots={r?.bots ?? []} />
+
+          <Runs />
 
           <section className="space-y-3">
             <GroupTitle title="Tasks" />
@@ -143,6 +145,35 @@ export function Status({ me, projects, presence, header }: { me: Person; project
       {dialog === "invite" && <Invite projects={projects} onClose={() => setDialog(null)} onDone={reload} />}
       {dialog === "bot" && <AddBot projects={projects} onClose={() => setDialog(null)} onDone={reload} />}
     </section>
+  );
+}
+
+/** Runs is what the agents are doing across the Server, and what failed. */
+function Runs() {
+  const { data, reload } = useLoad(() => api.dashboardRuns().then((x) => x.items), []);
+  useTopic("presence:server", null, reload);
+  if (!data?.length) return null;
+  const busy = data.filter((x) => x.status === "running" || x.status === "pending");
+  const failed = data.filter((x) => x.status === "failed");
+  return (
+    <Group title="Runs" count={busy.length} action={failed.length > 0 && <span className="text-[12px] text-bb-danger">{failed.length} failed today</span>}>
+      {[...busy, ...failed].slice(0, 20).map((x) => (
+        <button key={x.id} type="button" className="block w-full text-left hover:bg-bb-hover" onClick={() => go({ view: "task", projectId: x.project_id ?? "", taskId: x.task_id })}>
+          <Row>
+            <Pill tone={runTone(x.status)} pulse={x.status === "running"}>
+              {x.status === "pending" ? "queued" : x.status}
+            </Pill>
+            <span className="min-w-0 flex-1 truncate">{x.task_title}</span>
+            <span className="shrink-0 text-[12px] text-bb-subtle">
+              {x.project_name}
+              {x.bot_name ? ` · ${x.bot_name}` : ""}
+              {x.agent ? ` · ${x.agent}` : ""}
+            </span>
+            <span className="w-16 shrink-0 text-right text-[12px] text-bb-subtle">{ago(x.started_at ?? x.created_at)}</span>
+          </Row>
+        </button>
+      ))}
+    </Group>
   );
 }
 

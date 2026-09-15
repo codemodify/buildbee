@@ -23,10 +23,11 @@ type Options struct {
 
 // Server serves the REST API, the WebSocket streams and the web UI.
 type Server struct {
-	core *core.Service
-	hub  *ws.Hub
-	opts Options
-	log  *slog.Logger
+	core    *core.Service
+	hub     *ws.Hub
+	opts    Options
+	log     *slog.Logger
+	metrics *requestMetrics
 }
 
 // NewServer serves svc; hub must be the Publisher svc was created with.
@@ -35,7 +36,7 @@ func NewServer(svc *core.Service, hub *ws.Hub, opts Options) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{core: svc, hub: hub, opts: opts, log: log}
+	return &Server{core: svc, hub: hub, opts: opts, log: log, metrics: newRequestMetrics()}
 }
 
 // Handler returns the full HTTP handler with middleware.
@@ -66,6 +67,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/presence", s.presence)
 	mux.HandleFunc("GET /v1/members", s.roster)
 	mux.HandleFunc("GET /v1/search", s.search)
+	mux.HandleFunc("GET /v1/runs", s.dashboardRuns)
+	mux.HandleFunc("GET /metrics", s.serveMetrics)
 	mux.HandleFunc("GET /v1/channels/{id}/ws", s.hub.ServeTopic(func(r *http.Request) string { return "channel:" + r.PathValue("id") }, false))
 	mux.HandleFunc("GET /v1/runs/{id}/ws", s.hub.ServeTopic(func(r *http.Request) string { return "run:" + r.PathValue("id") }, true))
 
@@ -150,7 +153,7 @@ func (s *Server) Handler() http.Handler {
 
 	web := webui.Handler(s.opts.WebDir)
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/v1") {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/metrics" || strings.HasPrefix(r.URL.Path, "/v1") {
 			mux.ServeHTTP(w, r)
 			return
 		}

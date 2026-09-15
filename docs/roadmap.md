@@ -98,23 +98,24 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Pinned `# status` (agents and their load, every Project's Tasks, people with invites, Bots, usage) and `# decisions`; DMs between people across the Server, closable; your settings (name, theme, corners, notifications)
 - The Server runs agents itself when its machine can; new Projects start with no Bots, and Add bot offers the autopilot's four
 
-## Phase 2 — Chat UX, remaining
+## Phase 2d — Chat UX (done)
 
-- Message search; editing and deleting messages; file and image attachments
-- Keyboard navigation (a quick switcher); desktop notifications from the browser
-- Managing what exists: rename and archive channels, remove Bots and people from a Project, archive Projects, delete a DM for everyone
+- Message search, editing and deleting messages, file and image attachments
+- A quick switcher (Ctrl+K) and desktop notifications
+- Managing what exists: rename and archive channels, remove Bots and people, archive Projects, close or delete a DM
 
-## Phase 3 — Agent harness, remaining
+## Phase 3e — Agent harness (done)
 
 - Per-Project images
-- Permission requests as Decisions for Projects that want them (agents auto-approve today), answers flowing back to the agent
-- A sandbox for agents that run directly on a machine (no Docker)
-- Logs and large Artifacts in object storage
+- Permission requests as Decisions for Projects that want them, answers flowing back to the agent
+- A sandbox (bubblewrap) for agents that run directly on a machine
+- Files and large Artifacts in a blob store: a directory, or S3-compatible
 
-## Phase 5 — Scale and operations
+## Phase 5 — Scale and operations (done)
 
-- Freeze the database baseline before the first real install; later changes ship as new migrations
-- Dashboard across all Projects and Runs, metrics, retention, backups, load test with dozens of concurrent Runs
+- The database baseline is frozen: schema changes ship as new migrations, checksums pinned
+- `# status` is the dashboard across Projects and Runs; `GET /metrics` for Prometheus; retention for Run event streams and read notifications; backup and restore scripts for the database and the files
+- `buildbee-loadtest`: 200 Runs, 50 at a time, all succeeded (639 runs/minute, 458 events/second on one laptop)
 
 ## Phase 6 — Desktop and mobile apps
 

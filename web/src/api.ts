@@ -19,6 +19,7 @@ import type {
   Routine,
   Run,
   RunEvent,
+  RunRow,
   Task,
   TaskDetail,
   Thread,
@@ -136,6 +137,7 @@ export const api = {
   startRun: (taskId: string, body: { agent?: string; bot_member_id?: string; kind?: string } = {}) =>
     request<Run>(`/v1/tasks/${taskId}/runs`, post(body)),
   run: (runId: string) => request<Run>(`/v1/runs/${runId}`),
+  dashboardRuns: () => request<Items<RunRow>>("/v1/runs"),
   runEvents: (runId: string, after = 0) =>
     request<Page<RunEvent>>(`/v1/runs/${runId}/events${q({ after, limit: 1000 })}`),
   cancelRun: (runId: string) => request<Run>(`/v1/runs/${runId}`, patch({ status: "canceled", detail: "canceled" })),

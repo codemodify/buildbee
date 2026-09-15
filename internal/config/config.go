@@ -38,6 +38,7 @@ type Server struct {
 	BlobDir        string // BUILDBEE_BLOB_DIR (default ~/.local/share/buildbee/blobs)
 	S3             S3
 	MaxUploadBytes int64 // BUILDBEE_MAX_UPLOAD_BYTES: one attachment (default 25 MiB)
+	RetentionDays  int   // BUILDBEE_RETENTION_DAYS: keep Run event streams and read notifications this long (0 = forever)
 	// LocalWorker is whether the Server runs agents itself
 	// (BUILDBEE_LOCAL_WORKER): auto (default) when this machine can,
 	// on (refuse to start if it cannot) or off.
@@ -82,6 +83,7 @@ func LoadServer(getenv Getenv) (Server, error) {
 			SecretKey: value(getenv, "BUILDBEE_S3_SECRET_KEY", ""),
 		},
 		MaxUploadBytes: 25 << 20,
+		RetentionDays:  90,
 		GitHub: GitHub{
 			Token:         value(getenv, "GITHUB_TOKEN", ""),
 			Repo:          value(getenv, "GITHUB_REPO", ""),
@@ -115,6 +117,14 @@ func LoadServer(getenv Getenv) (Server, error) {
 	}
 	if c.MaxUploadBytes > c.MaxBodyBytes {
 		errs = append(errs, fmt.Errorf("BUILDBEE_MAX_UPLOAD_BYTES (%d) must not exceed BUILDBEE_MAX_BODY_BYTES (%d)", c.MaxUploadBytes, c.MaxBodyBytes))
+	}
+	if v := value(getenv, "BUILDBEE_RETENTION_DAYS", ""); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			errs = append(errs, fmt.Errorf("BUILDBEE_RETENTION_DAYS must be 0 or more days, got %q", v))
+		} else {
+			c.RetentionDays = n
+		}
 	}
 	if c.S3.Endpoint != "" {
 		if u, err := url.Parse(c.S3.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

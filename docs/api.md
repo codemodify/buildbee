@@ -44,6 +44,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `POST /v1/dms/{id}/close` | take a DM out of your list; it comes back with a new message or when you open it again. Nothing is deleted |
 | `GET /v1/projects/{id}/unread`, `POST /v1/channels/{id}/read` | per Channel and DM: `{channel_id, unread, last_seq}` / mark read up to `{seq}` |
 | `GET /v1/members` | everyone on the Server: `people` with their Projects (`left_at` if they left), `bots` with `project_name`, and recent `events` (created, joined, left, added), newest first |
+| `GET /v1/runs` | what the agents are doing across open Projects: Runs running, then queued, then those that failed in the last day, each with `task_title`, `project_name` and `bot_name` |
 | `GET /v1/search?q=&project_id=` | messages you can read (open channels of open Projects, your DMs) with every word of `q` as a word or prefix, best first, up to 50; each with `channel_name`, `channel_kind`, `project_name` and `author_name` |
 | `GET /v1/presence` | people with the app open; workers seen in the last 90 s with their agents, `slots` and `running`; `agents` (each agent's `workers`, `running`, `queued`; `any` is Runs that take whichever); `local`, the Server's own worker (`state` off, starting, running or unavailable, with `reason` and `isolation`) |
 | `GET /v1/projects/{id}/activity` | page of the Project log, newest first (`?type=`) |
@@ -101,3 +102,7 @@ A client that falls too far behind is disconnected; reconnect with the last curs
 Runs are a queue. A worker claims a Run, owns it until it finishes, and must heartbeat to keep it; only the claiming worker may append events, change its status or attach Artifacts to it (`409` otherwise). A Run whose worker stops heartbeating is failed by the Server. See [workers.md](workers.md).
 
 Runs have a `kind`: `plan` (Scout), `build` (Builder), `review` (Sentry, with a `verdict` of `approve` or `changes`) or `merge` (no agent). Tasks record the `branch` and `pr_url` their Builder pushed, and `merged_at`. Decisions with `action: "merge"` merge the Task's branch when answered `merge`. See [autopilot.md](autopilot.md).
+
+## Metrics
+
+`GET /metrics` answers in Prometheus text format, without a login like the rest of a LAN Server: Runs by status, Runs running and queued per agent, workers online and their slots, people online, and HTTP requests by method and status with a duration histogram (long-polls and WebSockets are counted but not timed).

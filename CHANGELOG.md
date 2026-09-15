@@ -11,6 +11,13 @@
 - Your settings (next to notifications): name (`PATCH /v1/me`), theme, rounded or sharp corners, notifications
 - New Projects start with you and `#tasks`, no Bots (`default_bots: true` on `POST /v1/projects` adds the autopilot's four)
 
+### Added (operations)
+- `# status` shows what the agents are doing across Projects (`GET /v1/runs`): running, queued and what failed today
+- `GET /metrics` in Prometheus text: Runs, queue per agent, workers, slots, people, request counts and latency
+- Housekeeping: finished Runs' event streams and read notifications are deleted after `BUILDBEE_RETENTION_DAYS` (90)
+- `scripts/backup.sh` and `scripts/restore.sh` cover the database and the files volume; the smoke test exercises both
+- `buildbee-loadtest` drives a Server with many Runs at once: 200 Runs, 50 at a time, all succeeded at 639 runs/minute and 458 events/second on one laptop
+
 ### Added (chat)
 - Attachments: attach, paste or drop files in any composer (`POST /v1/channels/{id}/files`, `file_ids` on posts); images preview, other files download safely (`GET /v1/files/{id}`)
 - Files and large Artifacts live outside Postgres (migration 0004): `BUILDBEE_BLOB_DIR` by default, or an S3-compatible bucket (`BUILDBEE_S3_*`); `GET /v1/artifacts/{id}/raw` streams a whole log

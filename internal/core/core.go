@@ -83,6 +83,9 @@ type Options struct {
 	// uploads are refused and Artifacts stay in Postgres.
 	Blobs          blob.Store
 	MaxUploadBytes int64 // one attachment (default 25 MiB)
+	// RetentionDays is how long a finished Run's event stream and a read
+	// notification are kept; 0 keeps them forever.
+	RetentionDays int
 }
 
 // Service implements BuildBee's operations over a Store.
@@ -96,6 +99,7 @@ type Service struct {
 	presence *presence
 	blobs    blob.Store
 	maxFile  int64
+	keepDays int
 }
 
 // New returns a Service. A nil Publisher drops events.
@@ -104,7 +108,7 @@ func New(st *store.Store, pub Publisher, opts Options) *Service {
 		pub = nopPublisher{}
 	}
 	s := &Service{st: st, pub: pub, log: opts.Logger, now: opts.Now, github: opts.GitHub, queue: newSignal(), presence: newPresence(),
-		blobs: opts.Blobs, maxFile: opts.MaxUploadBytes}
+		blobs: opts.Blobs, maxFile: opts.MaxUploadBytes, keepDays: opts.RetentionDays}
 	if s.maxFile <= 0 {
 		s.maxFile = 25 << 20
 	}

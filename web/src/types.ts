@@ -146,6 +146,13 @@ export type Run = {
   finished_at?: string;
 };
 
+/** RunRow is a Run on the Server's dashboard, with what it is about. */
+export type RunRow = Run & {
+  task_title: string;
+  project_name: string;
+  bot_name?: string;
+};
+
 export type RunEvent = {
   id: string;
   run_id: string;

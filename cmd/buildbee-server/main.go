@@ -62,7 +62,8 @@ func run() error {
 		return err
 	}
 	slog.Info("files stored in", "blobs", blobs.Name())
-	svc = core.New(store.New(pool), hub, core.Options{GitHub: cfg.GitHub, Blobs: blobs, MaxUploadBytes: cfg.MaxUploadBytes})
+	svc = core.New(store.New(pool), hub, core.Options{GitHub: cfg.GitHub, Blobs: blobs,
+		MaxUploadBytes: cfg.MaxUploadBytes, RetentionDays: cfg.RetentionDays})
 
 	api := httpapi.NewServer(svc, hub, httpapi.Options{
 		GitHub:       cfg.GitHub,
@@ -78,6 +79,7 @@ func run() error {
 	srv.RegisterOnShutdown(svc.StopWaiting) // release workers' long-polls
 
 	tickerDone := make(chan struct{})
+	swept := time.Now().Add(-time.Hour) // sweep once at startup
 	go func() {
 		defer close(tickerDone)
 		t := time.NewTicker(15 * time.Second)
@@ -88,10 +90,13 @@ func run() error {
 				return
 			case <-t.C:
 				svc.TickRoutines(ctx)
-				if n, err := svc.SweepUploads(ctx); err != nil {
-					slog.Error("sweep uploads", "err", err)
-				} else if n > 0 {
-					slog.Info("deleted uploads never posted", "files", n)
+				if time.Since(swept) > time.Hour {
+					swept = time.Now()
+					if got, err := svc.Sweep(ctx); err != nil {
+						slog.Error("housekeeping", "err", err)
+					} else if got != (core.Swept{}) {
+						slog.Info("housekeeping", "uploads", got.Uploads, "run_events", got.RunEvents, "notifications", got.Notifications)
+					}
 				}
 				if n, err := svc.ReapRuns(ctx); err != nil {
 					slog.Error("reap runs", "err", err)

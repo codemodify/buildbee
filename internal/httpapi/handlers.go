@@ -184,6 +184,11 @@ func (s *Server) listDMs(w http.ResponseWriter, r *http.Request) {
 	respondItems(s, w, list, err)
 }
 
+func (s *Server) dashboardRuns(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.DashboardRuns(r.Context())
+	respondItems(s, w, list, err)
+}
+
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))

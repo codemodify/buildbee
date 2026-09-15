@@ -47,6 +47,7 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | [`cmd/buildbee-server`](cmd/buildbee-server) | Server: REST `/v1`, WebSockets, Routines worker, embedded web UI |
 | [`cmd/buildbee-worker`](cmd/buildbee-worker) | Worker: claims queued Runs and executes them with agent CLIs |
 | [`cmd/buildbee`](cmd/buildbee) | CLI for Projects, Tasks, Handoffs, Runs and Routines |
+| [`cmd/buildbee-loadtest`](cmd/buildbee-loadtest) | drives a Server with many Runs at once and reports how it kept up |
 | [`internal/core`](internal/core) | Business rules: one transaction per operation with its Activity and notifications |
 | [`internal/httpapi`](internal/httpapi) | Thin HTTP handlers, identity resolution, middleware |
 | [`internal/ws`](internal/ws) | WebSocket hub with cursor replay |
@@ -70,6 +71,7 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_BLOB_DIR` | server | `~/.local/share/buildbee/blobs` | attachments and large Artifacts ([deploy](deploy/README.md#files)) |
 | `BUILDBEE_S3_ENDPOINT`, `_BUCKET`, `_REGION`, `_ACCESS_KEY`, `_SECRET_KEY` | server | unset | keep them in an S3-compatible bucket instead |
 | `BUILDBEE_MAX_UPLOAD_BYTES` | server | 25 MiB | one attachment |
+| `BUILDBEE_RETENTION_DAYS` | server | `90` | keep finished Runs' event streams and read notifications this long (0 = forever) |
 | `BUILDBEE_LOCAL_WORKER` | server | `auto` | run agents on the Server's machine: `auto`, `on` or `off` ([workers.md](docs/workers.md)) |
 | `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | Issue sync; without them it answers 503. Workers open PRs with their own `gh` login |
 | `GITHUB_WEBHOOK_SECRET` | server | unset | require `X-Hub-Signature-256` on webhooks |

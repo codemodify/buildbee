@@ -21,6 +21,70 @@ func scanRun(row interface{ Scan(...any) error }, r *models.Run) error {
 		&r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt)
 }
 
+// DeleteOldRunEvents deletes the event streams of Runs that finished
+// before cutoff. The Runs, their summaries and their Artifacts stay.
+func (s *Store) DeleteOldRunEvents(ctx context.Context, before time.Time, limit int) (int, error) {
+	tag, err := s.q.Exec(ctx, `DELETE FROM run_events WHERE id IN (
+		SELECT e.id FROM run_events e JOIN runs r ON r.id = e.run_id
+		WHERE r.finished_at IS NOT NULL AND r.finished_at < $1 LIMIT $2)`, before, limit)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// RunsByStatus counts every Run by status.
+func (s *Store) RunsByStatus(ctx context.Context) (map[string]int, error) {
+	rows, err := s.q.Query(ctx, `SELECT status, count(*) FROM runs GROUP BY status`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var st string
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			return nil, err
+		}
+		out[st] = n
+	}
+	return out, rows.Err()
+}
+
+// DashboardRuns returns the Runs going now (running, then queued) and those
+// that failed since, across open Projects, without their prompts.
+func (s *Store) DashboardRuns(ctx context.Context, failedSince time.Time, limit int) ([]models.RunRow, error) {
+	rows, err := s.q.Query(ctx, `SELECT r.id, r.task_id, r.project_id, COALESCE(r.bot_member_id::text, ''), r.status, r.kind, r.detail,
+			r.summary, r.branch, r.commit, r.pr_url, r.verdict, r.context_tokens, r.context_size, r.cost, r.cost_currency, r.agent,
+			'', r.worker, r.lease_until, r.attempts, r.created_at, r.updated_at, r.started_at, r.finished_at,
+			t.title, p.name, COALESCE(b.display_name, '')
+		FROM runs r
+		JOIN tasks t ON t.id = r.task_id
+		JOIN projects p ON p.id = r.project_id AND p.archived_at IS NULL
+		LEFT JOIN members b ON b.id = r.bot_member_id
+		WHERE r.status IN ('pending', 'running') OR (r.status = 'failed' AND r.finished_at > $1)
+		ORDER BY CASE r.status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, r.created_at DESC
+		LIMIT $2`, failedSince, limit)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []models.RunRow{}
+	for rows.Next() {
+		var x models.RunRow
+		r := &x.Run
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &r.BotMemberID, &r.Status, &r.Kind, &r.Detail, &r.Summary, &r.Branch, &r.Commit,
+			&r.PRURL, &r.Verdict, &r.ContextTokens, &r.ContextSize, &r.Cost, &r.CostCurrency, &r.Agent, &r.Prompt, &r.Worker,
+			&r.LeaseUntil, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt,
+			&x.TaskTitle, &x.ProjectName, &x.BotName); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
 // RecordUsage keeps a Run's peak context use and its latest session cost
 // (agents report cost cumulatively).
 func (s *Store) RecordUsage(ctx context.Context, runID string, used, size int64, cost float64, currency string) error {

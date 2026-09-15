@@ -178,3 +178,51 @@ func TestUnpostedUploadsAreSweptAfterADay(t *testing.T) {
 		rc.Close()
 	}
 }
+
+func TestSweepTrimsOldEventStreamsAndReadNotifications(t *testing.T) {
+	f := newFixture(t)
+	f.s.keepDays = 30
+	now := time.Now().UTC()
+	f.s.now = func() time.Time { return now }
+	ada, bob := f.person("Ada"), f.person("Bob")
+	p := f.project(ada, "Old")
+	_, err := f.s.Join(f.ctx, bob, p.ID)
+	f.must(err)
+	r := f.queue(ada, p.ID, "old work", NewRun{Agent: "fake"})
+	c, err := f.s.ClaimRun(f.ctx, WorkerActor("w"), []string{"fake"}, 0)
+	f.must(err)
+	_, err = f.s.ReportRun(f.ctx, WorkerActor("w"), c.Run.ID, RunReport{Status: "succeeded", Summary: "did it"})
+	f.must(err)
+	_, err = f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "@Bob look")
+	f.must(err)
+	notes := f.inbox(bob)
+	if len(notes) != 1 {
+		t.Fatalf("inbox: %+v", notes)
+	}
+	_, err = f.s.MarkRead(f.ctx, bob, notes[0].ID)
+	f.must(err)
+
+	now = now.AddDate(0, 0, 31)
+	got, err := f.s.Sweep(f.ctx)
+	f.must(err)
+	if got.RunEvents == 0 || got.Notifications != 1 {
+		t.Fatalf("swept: %+v", got)
+	}
+	evs, _, err := f.s.RunEvents(f.ctx, r.ID, 0, 100)
+	f.must(err)
+	if len(evs) != 0 {
+		t.Fatalf("events kept: %+v", evs)
+	}
+	run, err := f.s.Run(f.ctx, r.ID)
+	f.must(err)
+	if run.Summary != "did it" || run.Status != models.RunSucceeded {
+		t.Fatalf("the Run itself stays: %+v", run)
+	}
+	if n := f.inbox(bob); len(n) != 0 {
+		t.Fatalf("notifications kept: %+v", n)
+	}
+	msgs, _, _ := f.s.Messages(f.ctx, ada, p.Channels[0].ID, store.Page{})
+	if len(msgs) == 0 {
+		t.Fatal("messages are never swept")
+	}
+}

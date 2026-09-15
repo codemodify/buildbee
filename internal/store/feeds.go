@@ -235,6 +235,16 @@ func (s *Store) Unread(ctx context.Context, personID, projectID string) ([]model
 	return out, rows.Err()
 }
 
+// DeleteOldNotifications deletes notifications read before cutoff.
+func (s *Store) DeleteOldNotifications(ctx context.Context, before time.Time, limit int) (int, error) {
+	tag, err := s.q.Exec(ctx, `DELETE FROM notifications WHERE id IN (
+		SELECT id FROM notifications WHERE read_at IS NOT NULL AND read_at < $1 LIMIT $2)`, before, limit)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // --- activity ---
 
 const activityCols = `seq, project_id, COALESCE(actor_member_id::text, ''), actor, type, action, COALESCE(subject_id::text, ''), payload, created_at`

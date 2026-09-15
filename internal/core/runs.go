@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/codemodify/buildbee/internal/blob"
 	"github.com/codemodify/buildbee/internal/models"
@@ -14,6 +15,31 @@ import (
 )
 
 // --- runs ---
+
+// Metrics is what the Server is doing now, for /metrics.
+type Metrics struct {
+	Presence     *Presence
+	RunsByStatus map[string]int
+}
+
+// Metrics reads the counts /metrics reports.
+func (s *Service) Metrics(ctx context.Context) (*Metrics, error) {
+	pr, err := s.Presence(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := s.st.RunsByStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &Metrics{Presence: pr, RunsByStatus: counts}, nil
+}
+
+// DashboardRuns is what the Server's agents are doing: Runs running and
+// queued across open Projects, and those that failed in the last day.
+func (s *Service) DashboardRuns(ctx context.Context) ([]models.RunRow, error) {
+	return s.st.DashboardRuns(ctx, s.now().Add(-24*time.Hour), 200)
+}
 
 // Runs lists a Task's Runs, newest first.
 func (s *Service) Runs(ctx context.Context, taskID string) ([]models.Run, error) {

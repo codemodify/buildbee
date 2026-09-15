@@ -29,4 +29,14 @@ for _ in $(seq 60); do
   sleep 0.5
 done
 [ "$status" = succeeded ] || { echo "run $run still $status" >&2; exit 1; }
+# Back up and restore: the Project must still be there afterwards.
+backup="$(mktemp -d)"
+# (the smoke trap removes the stack; this directory is a mktemp)
+"$ROOT/scripts/backup.sh" "$backup/b" >/dev/null
+test -s "$backup/b/buildbee.dump" && test -s "$backup/b/files.tar.gz"
+"$ROOT/scripts/restore.sh" "$backup/b" >/dev/null
+"${compose[@]}" up -d --wait >/dev/null
+api "$base/v1/projects" | grep -q '"smoke"'
+echo "backup and restore ok"
+
 echo "smoke ok"
