@@ -79,6 +79,10 @@ func (c *Container) args(worker string, job Job, home string, argv []string) []s
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--memory", c.Memory, "--cpus", c.CPUs, "--pids-limit", strconv.Itoa(c.Pids),
 		"--env", "HOME=" + containerHome, "--env", "BUILDBEE=1",
+		// Temp files go under the Run's home: directories Docker creates
+		// for bind mounts (say under /tmp) belong to root, and agents such
+		// as Claude Code refuse temp directories another user owns.
+		"--env", "TMPDIR=" + containerHome + "/tmp", "--env", "CLAUDE_CODE_TMPDIR=" + containerHome + "/tmp",
 		"--env", "GIT_AUTHOR_NAME=BuildBee agent", "--env", "GIT_AUTHOR_EMAIL=buildbee@localhost",
 		"--env", "GIT_COMMITTER_NAME=BuildBee agent", "--env", "GIT_COMMITTER_EMAIL=buildbee@localhost",
 		"--volume", home + ":" + containerHome,
@@ -124,6 +128,9 @@ func (c *Container) exec(worker string, commands map[string][]string) Exec {
 			return "", err
 		}
 		defer os.RemoveAll(home)
+		if err := os.Mkdir(filepath.Join(home, "tmp"), 0o700); err != nil {
+			return "", err
+		}
 		if job.Dir == "" { // no repo: an empty directory to work in
 			if job.Dir, err = os.MkdirTemp("", "buildbee-run-*"); err != nil {
 				return "", err

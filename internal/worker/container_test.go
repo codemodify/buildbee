@@ -33,6 +33,7 @@ func TestContainerArgs(t *testing.T) {
 		"--cap-drop ALL --security-opt no-new-privileges",
 		"--memory 8g --cpus 4 --pids-limit 1024",
 		"--volume /tmp/h:/home/agent",
+		"--env TMPDIR=/home/agent/tmp --env CLAUDE_CODE_TMPDIR=/home/agent/tmp",
 		"--volume /w/runs/r1:/w/runs/r1 --workdir /w/runs/r1",
 		"--volume /w/mirrors/m.git:/w/mirrors/m.git",
 		"--volume " + home + "/.claude:/home/agent/.claude",
