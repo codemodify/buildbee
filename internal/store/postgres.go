@@ -45,6 +45,9 @@ func OpenPostgres(ctx context.Context, databaseURL string) (*pgxpool.Pool, error
 	return nil, fmt.Errorf("postgres: %w", last)
 }
 
+// Ping reports whether Postgres answers.
+func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
+
 // Migrate applies SQL migrations.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return migrate.Up(ctx, pool)

@@ -12,5 +12,5 @@ FROM alpine:3.24
 RUN apk add --no-cache ca-certificates docker-cli git
 COPY --from=build /out/buildbee-worker /usr/local/bin/buildbee-worker
 EXPOSE 8090
-ENV BUILDBEE_RUNTIME_ADDR=:8090
+ENV BUILDBEE_WORKER_ADDR=:8090
 CMD ["buildbee-worker"]

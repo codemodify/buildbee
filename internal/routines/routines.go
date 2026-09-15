@@ -3,7 +3,7 @@ package routines
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -83,7 +83,7 @@ func StartWorker(ctx context.Context, st store.Store, every time.Duration) {
 		case now := <-t.C:
 			rs, err := st.ListEnabledRoutines(ctx)
 			if err != nil {
-				log.Printf("routines worker: %v", err)
+				slog.Error("routines worker: list routines", "err", err)
 				continue
 			}
 			for _, r := range rs {
@@ -91,7 +91,7 @@ func StartWorker(ctx context.Context, st store.Store, every time.Duration) {
 					continue
 				}
 				if _, err := Fire(ctx, st, r.ID); err != nil {
-					log.Printf("routine %s: %v", r.ID, err)
+					slog.Error("routine fire failed", "routine", r.ID, "err", err)
 				}
 			}
 		}

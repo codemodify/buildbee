@@ -128,7 +128,7 @@ func runRun(args []string, c *client.Client) error {
 		}
 		return c.PrintJSON(out)
 	}
-	runtimeURL := os.Getenv("BUILDBEE_RUNTIME_URL")
+	runtimeURL := os.Getenv("BUILDBEE_WORKER_URL")
 	if runtimeURL == "" {
 		runtimeURL = "http://127.0.0.1:8090"
 	}
@@ -233,6 +233,6 @@ Usage:
 
 Environment:
   BUILDBEE_URL           Server base URL (default http://127.0.0.1:8080)
-  BUILDBEE_RUNTIME_URL   Runtime supervisor (default http://127.0.0.1:8090)
+  BUILDBEE_WORKER_URL   Worker (default http://127.0.0.1:8090)
 `)
 }

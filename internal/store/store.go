@@ -16,6 +16,8 @@ var (
 
 // Store persists Project workspace records.
 type Store interface {
+	Ping(ctx context.Context) error
+
 	CreateProject(ctx context.Context, name string, autoRun bool) (*models.ProjectBundle, error)
 	GetProject(ctx context.Context, id string) (*models.ProjectBundle, error)
 	ListProjects(ctx context.Context) ([]models.Project, error)

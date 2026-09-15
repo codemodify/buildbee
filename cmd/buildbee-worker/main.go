@@ -1,56 +1,88 @@
-// Command runtime exposes an HTTP supervisor that starts Sandbox Runs.
+// Command buildbee-worker executes Runs (Docker Sandbox or ACP agent) and
+// reports status, events and Artifacts to the Server.
 package main
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/codemodify/buildbee/internal/config"
 	"github.com/codemodify/buildbee/internal/worker"
 	"github.com/codemodify/buildbee/internal/worker/sandbox"
 )
 
 func main() {
-	addr := ":8090"
-	if v := os.Getenv("BUILDBEE_RUNTIME_ADDR"); v != "" {
-		addr = v
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	if err := run(); err != nil {
+		slog.Error("buildbee-worker stopped", "err", err)
+		os.Exit(1)
 	}
-	serverURL := os.Getenv("BUILDBEE_URL")
-	if serverURL == "" {
-		serverURL = "http://127.0.0.1:8080"
-	}
+}
 
-	var engine sandbox.Engine
-	if os.Getenv("BUILDBEE_FAKE_SANDBOX") == "1" || !sandbox.Available() {
-		log.Print("using fake Sandbox engine (no Docker or BUILDBEE_FAKE_SANDBOX=1)")
-		engine = sandbox.FakeEngine{Logs: "fake sandbox (runtime service)\n"}
-	} else {
-		engine = sandbox.DockerEngine{}
-		log.Print("using Docker Sandbox engine")
+func run() error {
+	cfg, err := config.LoadWorker(os.Getenv)
+	if err != nil {
+		return err
 	}
-	sup := worker.NewSupervisor(serverURL, engine)
+	var engine sandbox.Engine
+	switch {
+	case cfg.FakeSandbox:
+		slog.Warn("BUILDBEE_FAKE_SANDBOX=1: Runs use the fake Sandbox engine")
+		engine = sandbox.FakeEngine{Logs: "fake sandbox (worker)\n"}
+	case !sandbox.Available():
+		return errors.New("docker is not on PATH; install it or set BUILDBEE_FAKE_SANDBOX=1")
+	default:
+		engine = sandbox.DockerEngine{}
+	}
+	sup := worker.NewSupervisor(cfg.ServerURL, engine)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("POST /runs", func(w http.ResponseWriter, r *http.Request) {
 		var in worker.Request
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.TaskID == "" {
-			http.Error(w, `{"error":"task_id is required"}`, http.StatusBadRequest)
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil || in.TaskID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_id is required"})
 			return
 		}
 		out, err := sup.Execute(r.Context(), in)
 		if err != nil {
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadGateway)
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(out)
+		writeJSON(w, http.StatusCreated, out)
 	})
 
-	log.Printf("buildbee runtime listening on %s (server %s)", addr, serverURL)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	srv := &http.Server{Addr: cfg.Addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+	slog.Info("buildbee-worker listening", "addr", cfg.Addr, "server", cfg.ServerURL)
+
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }

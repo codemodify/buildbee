@@ -9,62 +9,63 @@ import (
 )
 
 func TestHandlerMissingUI(t *testing.T) {
-	t.Setenv("BUILDBEE_WEB_DIR", "")
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	Handler().ServeHTTP(rec, req)
+	Handler(t.TempDir()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status %d want 404 (no dist)", rec.Code)
+		t.Fatalf("status %d want 404 (no index.html)", rec.Code)
 	}
 }
 
 func TestHandlerSPAFromDir(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>buildbee</html>"), 0o644); err != nil {
-		t.Fatal(err)
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.Mkdir(filepath.Join(dir, "assets"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("ok"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("BUILDBEE_WEB_DIR", dir)
-	h := Handler()
+	write("index.html", "<html>buildbee</html>")
+	write("assets/app-abc123.js", "ok")
+	h := Handler(dir)
 
-	index := httptest.NewRecorder()
-	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	index := get("/")
 	if index.Code != http.StatusOK || index.Body.String() != "<html>buildbee</html>" {
 		t.Fatalf("index: %d %s", index.Code, index.Body.String())
 	}
+	if index.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("index Cache-Control: %q", index.Header().Get("Cache-Control"))
+	}
 
-	asset := httptest.NewRecorder()
-	h.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	asset := get("/assets/app-abc123.js")
 	if asset.Code != http.StatusOK || asset.Body.String() != "ok" {
 		t.Fatalf("asset: %d %s", asset.Code, asset.Body.String())
 	}
+	if asset.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Fatalf("asset Cache-Control: %q", asset.Header().Get("Cache-Control"))
+	}
 
-	spa := httptest.NewRecorder()
-	h.ServeHTTP(spa, httptest.NewRequest(http.MethodGet, "/projects/abc", nil))
-	if spa.Code != http.StatusOK || spa.Body.String() != "<html>buildbee</html>" {
-		t.Fatalf("spa fallback: %d %s", spa.Code, spa.Body.String())
+	if stale := get("/assets/app-old999.js"); stale.Code != http.StatusNotFound {
+		t.Fatalf("stale asset: got %d want 404", stale.Code)
 	}
-}
 
-func TestAvailable(t *testing.T) {
-	t.Setenv("BUILDBEE_WEB_DIR", "")
-	if Available() {
-		t.Fatal("expected no embedded index.html in tests")
+	route := get("/projects/abc")
+	if route.Code != http.StatusOK || route.Body.String() != "<html>buildbee</html>" {
+		t.Fatalf("spa fallback: %d %s", route.Code, route.Body.String())
 	}
-	dir := t.TempDir()
-	t.Setenv("BUILDBEE_WEB_DIR", dir)
-	if Available() {
-		t.Fatal("empty dir should not be available")
-	}
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !Available() {
-		t.Fatal("expected available after index.html")
+
+	post := httptest.NewRecorder()
+	h.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/projects/abc", nil))
+	if post.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST to UI: got %d want 405", post.Code)
 	}
 }

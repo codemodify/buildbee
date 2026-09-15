@@ -8,6 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/codemodify/buildbee/internal/config"
+	"github.com/codemodify/buildbee/internal/store"
+	"github.com/codemodify/buildbee/internal/testdb"
 )
 
 func TestHealthz(t *testing.T) {
@@ -397,8 +401,7 @@ func TestChannelBotMention(t *testing.T) {
 }
 
 func TestWebhookSignatureRequired(t *testing.T) {
-	t.Setenv("GITHUB_WEBHOOK_SECRET", "s3cret")
-	h := newTestMux(t)
+	h := newTestMuxWith(t, Options{GitHub: config.GitHub{WebhookSecret: "s3cret"}})
 	rec := doJSON(t, h, http.MethodPost, "/v1/issues/webhook?project_id=x", map[string]any{
 		"action": "opened",
 		"issue":  map[string]any{"number": 1, "title": "no sig", "html_url": "https://example.test/1"},
@@ -573,16 +576,15 @@ func TestNotificationsInbox(t *testing.T) {
 	}
 }
 
-func TestMuxKeepsAPIWhenWebMissing(t *testing.T) {
-	h := newTestMux(t)
-	health := doJSON(t, h, http.MethodGet, "/healthz", nil)
-	if health.Code != http.StatusOK {
-		t.Fatalf("healthz: %d", health.Code)
+func TestHealthzReportsDatabase(t *testing.T) {
+	pool := testdb.New(t)
+	h := NewServer(store.NewPostgres(pool), nil, Options{}).Handler()
+	if rec := doJSON(t, h, http.MethodGet, "/healthz", nil); rec.Code != http.StatusOK {
+		t.Fatalf("healthz with database: %d", rec.Code)
 	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("root without UI: %d %s", rec.Code, rec.Body.String())
+	pool.Close()
+	if rec := doJSON(t, h, http.MethodGet, "/healthz", nil); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("healthz without database: got %d want 503", rec.Code)
 	}
 }
 

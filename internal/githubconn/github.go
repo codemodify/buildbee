@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -35,10 +34,6 @@ type Result struct {
 	Error string `json:"error,omitempty"`
 }
 
-func FromEnv() (token, repo string) {
-	return os.Getenv("GITHUB_TOKEN"), os.Getenv("GITHUB_REPO")
-}
-
 type Issue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
@@ -58,12 +53,6 @@ func ListOpenIssues(ctx context.Context, token, repo string) ([]Issue, error) {
 
 // OpenDraftPR creates a branch + file commit + draft PR, or a fake URL.
 func OpenDraftPR(ctx context.Context, opt Options) (*Result, error) {
-	if opt.Token == "" {
-		opt.Token, _ = FromEnv()
-	}
-	if opt.Repo == "" {
-		_, opt.Repo = FromEnv()
-	}
 	if opt.Title == "" {
 		opt.Title = "BuildBee Artifact"
 	}

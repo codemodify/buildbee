@@ -1,32 +1,47 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 
+	"github.com/codemodify/buildbee/internal/config"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/codemodify/buildbee/internal/webui"
 	"github.com/codemodify/buildbee/internal/ws"
 )
 
+// Options configures a Server. The zero value is valid for tests.
+type Options struct {
+	GitHub       config.GitHub
+	WebDir       string // serve the UI from disk instead of the embed
+	MaxBodyBytes int64  // 0 = no limit
+	Logger       *slog.Logger
+}
+
 // Server hosts REST + Channel WebSocket for a Project workspace.
 type Server struct {
 	store store.Store
 	hub   *ws.Hub
+	opts  Options
+	log   *slog.Logger
 }
 
 // NewServer wires a Server over st; a nil hub gets a fresh one.
-func NewServer(st store.Store, hub *ws.Hub) *Server {
+func NewServer(st store.Store, hub *ws.Hub, opts Options) *Server {
 	if hub == nil {
 		hub = ws.NewHub()
 	}
-	return &Server{store: st, hub: hub}
+	log := opts.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Server{store: st, hub: hub, opts: opts, log: log}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", Health)
+	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /v1/{$}", s.v1Index)
 	mux.HandleFunc("GET /v1", s.v1Index)
 
@@ -93,36 +108,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/notifications/read-all", s.readAllNotifications)
 	mux.HandleFunc("POST /v1/notifications/{notificationID}/read", s.readNotification)
 
-	web := webui.Handler()
-	return sameOrigin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	web := webui.Handler(s.opts.WebDir)
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/v1") {
 			mux.ServeHTTP(w, r)
 			return
 		}
 		web.ServeHTTP(w, r)
-	}))
-}
-
-// sameOrigin rejects state-changing browser requests sent from another site.
-// There is no login, so without this any page a LAN user visits could create
-// Tasks or start Runs through their browser. Clients that send no Origin
-// (CLI, worker, webhooks) are unaffected.
-func sameOrigin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
-			next.ServeHTTP(w, r)
-			return
-		}
-		if origin := r.Header.Get("Origin"); origin != "" {
-			u, err := url.Parse(origin)
-			if err != nil || !strings.EqualFold(u.Host, r.Host) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin request refused"})
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
 	})
+	h = sameOrigin(h)
+	if s.opts.MaxBodyBytes > 0 {
+		h = http.MaxBytesHandler(h, s.opts.MaxBodyBytes)
+	}
+	return s.recoverPanics(s.logRequests(h))
 }
 
 func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {

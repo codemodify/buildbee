@@ -1,15 +1,17 @@
-// Command server starts the BuildBee Server (REST + Channel WebSocket).
+// Command buildbee-server runs the BuildBee Server: REST, WebSocket and the web UI.
 package main
 
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
-	"strings"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/config"
 	"github.com/codemodify/buildbee/internal/httpapi"
 	"github.com/codemodify/buildbee/internal/routines"
 	"github.com/codemodify/buildbee/internal/store"
@@ -17,44 +19,70 @@ import (
 )
 
 func main() {
-	addr := ":8080"
-	if v := os.Getenv("BUILDBEE_ADDR"); v != "" {
-		addr = v
-	} else if p := os.Getenv("PORT"); p != "" {
-		if !strings.HasPrefix(p, ":") {
-			p = ":" + p
-		}
-		addr = p
-	}
-
-	ctx := context.Background()
-	st, err := openStore(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	go routines.StartWorker(ctx, st, 15*time.Second)
-	h := httpapi.NewServer(st, ws.NewHub()).Handler()
-	log.Printf("buildbee server listening on %s", addr)
-	if err := http.ListenAndServe(addr, h); err != nil {
-		log.Fatal(err)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	if err := run(); err != nil {
+		slog.Error("buildbee-server stopped", "err", err)
+		os.Exit(1)
 	}
 }
 
-func openStore(ctx context.Context) (store.Store, error) {
-	url := strings.TrimSpace(os.Getenv("DATABASE_URL"))
-	if url == "" {
-		return nil, errors.New("DATABASE_URL is required (Postgres is the only store)")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	pool, err := store.OpenPostgres(ctx, url)
+func run() error {
+	cfg, err := config.LoadServer(os.Getenv)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := store.Migrate(ctx, pool); err != nil {
-		return nil, err
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	connectCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	pool, err := store.OpenPostgres(connectCtx, cfg.DatabaseURL)
+	if err == nil {
+		err = store.Migrate(connectCtx, pool)
 	}
-	log.Print("postgres connected; migrations applied")
-	return store.NewPostgres(pool), nil
+	cancel()
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	slog.Info("postgres connected; migrations applied")
+
+	st := store.NewPostgres(pool)
+	api := httpapi.NewServer(st, ws.NewHub(), httpapi.Options{
+		GitHub:       cfg.GitHub,
+		WebDir:       cfg.WebDir,
+		MaxBodyBytes: cfg.MaxBodyBytes,
+	})
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           api.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		routines.StartWorker(ctx, st, 15*time.Second)
+	}()
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+	slog.Info("buildbee-server listening", "addr", cfg.Addr)
+
+	select {
+	case err := <-serveErr:
+		stop()
+		<-workerDone
+		return err
+	case <-ctx.Done():
+	}
+	slog.Info("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	err = srv.Shutdown(shutdownCtx)
+	<-workerDone
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }

@@ -1,69 +1,68 @@
-# Postgres 16 + BuildBee Server.
+# BuildBee on one LAN host: Postgres + Server (+ optional worker).
+#
 # From the repo root:
 #   docker compose -f deploy/compose/docker-compose.yml up --build
-# Optional Artifact object-storage stub:
-#   docker compose -f deploy/compose/docker-compose.yml --profile extras up
+#   docker compose -f deploy/compose/docker-compose.yml --profile worker up --build
+#
+# Only the Server is published. Postgres stays on the compose network, and
+# the worker's Run endpoint is bound to this host's loopback.
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: buildbee
-      POSTGRES_PASSWORD: buildbee
+      POSTGRES_PASSWORD: ${BUILDBEE_DB_PASSWORD:-buildbee}
       POSTGRES_DB: buildbee
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U buildbee -d buildbee"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
   server:
     build:
       context: ../..
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "${BUILDBEE_PORT:-8080}:8080"
     environment:
-      BUILDBEE_ADDR: ":8080"
-      # Server applies SQL migrations on process start.
-      DATABASE_URL: postgres://buildbee:buildbee@postgres:5432/buildbee?sslmode=disable
+      DATABASE_URL: postgres://buildbee:${BUILDBEE_DB_PASSWORD:-buildbee}@postgres:5432/buildbee?sslmode=disable
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
 
-  # Sandbox supervisor. Mount the Docker socket to run real containers.
-  #   docker compose -f deploy/compose/docker-compose.yml --profile runtime up --build
-  runtime:
-    profiles: ["runtime"]
+  # Runs agents next to the host Docker daemon. Mounting the Docker socket
+  # gives this container root-equivalent access to the host: run it only on
+  # a machine dedicated to BuildBee Runs.
+  worker:
+    profiles: ["worker"]
     build:
       context: ../..
       dockerfile: Dockerfile.worker
     ports:
-      - "8090:8090"
+      - "127.0.0.1:${BUILDBEE_WORKER_PORT:-8090}:8090"
     environment:
-      BUILDBEE_RUNTIME_ADDR: ":8090"
       BUILDBEE_URL: http://server:8080
-      BUILDBEE_FAKE_SANDBOX: ${BUILDBEE_FAKE_SANDBOX:-1}
+      BUILDBEE_FAKE_SANDBOX: ${BUILDBEE_FAKE_SANDBOX:-0}
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-
-  # Optional later: Artifact object storage. Not required for the Server stub.
-  minio:
-    profiles: ["extras"]
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: buildbee
-      MINIO_ROOT_PASSWORD: buildbee-minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    restart: unless-stopped
 
 volumes:
   postgres_data:

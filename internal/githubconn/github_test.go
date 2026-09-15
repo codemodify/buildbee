@@ -13,8 +13,6 @@ func TestFakePR(t *testing.T) {
 }
 
 func TestMissingTokenRecordsFake(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GITHUB_REPO", "")
 	res, err := OpenDraftPR(nil, Options{TaskID: "task1"})
 	if err != nil {
 		t.Fatal(err)

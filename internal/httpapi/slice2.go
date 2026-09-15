@@ -128,7 +128,7 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if !verifyGitHubSignature(r, raw) {
+	if !s.verifyGitHubSignature(r, raw) {
 		writeWebhookUnauthorized(w)
 		return
 	}
@@ -170,9 +170,14 @@ func (s *Server) openPR(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	repo := in.Repo
+	if repo == "" {
+		repo = s.opts.GitHub.Repo
+	}
 	res, err := githubconn.OpenDraftPR(r.Context(), githubconn.Options{
+		Token: s.opts.GitHub.Token, Repo: repo,
 		Title: in.Title, Body: in.Body, Path: in.Path, Content: in.Content,
-		Fake: in.Fake, TaskID: taskID, RunID: in.RunID, Repo: in.Repo,
+		Fake: in.Fake, TaskID: taskID, RunID: in.RunID,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})

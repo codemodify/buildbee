@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/codemodify/buildbee/internal/store"
@@ -14,18 +15,21 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+// writeError maps store errors to status codes. Anything unexpected is
+// logged with its cause and reported to the client as a generic 500, so
+// driver errors never leak into the UI.
 func writeError(w http.ResponseWriter, err error) {
-	status := http.StatusInternalServerError
-	if errors.Is(err, store.ErrNotFound) {
-		status = http.StatusNotFound
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, store.ErrForbidden):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+	case errors.Is(err, store.ErrConflict):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	default:
+		slog.Error("request failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 	}
-	if errors.Is(err, store.ErrForbidden) {
-		status = http.StatusForbidden
-	}
-	if errors.Is(err, store.ErrConflict) {
-		status = http.StatusConflict
-	}
-	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
 func decodeJSON(r *http.Request, dst any) error {

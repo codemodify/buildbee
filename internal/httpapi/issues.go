@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -23,10 +22,10 @@ func (s *Server) syncIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	token := os.Getenv("GITHUB_TOKEN")
+	token := s.opts.GitHub.Token
 	repo := in.Repo
 	if repo == "" {
-		repo = os.Getenv("GITHUB_REPO")
+		repo = s.opts.GitHub.Repo
 	}
 	var items []models.Task
 	if in.Fake || token == "" || repo == "" {
@@ -71,7 +70,7 @@ func (s *Server) issuesWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if !verifyGitHubSignature(r, raw) {
+	if !s.verifyGitHubSignature(r, raw) {
 		writeWebhookUnauthorized(w)
 		return
 	}

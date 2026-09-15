@@ -5,18 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"os"
 	"strings"
 )
 
-// githubWebhookSecret is GITHUB_WEBHOOK_SECRET. Empty means signatures are not required (dev).
-func githubWebhookSecret() string {
-	return strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET"))
-}
-
-// verifyGitHubSignature checks X-Hub-Signature-256 when a webhook secret is configured.
-func verifyGitHubSignature(r *http.Request, raw []byte) bool {
-	secret := githubWebhookSecret()
+// verifyGitHubSignature checks X-Hub-Signature-256 when GITHUB_WEBHOOK_SECRET
+// is configured. Without a secret, webhooks are accepted unsigned (LAN).
+func (s *Server) verifyGitHubSignature(r *http.Request, raw []byte) bool {
+	secret := s.opts.GitHub.WebhookSecret
 	if secret == "" {
 		return true
 	}
