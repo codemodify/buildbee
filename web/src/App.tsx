@@ -6,6 +6,7 @@ import { useLoad, useMemberIndex, usePresence, useProject } from "./store";
 import type { Message, Person, Presence, Project } from "./types";
 import { ChannelHeader, ChannelView, MenuButton } from "./ui/Channel";
 import { InboxBell } from "./ui/Inbox";
+import { Members } from "./ui/Members";
 import { ProjectCtx, type Ctx } from "./ui/context";
 import { Button, Empty, ErrorNote, cx, inputClass } from "./ui/kit";
 import { Decisions, Settings, UsageView } from "./ui/Settings";
@@ -109,6 +110,10 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
       <main className="flex min-w-0 flex-1">
         {projectId ? (
           <ProjectView key={projectId} me={me} route={route} projectId={projectId} presence={presence} onMenu={menu} />
+        ) : route.view === "members" ? (
+          <div className="min-w-0 flex-1">
+            <Members header={<TopBar title="# members" onMenu={menu} />} />
+          </div>
         ) : route.view === "usage" ? (
           <div className="min-w-0 flex-1">
             <UsageView header={<TopBar title="Usage" onMenu={menu} />} />

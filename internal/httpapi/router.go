@@ -63,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 		s.hub.ServeMulti(w, r)
 	})
 	mux.HandleFunc("GET /v1/presence", s.presence)
+	mux.HandleFunc("GET /v1/members", s.roster)
 	mux.HandleFunc("GET /v1/channels/{id}/ws", s.hub.ServeTopic(func(r *http.Request) string { return "channel:" + r.PathValue("id") }, false))
 	mux.HandleFunc("GET /v1/runs/{id}/ws", s.hub.ServeTopic(func(r *http.Request) string { return "run:" + r.PathValue("id") }, true))
 

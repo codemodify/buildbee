@@ -138,9 +138,9 @@ func (s *Service) send(ctx context.Context, a Actor, channelID, threadID, body s
 
 // post writes a message by author (a reply when threadID is set) and acts
 // on it: @people are notified; a person's @Bot (or a message in a DM with
-// a Bot) opens a Task handed to it, with this message as the Task's thread;
-// in a Task's thread, @Bot hands that Task on, and any other reply reaches
-// the agent working on it.
+// a Bot) opens a Task handed to it, whose thread lives in #tasks; in a
+// thread about a Task, @Bot hands that Task on, and any other reply
+// reaches the agent working on it.
 func (w *work) post(ctx context.Context, proj *models.Project, ch *models.Channel, author *models.Member, a Actor,
 	body, threadID string) (*Posted, error) {
 	var root *models.Message
@@ -201,19 +201,25 @@ func (w *work) post(ctx context.Context, proj *models.Project, ch *models.Channe
 			}
 		case len(bots) > 0:
 			if task == nil {
-				thread := msg
-				if root != nil {
-					thread = root // an ordinary thread becomes the Task's
-				}
 				if task, err = w.createTask(ctx, proj, author, a, newTask{title: mentionTitle(body, ch.Name), body: body}); err != nil {
 					return nil, err
 				}
-				if err := w.linkThread(ctx, task, thread.ID); err != nil {
-					return nil, err
+				if ch.Locked && root == nil {
+					// Asked in #tasks: this message is the Task's thread.
+					if err := w.linkThread(ctx, task, msg.ID); err != nil {
+						return nil, err
+					}
+				} else {
+					// Asked elsewhere: the thread opens in #tasks and this
+					// message links to the Task.
+					if err := w.openThread(ctx, proj, task, author, "Task: "+task.Title, ""); err != nil {
+						return nil, err
+					}
+					if err := w.st.SetMessageTask(ctx, msg.ID, task.ID); err != nil {
+						return nil, err
+					}
 				}
-				if thread.ID == msg.ID {
-					out.Message.TaskID = task.ID
-				}
+				out.Message.TaskID = task.ID
 			}
 			for i := range bots {
 				h, t, err := w.handoff(ctx, proj, task, author, &bots[i], a, body, true)
@@ -246,7 +252,7 @@ func (w *work) linkThread(ctx context.Context, task *models.Task, messageID stri
 }
 
 // openThread starts a Task's thread in channelID (default: the Project's
-// first open Channel) with a message by author.
+// #tasks) with a message by author.
 func (w *work) openThread(ctx context.Context, proj *models.Project, task *models.Task, author *models.Member, body, channelID string) error {
 	if author == nil {
 		return nil

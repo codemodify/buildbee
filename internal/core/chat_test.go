@@ -110,8 +110,13 @@ func TestDMs(t *testing.T) {
 	// A message to a Bot in a DM asks it to work.
 	posted, err := f.s.PostMessage(f.ctx, ada, dm.ID, "Bump the Go version")
 	f.must(err)
-	if len(posted.Tasks) != 1 || posted.Tasks[0].AssigneeMemberID != builder.ID || posted.Tasks[0].ThreadID != posted.ID {
+	if len(posted.Tasks) != 1 || posted.Tasks[0].AssigneeMemberID != builder.ID || posted.TaskID != posted.Tasks[0].ID {
 		t.Fatalf("posted: %+v", posted)
+	}
+	th, err := f.s.Thread(f.ctx, ada, posted.Tasks[0].ThreadID, store.Page{})
+	f.must(err)
+	if th.Root.ChannelID != p.Channels[0].ID || th.Root.Body != "Task: Bump the Go version" {
+		t.Fatalf("the Task's thread is in #tasks: %+v", th.Root)
 	}
 	// Others do not see it.
 	if dms, _ := f.s.DMs(f.ctx, bob, p.ID); len(dms) != 0 {
@@ -209,31 +214,55 @@ func TestPresence(t *testing.T) {
 	}
 }
 
-func TestLeavingAndComingBackIsAnnouncedInPing(t *testing.T) {
+func TestRosterShowsTheServersPeopleAndBots(t *testing.T) {
 	f := newFixture(t)
 	ada, bob := f.person("Ada"), f.person("Bob")
 	p := f.project(ada, "People")
-	ping := p.Channels[0].ID
+	f.project(bob, "Other")
 	_, err := f.s.Join(f.ctx, bob, p.ID)
 	f.must(err)
 	f.must(f.s.Leave(f.ctx, bob, p.ID))
-	f.must(f.s.Leave(f.ctx, bob, p.ID)) // once is enough
-	members, _ := f.s.Members(f.ctx, p.ID)
-	for _, m := range members {
-		if m.DisplayName == "Bob" && m.LeftAt == nil {
-			t.Fatal("Bob left")
-		}
-	}
-	_, err = f.s.PostMessage(f.ctx, bob, ping, "back") // writing brings Bob back
+	f.must(f.s.Leave(f.ctx, bob, p.ID))                            // once is enough
+	_, err = f.s.PostMessage(f.ctx, bob, p.Channels[0].ID, "back") // writing brings Bob back
 	f.must(err)
 	_, err = f.s.AddMember(f.ctx, ada, p.ID, NewMember{Kind: "bot", DisplayName: "Docs", Role: "writer"})
 	f.must(err)
-	msgs, _, _ := f.s.Messages(f.ctx, ada, ping, store.Page{})
-	var lines []string
-	for _, m := range msgs[2:] { // after the Project's first two lines
-		lines = append(lines, m.Body)
+	r, err := f.s.Roster(f.ctx)
+	f.must(err)
+	if len(r.People) != 2 || r.People[0].Name != "Ada" || len(r.People[1].Projects) != 2 {
+		t.Fatalf("people: %+v", r.People)
 	}
-	if got := strings.Join(lines, " | "); got != "Bob joined. | Bob left. | Bob joined. | back | Docs joined." {
-		t.Fatalf("#ping: %s", got)
+	if len(r.Bots) != 9 || r.Bots[0].ProjectName != "Other" {
+		t.Fatalf("bots of both Projects: %d %+v", len(r.Bots), r.Bots[0])
+	}
+	var log []string
+	for _, e := range r.Events {
+		log = append(log, e.Name+" "+e.Action)
+	}
+	if got := strings.Join(log, ", "); got != "Docs added, Bob joined, Bob left, Bob joined, Bob created, Ada created" {
+		t.Fatalf("events, newest first: %s", got)
+	}
+	msgs, _, _ := f.s.Messages(f.ctx, ada, p.Channels[0].ID, store.Page{})
+	if len(msgs) != 1 || msgs[0].Body != "back" {
+		t.Fatalf("no status lines in chat: %+v", msgs)
+	}
+}
+
+func TestAskingElsewhereOpensTheTaskThreadInTasks(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Where")
+	design, err := f.s.CreateChannel(f.ctx, ada, p.ID, "design")
+	f.must(err)
+	posted, err := f.s.PostMessage(f.ctx, ada, design.ID, "@Scout look at the empty states")
+	f.must(err)
+	task := posted.Tasks[0]
+	th, err := f.s.Thread(f.ctx, ada, task.ThreadID, store.Page{})
+	f.must(err)
+	if th.Root.ChannelID != p.Channels[0].ID || th.Root.TaskID != task.ID || posted.TaskID != task.ID || posted.ReplyCount != 0 {
+		t.Fatalf("thread root %+v, message %+v", th.Root, posted.Message)
+	}
+	if len(th.Replies) != 1 || th.Replies[0].Body != "Planning." {
+		t.Fatalf("Scout reports in the Task's thread: %+v", th.Replies)
 	}
 }

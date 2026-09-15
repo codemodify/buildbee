@@ -298,3 +298,34 @@ func mustJSON(t *testing.T, v any) string {
 	}
 	return string(raw)
 }
+
+func TestMembersListsTheServer(t *testing.T) {
+	s := newStack(t, Options{})
+	s.project("Ada", "Chat")
+	type rosterJSON struct {
+		People []struct {
+			Name     string `json:"name"`
+			Projects []struct {
+				ProjectName string `json:"project_name"`
+			} `json:"projects"`
+		} `json:"people"`
+		Bots []struct {
+			DisplayName string `json:"display_name"`
+			ProjectName string `json:"project_name"`
+		} `json:"bots"`
+		Events []struct {
+			Name   string `json:"name"`
+			Action string `json:"action"`
+		} `json:"events"`
+	}
+	r := ok[rosterJSON](t, s.call(http.MethodGet, "/v1/members", "", nil), http.StatusOK)
+	if len(r.People) != 1 || r.People[0].Name != "Ada" || len(r.People[0].Projects) != 1 || r.People[0].Projects[0].ProjectName != "Chat" {
+		t.Fatalf("people: %+v", r.People)
+	}
+	if len(r.Bots) == 0 || r.Bots[0].ProjectName != "Chat" {
+		t.Fatalf("bots: %+v", r.Bots)
+	}
+	if len(r.Events) != 1 || r.Events[0].Name != "Ada" || r.Events[0].Action != "created" {
+		t.Fatalf("events: %+v", r.Events)
+	}
+}

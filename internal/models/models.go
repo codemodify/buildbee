@@ -316,9 +316,9 @@ type Preferences struct {
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
-// PingChannel is every Project's first Channel: where people meet and
-// where joins and leaves are announced. It cannot be renamed or archived.
-const PingChannel = "ping"
+// TasksChannel is every Project's first Channel, where each Task's thread
+// lives. It cannot be renamed or archived.
+const TasksChannel = "tasks"
 
 // Channel kinds: open channels, and DMs between chosen Members.
 const (
@@ -331,7 +331,7 @@ type Channel struct {
 	ProjectID  string     `json:"project_id"`
 	Name       string     `json:"name"`
 	Kind       string     `json:"kind"`
-	Locked     bool       `json:"locked,omitempty"`     // #ping
+	Locked     bool       `json:"locked,omitempty"`     // #tasks
 	Members    []string   `json:"member_ids,omitempty"` // DMs only
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -649,4 +649,43 @@ type UsageRow struct {
 	Runs          int                `json:"runs"`
 	Cost          map[string]float64 `json:"cost"`
 	ContextTokens int64              `json:"context_tokens"` // sum of each Run's peak
+}
+
+// Roster is everyone who is part of this Server: people with the Projects
+// they are in, the Bots of every Project, and who joined or left lately.
+type Roster struct {
+	People []RosterPerson `json:"people"`
+	Bots   []RosterBot    `json:"bots"`
+	Events []RosterEvent  `json:"events"`
+}
+
+// RosterPerson is a Person and their Projects.
+type RosterPerson struct {
+	Person
+	Projects []Membership `json:"projects"`
+}
+
+// Membership is a Person's place in one Project.
+type Membership struct {
+	ProjectID   string     `json:"project_id"`
+	ProjectName string     `json:"project_name"`
+	MemberID    string     `json:"member_id"`
+	Role        string     `json:"role"`
+	JoinedAt    time.Time  `json:"joined_at"`
+	LeftAt      *time.Time `json:"left_at,omitempty"`
+}
+
+// RosterBot is a Bot and the Project it works in.
+type RosterBot struct {
+	Member
+	ProjectName string `json:"project_name"`
+}
+
+// RosterEvent is someone creating, joining, leaving or being added to a Project.
+type RosterEvent struct {
+	Name        string    `json:"name"`
+	Action      string    `json:"action"` // joined | left | added
+	ProjectID   string    `json:"project_id"`
+	ProjectName string    `json:"project_name"`
+	At          time.Time `json:"at"`
 }

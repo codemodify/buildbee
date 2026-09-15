@@ -224,9 +224,6 @@ func (w *work) member(ctx context.Context, a Actor, projectID string, join bool)
 			map[string]any{"kind": m.Kind, "role": m.Role, "name": m.DisplayName}); err != nil {
 			return nil, err
 		}
-		if err := w.ping(ctx, projectID, m.DisplayName+" joined."); err != nil {
-			return nil, err
-		}
 	}
 	return m, nil
 }

@@ -169,6 +169,11 @@ func (s *Server) postReply(w http.ResponseWriter, r *http.Request) {
 	respond(s, w, http.StatusCreated, m, err)
 }
 
+func (s *Server) roster(w http.ResponseWriter, r *http.Request) {
+	out, err := s.core.Roster(r.Context())
+	respond(s, w, http.StatusOK, out, err)
+}
+
 func (s *Server) presence(w http.ResponseWriter, r *http.Request) {
 	p, err := s.core.Presence(r.Context())
 	respond(s, w, http.StatusOK, p, err)

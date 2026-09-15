@@ -1,5 +1,5 @@
 import { Fragment, useMemo } from "react";
-import { go } from "../route";
+import { go, parse } from "../route";
 import { Markdown, ago, clock } from "../text";
 import type { Message } from "../types";
 import { mentionNames, useCtx } from "./context";
@@ -90,7 +90,7 @@ export function MessageItem({
         <div className="text-[14px] leading-relaxed text-bb-fg">
           <Markdown text={m.body} mentions={names} />
         </div>
-        {task && <TaskCard taskId={task.id} onOpen={() => onOpenThread?.(m)} />}
+        {task && <TaskCard taskId={task.id} />}
         {!compactThread && (m.reply_count ?? 0) > 0 && onOpenThread && (
           <button
             type="button"
@@ -115,11 +115,16 @@ export function MessageItem({
   );
 }
 
-/** TaskCard shows a Task's state where its thread starts. */
-export function TaskCard({ taskId, onOpen }: { taskId: string; onOpen?: () => void }) {
+/** TaskCard shows a Task's state; it opens the Task's thread beside the channel. */
+export function TaskCard({ taskId }: { taskId: string }) {
   const { tasks, members, data } = useCtx();
   const task = tasks.get(taskId);
   if (!task) return null;
+  const onOpen = () => {
+    if (!task.thread_id) return;
+    const here = parse(window.location.hash);
+    go(here.view === "channel" ? { ...here, threadId: task.thread_id } : { view: "channel", projectId: data.project.id, threadId: task.thread_id });
+  };
   const assignee = task.assignee_member_id ? members.get(task.assignee_member_id) : undefined;
   return (
     <div className="mt-1.5 max-w-xl rounded-lg border border-bb-border bg-bb-surface p-3">

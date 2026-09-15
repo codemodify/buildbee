@@ -8,7 +8,8 @@ export type Route =
   | { view: "task"; projectId: string; taskId: string }
   | { view: "decisions"; projectId: string }
   | { view: "settings"; projectId: string }
-  | { view: "usage"; projectId?: string };
+  | { view: "usage"; projectId?: string }
+  | { view: "members" };
 
 export function parse(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
@@ -16,6 +17,7 @@ export function parse(hash: string): Route {
   const threadId = params.get("thread") || undefined;
   const [p, projectId, section, id] = path.split("/").filter(Boolean);
   if (p === "usage") return { view: "usage" };
+  if (p === "members") return { view: "members" };
   if (p === "projects") return fromServerLink(path) ?? { view: "home" };
   if (p !== "p" || !projectId) return { view: "home" };
   switch (section) {
@@ -51,6 +53,8 @@ export function href(r: Route): string {
       return `#/p/${r.projectId}/settings`;
     case "usage":
       return r.projectId ? `#/p/${r.projectId}/usage` : "#/usage";
+    case "members":
+      return "#/members";
   }
 }
 

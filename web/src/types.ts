@@ -240,6 +240,21 @@ export type Usage = {
   by_project?: UsageRow[];
 };
 
+export type Membership = {
+  project_id: string;
+  project_name: string;
+  member_id: string;
+  role: string;
+  joined_at: string;
+  left_at?: string;
+};
+
+export type Roster = {
+  people: (Person & { projects: Membership[] })[];
+  bots: (Member & { project_name: string })[];
+  events: { name: string; action: string; project_id: string; project_name: string; at: string }[];
+};
+
 /** A message as posted, with what its mentions set in motion. */
 export type Posted = Message & {
   tasks?: Task[];

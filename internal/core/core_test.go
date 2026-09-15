@@ -129,20 +129,15 @@ func TestCreateProjectSeedsOwnerBotsAndChannel(t *testing.T) {
 			t.Fatalf("missing bot %s", role)
 		}
 	}
-	if len(p.Channels) != 1 || p.Channels[0].Name != "ping" || !p.Channels[0].Locked {
+	if len(p.Channels) != 1 || p.Channels[0].Name != "tasks" || !p.Channels[0].Locked {
 		t.Fatalf("channels: %+v", p.Channels)
-	}
-	msgs, _, err := f.s.Messages(f.ctx, ada, p.Channels[0].ID, store.Page{})
-	f.must(err)
-	if len(msgs) != 2 || msgs[0].Body != "Ada joined." || msgs[1].Body != "Scout, Builder, Sentry, Pulse joined." {
-		t.Fatalf("#ping: %+v", msgs)
 	}
 	name, yes := "lobby", true
 	if _, err := f.s.UpdateChannel(f.ctx, ada, p.Channels[0].ID, ChannelPatch{Name: &name}); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("#ping cannot be renamed: %v", err)
+		t.Fatalf("#tasks cannot be renamed: %v", err)
 	}
 	if _, err := f.s.UpdateChannel(f.ctx, ada, p.Channels[0].ID, ChannelPatch{Archived: &yes}); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("#ping cannot be archived: %v", err)
+		t.Fatalf("#tasks cannot be archived: %v", err)
 	}
 	if rs, err := f.s.Routines(f.ctx, p.ID); err != nil || len(rs) != 0 {
 		t.Fatalf("no Routines until someone schedules one: %+v %v", rs, err)
@@ -576,7 +571,7 @@ func TestRoutineOpensATaskOnceAcrossConcurrentTicks(t *testing.T) {
 	msgs, _, _ := f.s.Messages(f.ctx, ada, p.Channels[0].ID, store.Page{})
 	last := msgs[len(msgs)-1]
 	if last.MemberID != bot(p, models.RolePulse).ID || !strings.Contains(last.Body, "→ Scout") || last.TaskID == "" {
-		t.Fatalf("Pulse opens the Task's thread in #ping: %+v", msgs)
+		t.Fatalf("Pulse opens the Task's thread in #tasks: %+v", msgs)
 	}
 	if n := f.inbox(ada); len(n) != 1 || n[0].Kind != "routine" {
 		t.Fatalf("inbox: %+v", n)

@@ -65,6 +65,26 @@ export function Sidebar({
         </span>
       </div>
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-2">
+        <button
+          type="button"
+          onClick={() => {
+            go({ view: "members" });
+            onNavigate();
+          }}
+          className={cx(
+            "mb-1 flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-left text-[13.5px]",
+            route.view === "members" ? "bg-bb-accent-soft font-medium text-bb-fg" : "text-bb-muted hover:bg-bb-hover hover:text-bb-fg",
+          )}
+        >
+          <span className="w-3 text-center text-bb-subtle">#</span>
+          members
+          {online.size > 0 && (
+            <span className="ml-auto flex items-center gap-1 text-[11px] text-bb-subtle" title={`${online.size} online`}>
+              <span className="h-1.5 w-1.5 rounded-full bg-bb-success" />
+              {online.size}
+            </span>
+          )}
+        </button>
         {projects.map((p) => (
           <ProjectSection
             key={p.id}
