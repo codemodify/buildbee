@@ -31,15 +31,6 @@ func NewServer(st store.Store, hub *ws.Hub) *Server {
 	return newSrv(st, hub, auth.New(auth.FromEnv()))
 }
 
-// NewMux returns a Server with an in-memory Store and dev auth (tests / no OAuth).
-func NewMux() http.Handler {
-	return newSrv(store.NewMemory(), ws.NewHub(), auth.NewDev()).Handler()
-}
-
-func NewMuxSecure() http.Handler {
-	return newSrv(store.NewMemory(), ws.NewHub(), auth.New(auth.Config{ClientID: "test"})).Handler()
-}
-
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", Health)

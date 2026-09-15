@@ -13,7 +13,7 @@ import (
 func TestHealthz(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	NewMux().ServeHTTP(rec, req)
+	newTestMux(t).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d want %d", rec.Code, http.StatusOK)
@@ -30,7 +30,7 @@ func TestHealthz(t *testing.T) {
 func TestV1Index(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/", nil)
-	NewMux().ServeHTTP(rec, req)
+	newTestMux(t).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d want %d", rec.Code, http.StatusOK)
 	}
@@ -46,14 +46,14 @@ func TestV1Index(t *testing.T) {
 func TestUnknownPath(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/nope", nil)
-	NewMux().ServeHTTP(rec, req)
+	newTestMux(t).ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: got %d want %d", rec.Code, http.StatusNotFound)
 	}
 }
 
 func TestRunEventsStream(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Stream Project"}))
 	task := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+proj["id"].(string)+"/tasks?handoff=none", map[string]string{"title": "Stream"}))
 	run := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/tasks/"+task["id"].(string)+"/runs", nil))
@@ -101,7 +101,7 @@ func TestCORSEchoesDesktopOrigin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodOptions, "/v1/projects", nil)
 	req.Header.Set("Origin", "http://tauri.localhost")
-	NewMux().ServeHTTP(rec, req)
+	newTestMux(t).ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status: got %d want %d", rec.Code, http.StatusNoContent)
 	}
@@ -164,7 +164,7 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 }
 
 func TestVerticalSlice(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Project"})
 	if created.Code != http.StatusCreated {
@@ -361,7 +361,7 @@ func TestVerticalSlice(t *testing.T) {
 }
 
 func TestChannelBotMention(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Mentions"})
 	var proj struct {
 		ID      string `json:"id"`
@@ -421,7 +421,7 @@ func TestChannelBotMention(t *testing.T) {
 
 func TestWebhookSignatureRequired(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "s3cret")
-	h := NewMux()
+	h := newTestMux(t)
 	rec := doJSON(t, h, http.MethodPost, "/v1/issues/webhook?project_id=x", map[string]any{
 		"action": "opened",
 		"issue":  map[string]any{"number": 1, "title": "no sig", "html_url": "https://example.test/1"},
@@ -432,7 +432,7 @@ func TestWebhookSignatureRequired(t *testing.T) {
 }
 
 func TestDecisionMemoryReuse(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Memory Project"})
 	proj := decode[map[string]any](t, created)
 	pid := proj["id"].(string)
@@ -489,7 +489,7 @@ func TestDecisionMemoryReuse(t *testing.T) {
 }
 
 func TestNotificationsInbox(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Notify Project"})
 	var proj struct {
 		ID      string `json:"id"`
@@ -597,7 +597,7 @@ func TestNotificationsInbox(t *testing.T) {
 }
 
 func TestMuxKeepsAPIWhenWebMissing(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	health := doJSON(t, h, http.MethodGet, "/healthz", nil)
 	if health.Code != http.StatusOK {
 		t.Fatalf("healthz: %d", health.Code)
@@ -610,7 +610,7 @@ func TestMuxKeepsAPIWhenWebMissing(t *testing.T) {
 }
 
 func TestOAuthProtectsMutations(t *testing.T) {
-	h := NewMuxSecure()
+	h := newTestMuxSecure(t)
 	rec := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Nope"})
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status: got %d want 401 %s", rec.Code, rec.Body.String())
@@ -622,7 +622,7 @@ func TestOAuthProtectsMutations(t *testing.T) {
 }
 
 func TestBotRolesHandoffAndAutorun(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]any{"name": "Roles", "auto_run": true})
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", created.Code, created.Body.String())
@@ -705,7 +705,7 @@ func TestBotRolesHandoffAndAutorun(t *testing.T) {
 }
 
 func TestMemberInvites(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Invite Project"})
 	var proj struct {
 		ID      string `json:"id"`
@@ -834,7 +834,7 @@ func TestMemberInvites(t *testing.T) {
 		t.Fatalf("dev session owner should already be a Member: %#v", selfBody)
 	}
 
-	oauth := NewMuxSecure()
+	oauth := newTestMuxSecure(t)
 	unauth := doJSON(t, oauth, http.MethodPost, "/v1/projects/"+proj.ID+"/invites", map[string]string{"email": "x@y.z"})
 	if unauth.Code != http.StatusUnauthorized {
 		t.Fatalf("oauth invite: %d %s", unauth.Code, unauth.Body.String())
@@ -842,7 +842,7 @@ func TestMemberInvites(t *testing.T) {
 }
 
 func TestCrossProjectIdentity(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	a := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Alpha"}))
 	b := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Beta"}))
 	invA := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+a["id"].(string)+"/invites", map[string]string{
@@ -871,7 +871,7 @@ func TestCrossProjectIdentity(t *testing.T) {
 }
 
 func TestDecisionAssigneeNotify(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Assign"})
 	var proj struct {
 		ID      string `json:"id"`
@@ -947,7 +947,7 @@ func TestDecisionAssigneeNotify(t *testing.T) {
 }
 
 func TestNotificationPreferences(t *testing.T) {
-	h := NewMux()
+	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Prefs"})
 	var proj struct {
 		ID      string `json:"id"`

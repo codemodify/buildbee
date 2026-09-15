@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -46,10 +47,9 @@ func main() {
 }
 
 func openStore(ctx context.Context) (store.Store, error) {
-	url := os.Getenv("DATABASE_URL")
+	url := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if url == "" {
-		log.Print("DATABASE_URL unset; using in-memory store (not persisted)")
-		return store.NewMemory(), nil
+		return nil, errors.New("DATABASE_URL is required (Postgres is the only store)")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()

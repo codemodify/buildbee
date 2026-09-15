@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mirror GitHub Actions CI locally (memory store, no Docker).
+# Mirror GitHub Actions CI locally. Needs Docker for a throwaway Postgres.
 set -euo pipefail
 export GOTOOLCHAIN="${GOTOOLCHAIN:-local}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,9 +17,14 @@ else
   echo "== desktop cargo check skipped (need cargo + webkit2gtk) =="
 fi
 
-echo "== e2e (memory Server) =="
+echo "== e2e (Postgres Server) =="
 need_stop=0
+pg=""
 if ! curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+  pg="$(docker run -d --rm -e POSTGRES_PASSWORD=postgres -p 127.0.0.1::5432 postgres:17-alpine)"
+  trap 'docker rm -f "$pg" >/dev/null 2>&1 || true' EXIT
+  pgport="$(docker port "$pg" 5432/tcp | head -1 | cut -d: -f2)"
+  export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${pgport}/postgres?sslmode=disable"
   go run ./cmd/buildbee-server >/tmp/buildbee-server-ci.log 2>&1 &
   echo $! > /tmp/buildbee-server-ci.pid
   need_stop=1
