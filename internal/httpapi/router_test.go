@@ -56,6 +56,85 @@ func TestUnknownPath(t *testing.T) {
 	}
 }
 
+func TestNULInAgentOutputIsStored(t *testing.T) {
+	h := newTestMux(t)
+	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "NUL"}))
+	task := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+proj["id"].(string)+"/tasks?handoff=none", map[string]string{"title": "x"}))
+	tid := task["id"].(string)
+	run := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/tasks/"+tid+"/runs", nil))
+	rid := run["id"].(string)
+
+	// What a UTF-16 file or `find -print0` looks like in an agent transcript.
+	post := func(path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+		return rec
+	}
+	if rec := post("/v1/runs/"+rid+"/events", `{"kind":"token","payload":{"text":"a\u0000b"}}`); rec.Code != http.StatusCreated {
+		t.Fatalf("run event with NUL: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post("/v1/tasks/"+tid+"/artifacts", `{"kind":"log","name":"acp.log","body":"x\u0000y","run_id":"`+rid+`"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("artifact with NUL: %d %s", rec.Code, rec.Body.String())
+	}
+	evs := decode[struct {
+		Items []struct {
+			Payload map[string]any `json:"payload"`
+		} `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/runs/"+rid+"/events", nil))
+	last := evs.Items[len(evs.Items)-1].Payload["text"]
+	if last != "a\u2400b" {
+		t.Fatalf("stored text: %q", last)
+	}
+}
+
+func TestMentionWithMultibyteTextCreatesTask(t *testing.T) {
+	h := newTestMux(t)
+	proj := decode[struct {
+		ID      string `json:"id"`
+		Members []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"members"`
+		Channels []struct {
+			ID string `json:"id"`
+		} `json:"channels"`
+	}](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "CJK"}))
+	// "@Scout " + CJK text long enough that byte 120 lands mid-character.
+	body := "@Scout " + strings.Repeat("\u65e5\u672c\u8a9e", 40)
+	res := decode[struct {
+		Tasks []map[string]any `json:"tasks"`
+	}](t, doJSON(t, h, http.MethodPost, "/v1/channels/"+proj.Channels[0].ID+"/messages", map[string]string{
+		"body": body, "member_id": proj.Members[0].ID,
+	}))
+	if len(res.Tasks) != 1 {
+		t.Fatalf("mention created %d Tasks, want 1", len(res.Tasks))
+	}
+}
+
+func TestDecisionMemoryShowsInListings(t *testing.T) {
+	h := newTestMux(t)
+	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Memory"}))
+	pid := proj["id"].(string)
+	first := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+pid+"/decisions", map[string]any{
+		"prompt": "Use Postgres?", "options": []string{"yes", "no"},
+	}))
+	doJSON(t, h, http.MethodPost, "/v1/decisions/"+first["id"].(string)+"/answer", map[string]string{"answer": "yes"})
+	doJSON(t, h, http.MethodPost, "/v1/projects/"+pid+"/decisions", map[string]any{"prompt": "use postgres", "options": []string{"yes", "no"}})
+
+	list := decode[struct {
+		Items []map[string]any `json:"items"`
+	}](t, doJSON(t, h, http.MethodGet, "/v1/projects/"+pid+"/decisions", nil))
+	var reused int
+	for _, d := range list.Items {
+		if d["reused"] == true && d["fingerprint"] == "use postgres" {
+			reused++
+		}
+	}
+	if reused != 1 {
+		t.Fatalf("listed Decisions must carry reused+fingerprint: %v", list.Items)
+	}
+}
+
 func TestGitHubNotConfigured(t *testing.T) {
 	h := newTestMux(t)
 	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "No GitHub"}))

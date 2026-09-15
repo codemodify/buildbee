@@ -103,4 +103,3 @@ func TestStreamFakeEmitsChunks(t *testing.T) {
 		t.Fatalf("events %#v kinds %#v", evs, kinds)
 	}
 }
-

@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -32,9 +34,18 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 }
 
+// decodeJSON decodes the request body into dst after replacing NUL escapes
+// Postgres cannot store. An empty body is io.EOF.
 func decodeJSON(r *http.Request, dst any) error {
 	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(dst)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return io.EOF
+	}
+	return json.Unmarshal(sanitizeJSON(raw), dst)
 }
 
 func writeItems[T any](w http.ResponseWriter, items []T) {

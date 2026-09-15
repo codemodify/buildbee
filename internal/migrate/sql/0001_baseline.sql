@@ -1,5 +1,9 @@
 -- BuildBee baseline schema.
 --
+-- Foreign keys to members are DEFERRABLE INITIALLY DEFERRED: Postgres checks
+-- them at commit, so deleting a Project can cascade through its members and
+-- the messages/handoffs that reference them in one statement.
+--
 -- Pre-release: this file is edited in place until the first release, so a
 -- database created by an earlier build must be recreated (docker compose
 -- down -v). After the first release every change is a new numbered file.
@@ -40,7 +44,7 @@ CREATE INDEX channels_project_id_idx ON channels (project_id);
 CREATE TABLE messages (
     id UUID PRIMARY KEY,
     channel_id UUID NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
-    member_id UUID NOT NULL REFERENCES members (id),
+    member_id UUID NOT NULL REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     body TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -51,8 +55,8 @@ CREATE TABLE tasks (
     project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     status TEXT NOT NULL,
-    assignee_member_id UUID REFERENCES members (id),
-    issue_number INT,
+    assignee_member_id UUID REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
+    issue_number INT CHECK (issue_number > 0),
     issue_url TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -63,8 +67,8 @@ CREATE UNIQUE INDEX tasks_project_issue_idx ON tasks (project_id, issue_number) 
 CREATE TABLE handoffs (
     id UUID PRIMARY KEY,
     task_id UUID NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
-    from_member_id UUID NOT NULL REFERENCES members (id),
-    to_member_id UUID NOT NULL REFERENCES members (id),
+    from_member_id UUID NOT NULL REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
+    to_member_id UUID NOT NULL REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     note TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -79,7 +83,9 @@ CREATE TABLE decisions (
     options JSONB NOT NULL DEFAULT '[]',
     recommendation TEXT NOT NULL DEFAULT '',
     answer TEXT,
-    assignee_member_id UUID REFERENCES members (id),
+    reused BOOLEAN NOT NULL DEFAULT false,
+    fingerprint TEXT NOT NULL DEFAULT '',
+    assignee_member_id UUID REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     answered_at TIMESTAMPTZ
 );

@@ -196,12 +196,10 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	var mentionTasks []models.Task
 	var mentionHandoffs []models.Handoff
 	for _, bot := range mentioned {
-		title := "Mention @" + bot.DisplayName + ": " + body
-		if len(title) > 120 {
-			title = title[:120]
-		}
+		title := truncateUTF8("Mention @"+bot.DisplayName+": "+body, 120)
 		task, err := s.store.CreateTask(r.Context(), ch.ProjectID, title, bot.ID)
 		if err != nil {
+			s.log.Error("mention: create task", "bot", bot.ID, "err", err)
 			continue
 		}
 		mentionTasks = append(mentionTasks, *task)

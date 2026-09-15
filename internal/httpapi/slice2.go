@@ -133,7 +133,7 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		writeWebhookUnauthorized(w)
 		return
 	}
-	taskID, name, status, ext, artifactID := parsePipelineWebhook(raw)
+	taskID, name, status, ext, artifactID := parsePipelineWebhook(sanitizeJSON(raw))
 	if q := r.URL.Query().Get("task_id"); q != "" && taskID == "" {
 		taskID = q
 	}

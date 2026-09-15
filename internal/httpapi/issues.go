@@ -96,8 +96,8 @@ func (s *Server) issuesWebhook(w http.ResponseWriter, r *http.Request) {
 			ProjectID string `json:"project_id"`
 		} `json:"client_payload"`
 	}
-	if err := json.Unmarshal(raw, &body); err != nil || body.Issue == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "issue payload required"})
+	if err := json.Unmarshal(sanitizeJSON(raw), &body); err != nil || body.Issue == nil || body.Issue.Number <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "issue payload with a positive number required"})
 		return
 	}
 	projectID := r.URL.Query().Get("project_id")

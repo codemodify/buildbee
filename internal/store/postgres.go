@@ -459,7 +459,7 @@ func (p *Postgres) ListDecisions(ctx context.Context, projectID string) ([]model
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at, COALESCE(assignee_member_id::text, '')
+	rows, err := p.pool.Query(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at, COALESCE(assignee_member_id::text, ''), reused, fingerprint
 		FROM decisions WHERE project_id=$1 ORDER BY created_at DESC`, projectID)
 	if err != nil {
 		return nil, err
@@ -489,14 +489,15 @@ func (p *Postgres) CreateDecision(ctx context.Context, projectID, prompt, recomm
 	}
 	d := models.Decision{
 		ID: uuid.NewString(), ProjectID: projectID, Prompt: prompt,
-		Options: options, Recommendation: recommendation, AssigneeMemberID: assigneeMemberID, CreatedAt: time.Now().UTC(),
+		Options: options, Recommendation: recommendation, Fingerprint: models.DecisionFingerprint(prompt),
+		AssigneeMemberID: assigneeMemberID, CreatedAt: time.Now().UTC(),
 	}
 	var assignee any
 	if assigneeMemberID != "" {
 		assignee = assigneeMemberID
 	}
-	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, created_at, assignee_member_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.CreatedAt, assignee); err != nil {
+	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, created_at, assignee_member_id, fingerprint)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.CreatedAt, assignee, d.Fingerprint); err != nil {
 		return nil, err
 	}
 	_ = p.addActivity(ctx, projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "create"})
@@ -525,8 +526,8 @@ func (p *Postgres) CreateReusedDecision(ctx context.Context, projectID, prompt, 
 	if assigneeMemberID != "" {
 		assignee = assigneeMemberID
 	}
-	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, answer, answered_at, created_at, assignee_member_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.Answer, d.AnsweredAt, d.CreatedAt, assignee); err != nil {
+	if _, err := p.pool.Exec(ctx, `INSERT INTO decisions (id, project_id, prompt, options, recommendation, answer, answered_at, created_at, assignee_member_id, reused, fingerprint)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10)`, d.ID, d.ProjectID, d.Prompt, raw, d.Recommendation, d.Answer, d.AnsweredAt, d.CreatedAt, assignee, d.Fingerprint); err != nil {
 		return nil, err
 	}
 	_ = p.addActivity(ctx, projectID, models.TypeDecision, map[string]any{"id": d.ID, "action": "reuse", "answer": answer, "fingerprint": d.Fingerprint})
@@ -601,7 +602,7 @@ func (p *Postgres) ListDecisionMemories(ctx context.Context, projectID string) (
 }
 
 func (p *Postgres) getDecision(ctx context.Context, id string) (*models.Decision, error) {
-	row := p.pool.QueryRow(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at, COALESCE(assignee_member_id::text, '') FROM decisions WHERE id=$1`, id)
+	row := p.pool.QueryRow(ctx, `SELECT id, project_id, prompt, options, recommendation, COALESCE(answer, ''), created_at, answered_at, COALESCE(assignee_member_id::text, ''), reused, fingerprint FROM decisions WHERE id=$1`, id)
 	d, err := scanDecision(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -620,7 +621,7 @@ func scanDecision(row scannable) (models.Decision, error) {
 	var d models.Decision
 	var raw []byte
 	var answered *time.Time
-	err := row.Scan(&d.ID, &d.ProjectID, &d.Prompt, &raw, &d.Recommendation, &d.Answer, &d.CreatedAt, &answered, &d.AssigneeMemberID)
+	err := row.Scan(&d.ID, &d.ProjectID, &d.Prompt, &raw, &d.Recommendation, &d.Answer, &d.CreatedAt, &answered, &d.AssigneeMemberID, &d.Reused, &d.Fingerprint)
 	if err != nil {
 		return d, err
 	}
@@ -930,32 +931,30 @@ func (p *Postgres) UpdatePipeline(ctx context.Context, id, status, externalURL s
 }
 
 func (p *Postgres) UpsertIssueTask(ctx context.Context, projectID string, number int, title, issueURL string) (*models.Task, error) {
+	if number <= 0 {
+		return nil, fmt.Errorf("%w: issue number must be positive", ErrConflict)
+	}
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	var id string
-	err := p.pool.QueryRow(ctx, `SELECT id FROM tasks WHERE project_id=$1 AND issue_number=$2`, projectID, number).Scan(&id)
-	if err == nil {
-		if _, err := p.pool.Exec(ctx, `UPDATE tasks SET title=$2, issue_url=$3, updated_at=$4 WHERE id=$1`, id, title, issueURL, time.Now().UTC()); err != nil {
-			return nil, err
-		}
-		_ = p.addActivity(ctx, projectID, models.TypeIssue, map[string]any{"task_id": id, "issue_number": number, "action": "update"})
-		return p.GetTask(ctx, id)
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
-	}
+	// One statement, so a webhook racing a sync cannot create a duplicate.
 	t := time.Now().UTC()
-	task := models.Task{
-		ID: uuid.NewString(), ProjectID: projectID, Title: title, Status: "open",
-		IssueNumber: number, IssueURL: issueURL, CreatedAt: t, UpdatedAt: t,
-	}
-	if _, err := p.pool.Exec(ctx, `INSERT INTO tasks (id, project_id, title, status, issue_number, issue_url, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, task.ID, task.ProjectID, task.Title, task.Status, number, issueURL, t, t); err != nil {
+	var id string
+	var inserted bool
+	err := p.pool.QueryRow(ctx, `INSERT INTO tasks (id, project_id, title, status, issue_number, issue_url, created_at, updated_at)
+		VALUES ($1,$2,$3,'open',$4,$5,$6,$6)
+		ON CONFLICT (project_id, issue_number) WHERE issue_number IS NOT NULL
+		DO UPDATE SET title=EXCLUDED.title, issue_url=EXCLUDED.issue_url, updated_at=EXCLUDED.updated_at
+		RETURNING id, (xmax = 0)`, uuid.NewString(), projectID, title, number, issueURL, t).Scan(&id, &inserted)
+	if err != nil {
 		return nil, err
 	}
-	_ = p.addActivity(ctx, projectID, models.TypeIssue, map[string]any{"task_id": task.ID, "issue_number": number, "action": "create"})
-	return &task, nil
+	action := "update"
+	if inserted {
+		action = "create"
+	}
+	_ = p.addActivity(ctx, projectID, models.TypeIssue, map[string]any{"task_id": id, "issue_number": number, "action": action})
+	return p.GetTask(ctx, id)
 }
 
 func (p *Postgres) AppendActivity(ctx context.Context, projectID, typ string, payload map[string]any) error {
