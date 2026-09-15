@@ -26,6 +26,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.1"
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: Vet
         run: go vet ./...
       - name: Test
@@ -43,43 +45,9 @@ jobs:
       - working-directory: web
         run: npm ci && npm run build
 
-
-  e2e:
+  images:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s --health-timeout 5s --health-retries 30
-    env:
-      GOTOOLCHAIN: local
-      BUILDBEE_URL: http://127.0.0.1:8080
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.27.1"
-      - name: Start Server (Postgres, dev auth)
-        run: |
-          go run ./cmd/buildbee-server > /tmp/buildbee-server.log 2>&1 &
-          echo $! > /tmp/buildbee-server.pid
-          for i in $(seq 1 45); do
-            if curl -fsS "$BUILDBEE_URL/healthz"; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "server failed to start" >&2
-          cat /tmp/buildbee-server.log >&2
-          exit 1
-      - name: e2e scripts
-        run: |
-          ./scripts/e2e.sh
-          ./scripts/e2e-roles-acp.sh
-          ./scripts/e2e-notifications.sh
-          ./scripts/e2e-acp-stream.sh
+      - name: Build images and smoke-test the compose stack
+        run: ./scripts/smoke-compose.sh

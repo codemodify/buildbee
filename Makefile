@@ -2,7 +2,7 @@ export GOTOOLCHAIN ?= local
 
 BIN := bin
 
-.PHONY: all web embed-web build run test vet clean
+.PHONY: all web embed-web build run test vet fmt-check smoke clean
 
 all: build
 
@@ -24,12 +24,21 @@ build: embed-web
 run: web
 	BUILDBEE_WEB_DIR=$(CURDIR)/web/dist go run ./cmd/buildbee-server
 
+fmt-check:
+	@test -z "$$(gofmt -l .)" || { gofmt -l .; echo "run: gofmt -w ."; exit 1; }
+
 vet:
 	go vet ./...
 
-test: vet
+# Go tests need Postgres: set BUILDBEE_TEST_DATABASE_URL, or have Docker
+# available and a throwaway postgres container is started per package.
+test: fmt-check vet
 	go test ./...
 	cd web && npm ci && npm run build
+
+# Build both images and exercise the compose stack end to end.
+smoke:
+	./scripts/smoke-compose.sh
 
 clean:
 	rm -rf $(BIN) web/dist
