@@ -57,6 +57,7 @@ type LocalWorker struct {
 	// Isolation is where its agents run: container, or host (directly on
 	// the Server's machine).
 	Isolation string `json:"isolation,omitempty"`
+	Sandboxed bool   `json:"sandboxed,omitempty"` // host agents under bubblewrap
 }
 
 // Presence is who is online now, and what the agents are doing.

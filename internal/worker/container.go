@@ -308,9 +308,15 @@ type copiedLogin struct {
 var tokenMu sync.Map // host path -> *sync.Mutex
 
 func (c *Container) copyLogins(agent, home string) (*copiedLogins, error) {
+	return copyLogins(c.Home, agent, home)
+}
+
+// copyLogins copies agent's login files from the user's realHome into a
+// Run's scratch home.
+func copyLogins(realHome, agent, home string) (*copiedLogins, error) {
 	out := &copiedLogins{}
 	for _, f := range loginFiles[agent] {
-		host := filepath.Join(c.Home, f.path)
+		host := filepath.Join(realHome, f.path)
 		data, err := os.ReadFile(host)
 		if errors.Is(err, os.ErrNotExist) {
 			continue

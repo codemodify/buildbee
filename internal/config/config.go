@@ -189,6 +189,7 @@ type Worker struct {
 	Agents       []string // BUILDBEE_WORKER_AGENTS, comma-separated; empty = decided by the worker
 	Slots        int      // BUILDBEE_WORKER_SLOTS: Runs executed at once (default 4)
 	Isolation    string   // BUILDBEE_WORKER_ISOLATION: container (default) or host
+	Sandbox      string   // BUILDBEE_WORKER_SANDBOX: auto (default), require or off; host isolation only
 	Image        string   // BUILDBEE_WORKER_IMAGE: agent image for container isolation
 	Memory, CPUs string   // BUILDBEE_WORKER_MEMORY, BUILDBEE_WORKER_CPUS: per-Run container limits
 	Network      string   // BUILDBEE_WORKER_NETWORK: per-Run container network
@@ -211,6 +212,7 @@ func LoadWorker(getenv Getenv) (Worker, error) {
 		Name:       value(getenv, "BUILDBEE_WORKER_NAME", host),
 		Slots:      4,
 		Isolation:  value(getenv, "BUILDBEE_WORKER_ISOLATION", "container"),
+		Sandbox:    strings.ToLower(value(getenv, "BUILDBEE_WORKER_SANDBOX", "auto")),
 		Image:      value(getenv, "BUILDBEE_WORKER_IMAGE", "buildbee-agents"),
 		Memory:     value(getenv, "BUILDBEE_WORKER_MEMORY", "8g"),
 		CPUs:       value(getenv, "BUILDBEE_WORKER_CPUS", "4"),
@@ -233,6 +235,9 @@ func LoadWorker(getenv Getenv) (Worker, error) {
 	}
 	if c.Isolation != "container" && c.Isolation != "host" {
 		errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_ISOLATION must be container or host, got %q", c.Isolation))
+	}
+	if !slices.Contains([]string{"auto", "require", "off"}, c.Sandbox) {
+		errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_SANDBOX must be auto, require or off, got %q", c.Sandbox))
 	}
 	if getenv("BUILDBEE_WORKER_ALLOW_HOST_AGENTS") != "" {
 		errs = append(errs, errors.New("BUILDBEE_WORKER_ALLOW_HOST_AGENTS is gone; set BUILDBEE_WORKER_ISOLATION=host to run agents on this machine"))

@@ -27,12 +27,26 @@ func FromConfig(ctx context.Context, cfg config.Worker, log *slog.Logger) (*Work
 		log = slog.Default()
 	}
 	box := Container{Image: cfg.Image, Memory: cfg.Memory, CPUs: cfg.CPUs, Network: cfg.Network}
+	var sandbox *Sandbox
 	agents := cfg.Agents
 	onlyFake := len(agents) > 0 && !slices.ContainsFunc(agents, func(a string) bool { return a != "fake" })
 	switch {
 	case onlyFake:
 	case cfg.Isolation == IsolationHost:
-		log.Warn("BUILDBEE_WORKER_ISOLATION=host: agents run on this machine with this user's files and logins")
+		if cfg.Sandbox != SandboxOff {
+			sb, err := FindSandbox(ctx)
+			switch {
+			case err == nil:
+				sandbox = sb
+				log.Info("agents run on this machine, sandboxed by bubblewrap: the home is hidden, only the Run's checkout is writable")
+			case cfg.Sandbox == SandboxRequire:
+				return nil, fmt.Errorf("BUILDBEE_WORKER_SANDBOX=require: %w", err)
+			default:
+				log.Warn("agents run on this machine unsandboxed, with this user's files and logins", "why", err)
+			}
+		} else {
+			log.Warn("BUILDBEE_WORKER_SANDBOX=off: agents run on this machine with this user's files and logins")
+		}
 		if len(agents) == 0 {
 			if agents = acp.Installed(cfg.AgentCommands); len(agents) == 0 {
 				return nil, fmt.Errorf("%w: no agent's ACP command is on PATH (see docs/workers.md); install one or set BUILDBEE_WORKER_AGENTS=fake", ErrNoAgents)
@@ -66,9 +80,12 @@ func FromConfig(ctx context.Context, cfg config.Worker, log *slog.Logger) (*Work
 		}
 	}
 	return New(Config{Server: cfg.ServerURL, Name: cfg.Name, Agents: agents, Slots: cfg.Slots,
-		Isolation: cfg.Isolation, Container: box, Commands: cfg.AgentCommands, RunTimeout: cfg.RunTimeout,
+		Isolation: cfg.Isolation, Container: box, Sandbox: sandbox, Commands: cfg.AgentCommands, RunTimeout: cfg.RunTimeout,
 		Dir: cfg.Dir, OpenPRs: cfg.OpenPRs, Log: log})
 }
 
 // Agents are the agents this worker offers.
 func (w *Worker) Agents() []string { return slices.Clone(w.cfg.Agents) }
+
+// Sandboxed reports whether host agents run under bubblewrap.
+func (w *Worker) Sandboxed() bool { return w.cfg.Sandbox != nil }

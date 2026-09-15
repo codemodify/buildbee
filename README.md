@@ -79,6 +79,7 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_WORKER_AGENTS` | worker | detected | agents to offer, comma-separated ([workers.md](docs/workers.md)) |
 | `BUILDBEE_WORKER_SLOTS` | worker | `4` | Runs executed at once |
 | `BUILDBEE_WORKER_ISOLATION` | worker | `container` | `host` runs agents directly on the worker machine (see below) |
+| `BUILDBEE_WORKER_SANDBOX` | worker | `auto` | host agents under bubblewrap: `auto`, `require` or `off` |
 | `BUILDBEE_WORKER_IMAGE` | worker | `buildbee-agents` | agents image, built from `Dockerfile.agents` |
 | `BUILDBEE_WORKER_RUN_TIMEOUT` | worker | `2h` | Run time limit |
 | `BUILDBEE_WORKER_DIR` | worker | `~/.cache/buildbee-worker` | repo mirrors and Run checkouts |
@@ -95,4 +96,6 @@ BuildBee trusts the network it runs on. Anyone who can reach the Server can read
 - State-changing requests from another site's page are refused, and WebSockets only accept same-origin pages, so a website a LAN user visits cannot drive the Server through their browser.
 - Only the Server port is published by compose. Postgres stays on the compose network, and workers open no port.
 - Only the worker that claimed a Run can write to it.
-- By default each Run's agent runs in its own container that sees only the Run's checkout and that agent's login, with no Docker socket. `BUILDBEE_WORKER_ISOLATION=host` runs agents directly on the worker machine instead, with the worker user's files and logins.
+- By default each Run's agent runs in its own container that sees only the Run's checkout and that agent's login, with no Docker socket. `BUILDBEE_WORKER_ISOLATION=host` runs agents directly on the worker machine instead: sandboxed by bubblewrap where it is installed (the home hidden, only the checkout writable), otherwise with the worker user's files and logins.
+- A Project can make agents ask before acting (`agent_permissions: ask`): each request waits for a person's answer in `# decisions`.
+- Attachments are served so they cannot run as pages of the Server: only raster images inline, everything else as a sandboxed download.

@@ -191,7 +191,9 @@ function Agents({ presence, bots }: { presence?: Presence; bots: Roster["bots"] 
   const note =
     local.state === "running"
       ? local.isolation === "host"
-        ? "This server runs agents directly on its machine (no Docker)."
+        ? local.sandboxed
+          ? "This server runs agents on its machine, sandboxed: they see the system read-only and write only their checkout."
+          : "This server runs agents directly on its machine, unsandboxed: they can reach everything its user can. Install bubblewrap to sandbox them."
         : "This server runs agents in containers."
       : local.state === "starting"
         ? "Checking which agents this server can run…"

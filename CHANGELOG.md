@@ -20,6 +20,7 @@
 - Edit and delete your own messages (`PATCH`/`DELETE /v1/messages/{id}`): "(edited)" marks edits, a deleted message keeps its thread
 
 ### Added (agents)
+- Agents that run on a machine without Docker are sandboxed with bubblewrap when it is there (`BUILDBEE_WORKER_SANDBOX`): read-only system, hidden home, writes only to the checkout; `# status` says whether the Server's agents are sandboxed
 - Projects can make agents ask before acting (`agent_permissions: ask`, migration 0006): each request is a Decision the worker waits on (`POST /v1/runs/{id}/permission`, `GET /v1/decisions/{id}`); a Run that ends closes its questions
 - Per-Project agent images (`agent_image`, migration 0005): workers pull them on first use and check the Run's agent is in them
 

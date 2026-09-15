@@ -55,6 +55,9 @@ type Config struct {
 	// worker's user. The fake agent always runs in-process.
 	Isolation string
 	Container Container // settings for IsolationContainer
+	// Sandbox, in host isolation, runs agents under bubblewrap; nil runs
+	// them with the worker user's full access.
+	Sandbox *Sandbox
 	// Commands overrides how agents are started (see acp.Launch).
 	Commands map[string][]string
 	// RunTimeout stops a Run that takes longer (default 2h).
@@ -130,6 +133,9 @@ func New(cfg Config) (*Worker, error) {
 			return nil, fmt.Errorf("worker: %w", err)
 		}
 		cfg.Exec = cfg.Container.exec(cfg.Name, cfg.Commands)
+	}
+	if cfg.Exec == nil && cfg.Sandbox != nil {
+		cfg.Exec = cfg.Sandbox.exec(cfg.Commands)
 	}
 	if cfg.Exec == nil {
 		commands := cfg.Commands

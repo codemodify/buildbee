@@ -137,7 +137,7 @@ func run() error {
 			}
 		}
 		slog.Info("running agents on this machine", "worker", localCfg.Name, "agents", local.Agents(), "slots", localCfg.Slots)
-		svc.SetLocalWorker(core.LocalWorker{State: "running", Name: localCfg.Name, Isolation: localCfg.Isolation})
+		svc.SetLocalWorker(core.LocalWorker{State: "running", Name: localCfg.Name, Isolation: localCfg.Isolation, Sandboxed: local.Sandboxed()})
 		local.Run(ctx)
 	}()
 

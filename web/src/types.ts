@@ -252,6 +252,7 @@ export type LocalWorker = {
   reason?: string;
   name?: string;
   isolation?: "container" | "host" | string;
+  sandboxed?: boolean;
 };
 
 export type Presence = {
