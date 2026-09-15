@@ -115,3 +115,37 @@ func TestMissingFlags(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestRunStartMarksRunFailedWhenWorkerUnreachable(t *testing.T) {
+	var patched map[string]string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/tasks/t1/runs", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "r1", "task_id": "t1", "status": "pending"})
+	})
+	mux.HandleFunc("GET /v1/tasks/t1", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "t1", "title": "Ship"})
+	})
+	mux.HandleFunc("PATCH /v1/runs/r1", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&patched)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "r1", "status": patched["status"]})
+	})
+	mux.HandleFunc("POST /v1/tasks/t1/pr", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a failed Run must not record a PR")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close() // nothing listens here any more
+	t.Setenv("BUILDBEE_WORKER_URL", deadURL)
+
+	c := &client.Client{Base: srv.URL, HTTP: srv.Client(), Output: io.Discard}
+	err := run([]string{"run", "start", "--task", "t1", "--acp", "--agent", "claude"}, c)
+	if err == nil {
+		t.Fatal("expected an error when the worker is unreachable")
+	}
+	if patched["status"] != "failed" || !strings.Contains(patched["detail"], "worker") {
+		t.Fatalf("run must be marked failed with the reason, got %v", patched)
+	}
+}

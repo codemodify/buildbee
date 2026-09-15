@@ -85,14 +85,3 @@ func TestExecuteFakeACP(t *testing.T) {
 		t.Fatalf("status %q", out.Run.Status)
 	}
 }
-
-func TestStartRunStub(t *testing.T) {
-	s := NewSupervisor("", sandbox.FakeEngine{})
-	status, err := s.StartRun("run-placeholder")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status != StatusPending {
-		t.Fatalf("status: got %q want %q", status, StatusPending)
-	}
-}

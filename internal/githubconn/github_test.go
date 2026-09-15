@@ -1,9 +1,13 @@
 package githubconn
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+)
 
 func TestFakePR(t *testing.T) {
-	res, err := OpenDraftPR(nil, Options{Fake: true, TaskID: "aaaaaaaa-bbbb", Repo: "acme/buildbee"})
+	res, err := OpenDraftPR(context.Background(), Options{Fake: true, TaskID: "aaaaaaaa-bbbb", Repo: "acme/buildbee"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -12,12 +16,8 @@ func TestFakePR(t *testing.T) {
 	}
 }
 
-func TestMissingTokenRecordsFake(t *testing.T) {
-	res, err := OpenDraftPR(nil, Options{TaskID: "task1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Fake {
-		t.Fatal("expected fake")
+func TestMissingConfigIsAnError(t *testing.T) {
+	if _, err := OpenDraftPR(context.Background(), Options{TaskID: "task1"}); !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("got %v, want ErrNotConfigured", err)
 	}
 }

@@ -56,6 +56,31 @@ func TestUnknownPath(t *testing.T) {
 	}
 }
 
+func TestGitHubNotConfigured(t *testing.T) {
+	h := newTestMux(t)
+	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "No GitHub"}))
+	pid := proj["id"].(string)
+	task := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+pid+"/tasks?handoff=none", map[string]string{"title": "x"}))
+	tid := task["id"].(string)
+
+	for _, tc := range []struct{ path, body string }{
+		{"/v1/tasks/" + tid + "/pr", ""},
+		{"/v1/tasks/" + tid + "/pr", `{"title":"real please"}`},
+		{"/v1/projects/" + pid + "/issues/sync", `{}`},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "GITHUB_TOKEN") {
+			t.Fatalf("%s %q: got %d %s, want 503 naming GITHUB_TOKEN", tc.path, tc.body, rec.Code, rec.Body.String())
+		}
+	}
+	detail := decode[map[string]any](t, doJSON(t, h, http.MethodGet, "/v1/tasks/"+tid+"/detail", nil))
+	if arts, _ := detail["artifacts"].([]any); len(arts) != 0 {
+		t.Fatalf("no PR Artifact may be recorded without GitHub: %v", arts)
+	}
+}
+
 func TestCrossOriginWritesRefused(t *testing.T) {
 	h := newTestMux(t)
 	body := strings.NewReader(`{"name":"x"}`)

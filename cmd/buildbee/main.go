@@ -128,9 +128,9 @@ func runRun(args []string, c *client.Client) error {
 		}
 		return c.PrintJSON(out)
 	}
-	runtimeURL := os.Getenv("BUILDBEE_WORKER_URL")
-	if runtimeURL == "" {
-		runtimeURL = "http://127.0.0.1:8090"
+	workerURL := os.Getenv("BUILDBEE_WORKER_URL")
+	if workerURL == "" {
+		workerURL = "http://127.0.0.1:8090"
 	}
 	run, err := c.CreateRun(task)
 	if err != nil {
@@ -141,26 +141,13 @@ func runRun(args []string, c *client.Client) error {
 	if t, err := c.GetTask(task); err == nil {
 		title, _ = t["title"].(string)
 	}
-	out, err := c.RuntimeStart(runtimeURL, task, runID, repo, cmd, fake, acpMode, agent, title, notes)
+	out, err := c.WorkerStart(workerURL, task, runID, repo, cmd, fake, acpMode, agent, title, notes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "runtime unavailable (%v); falling back to fake\n", err)
-		if acpMode {
-			return c.PrintJSONFallbackACP(task, runID, agent)
+		// Record the truth: the Run did not execute. Never fall back to a fake success.
+		if _, uerr := c.UpdateRun(runID, "failed", "worker: "+err.Error()); uerr != nil {
+			fmt.Fprintf(os.Stderr, "also failed to mark run %s failed: %v\n", runID, uerr)
 		}
-		if _, err := c.UpdateRun(runID, "succeeded", "fake success (runtime fallback)"); err != nil {
-			return err
-		}
-		art, err := c.CreateArtifact(task, map[string]string{
-			"kind": "log", "name": "sandbox.log", "body": "fake sandbox fallback\n", "run_id": runID,
-		})
-		if err != nil {
-			return err
-		}
-		pr, err := c.OpenPR(task, true, runID)
-		if err != nil {
-			return err
-		}
-		return c.PrintJSON(map[string]any{"run": run, "artifact": art, "pr": pr, "fake": true})
+		return fmt.Errorf("run %s failed: %w", runID, err)
 	}
 	return c.PrintJSON(out)
 }

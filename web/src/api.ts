@@ -138,7 +138,7 @@ export const api = {
   syncIssues: (projectId: string) =>
     request<{ items: import("./types").Task[]; fake?: boolean }>(
       `/v1/projects/${projectId}/issues/sync`,
-      { method: "POST", body: JSON.stringify({ fake: true }) },
+      { method: "POST", body: "{}" },
     ),
   listRoutines: (projectId: string) =>
     request<{ items: import("./types").Routine[] }>(

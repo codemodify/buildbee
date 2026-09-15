@@ -182,16 +182,18 @@ func (c *Client) RunRoutine(id string) (map[string]any, error) {
 	return out, err
 }
 
-func (c *Client) RuntimeStart(runtimeURL, taskID, runID, repoURL, cmd string, fake, acpMode bool, agent, title, notes string) (map[string]any, error) {
-	rt := &Client{Base: strings.TrimRight(runtimeURL, "/"), HTTP: c.HTTP, Output: c.Output}
+// WorkerStart asks the worker at workerURL to execute an existing Run.
+func (c *Client) WorkerStart(workerURL, taskID, runID, repoURL, cmd string, fake, acpMode bool, agent, title, notes string) (map[string]any, error) {
+	wk := &Client{Base: strings.TrimRight(workerURL, "/"), HTTP: c.HTTP, Output: c.Output}
 	var out map[string]any
-	err := rt.do(http.MethodPost, "/runs", map[string]any{
+	err := wk.do(http.MethodPost, "/runs", map[string]any{
 		"task_id": taskID, "run_id": runID, "repo_url": repoURL, "command": cmd,
-		"fake": fake, "fake_pr": true, "acp": acpMode, "agent": agent, "title": title, "notes": notes,
+		"fake": fake, "fake_pr": fake, "acp": acpMode, "agent": agent, "title": title, "notes": notes,
 	}, &out)
 	return out, err
 }
 
+// FakeACPRun records a FakeACP Run end to end without a worker (--acp --agent fake).
 func (c *Client) FakeACPRun(taskID, agent string) (map[string]any, error) {
 	run, err := c.CreateRun(taskID)
 	if err != nil {
@@ -201,18 +203,8 @@ func (c *Client) FakeACPRun(taskID, agent string) (map[string]any, error) {
 	return c.completeFakeACP(taskID, runID, agent)
 }
 
-func (c *Client) PrintJSONFallbackACP(taskID, runID, agent string) error {
-	out, err := c.completeFakeACP(taskID, runID, agent)
-	if err != nil {
-		return err
-	}
-	return c.PrintJSON(out)
-}
-
 func (c *Client) completeFakeACP(taskID, runID, agent string) (map[string]any, error) {
-	if agent == "" || agent == "auto" {
-		agent = "fake"
-	}
+	agent = "fake"
 	title := ""
 	if t, err := c.GetTask(taskID); err == nil {
 		title, _ = t["title"].(string)

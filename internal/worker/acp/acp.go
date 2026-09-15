@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -52,24 +53,29 @@ type Config struct {
 	WorkDir string
 }
 
-// Detect returns the agent binary name to run. "fake" if none are available.
-func Detect(preferred string) string {
+// ErrNoAgent means the requested agent CLI is not installed on this worker.
+var ErrNoAgent = errors.New("acp: agent not installed")
+
+// Detect resolves the agent binary to run. "fake" selects FakeACP explicitly;
+// a named agent must be on PATH; "auto" (or empty) picks the first installed
+// KnownAgent. A missing agent is an error — never a silent FakeACP.
+func Detect(preferred string) (string, error) {
 	preferred = strings.ToLower(strings.TrimSpace(preferred))
 	if preferred == "fake" {
-		return "fake"
+		return "fake", nil
 	}
 	if preferred != "" && preferred != "auto" {
-		if _, err := exec.LookPath(preferred); err == nil {
-			return preferred
+		if _, err := exec.LookPath(preferred); err != nil {
+			return "", fmt.Errorf("%w: %s is not on PATH", ErrNoAgent, preferred)
 		}
-		return "fake"
+		return preferred, nil
 	}
 	for _, name := range KnownAgents {
 		if _, err := exec.LookPath(name); err == nil {
-			return name
+			return name, nil
 		}
 	}
-	return "fake"
+	return "", fmt.Errorf("%w: none of %s is on PATH", ErrNoAgent, strings.Join(KnownAgents, ", "))
 }
 
 // Prompt builds the text sent to the agent from a Task + Handoff notes.
@@ -172,12 +178,15 @@ func firstLine(s string) string {
 }
 
 // Open returns a Session for the resolved agent (CLI or FakeACP).
-func Open(cfg Config) (Session, string) {
-	name := Detect(cfg.Agent)
-	if name == "fake" {
-		return &FakeSession{Agent: "fake"}, "fake"
+func Open(cfg Config) (Session, string, error) {
+	name, err := Detect(cfg.Agent)
+	if err != nil {
+		return nil, "", err
 	}
-	return &CLISession{Bin: name, WorkDir: cfg.WorkDir}, name
+	if name == "fake" {
+		return &FakeSession{Agent: "fake"}, "fake", nil
+	}
+	return &CLISession{Bin: name, WorkDir: cfg.WorkDir}, name, nil
 }
 
 // Run starts a session, sends the prompt, and collects output (no live events).
@@ -187,7 +196,10 @@ func Run(ctx context.Context, cfg Config, prompt string) (agent, output string, 
 
 // Stream runs the agent and invokes emit for each token, tool, or log line.
 func Stream(ctx context.Context, cfg Config, prompt string, emitFn Handler) (agent, output string, err error) {
-	name := Detect(cfg.Agent)
+	name, err := Detect(cfg.Agent)
+	if err != nil {
+		return "", "", err
+	}
 	if name == "fake" {
 		out, err := StreamFake(ctx, name, prompt, emitFn)
 		return name, out, err
@@ -292,8 +304,8 @@ func (s *CLISession) Send(ctx context.Context, prompt string) error {
 		defer wg.Done()
 		scanStream(stderr, func(line string) { writeLine("log", "stderr", line) })
 	}()
+	wg.Wait() // drain both pipes first: Wait closes them and loses unread output
 	s.err = cmd.Wait()
-	wg.Wait()
 	s.out = buf.String()
 	s.sent = true
 	if s.err != nil && s.out == "" {
@@ -302,11 +314,40 @@ func (s *CLISession) Send(ctx context.Context, prompt string) error {
 	return nil
 }
 
+// maxLine caps one line of agent output; longer lines are truncated.
+const maxLine = 1 << 20
+
+// scanStream calls each for every line until r is exhausted. A line longer
+// than maxLine is truncated with a marker and the rest of it discarded, so
+// the pipe keeps draining and the agent never blocks on a full pipe.
 func scanStream(r io.Reader, each func(string)) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		each(sc.Text() + "\n")
+	br := bufio.NewReaderSize(r, 64*1024)
+	var line []byte
+	truncated := false
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if len(line)+len(chunk) > maxLine {
+			if room := maxLine - len(line); room > 0 {
+				line = append(line, chunk[:room]...)
+			}
+			truncated = true
+		} else {
+			line = append(line, chunk...)
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if len(line) > 0 {
+			text := strings.TrimSuffix(string(line), "\n")
+			if truncated {
+				text += " …[line truncated]"
+			}
+			each(text + "\n")
+		}
+		line, truncated = line[:0], false
+		if err != nil {
+			return
+		}
 	}
 }
 

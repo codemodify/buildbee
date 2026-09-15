@@ -30,13 +30,10 @@ type Supervisor struct {
 	Server *notify.Client
 }
 
+// NewSupervisor reports to the Server at serverURL; a nil engine means Docker.
 func NewSupervisor(serverURL string, engine sandbox.Engine) *Supervisor {
 	if engine == nil {
-		if sandbox.Available() {
-			engine = sandbox.DockerEngine{}
-		} else {
-			engine = sandbox.FakeEngine{Logs: "docker unavailable; fake Sandbox"}
-		}
+		engine = sandbox.DockerEngine{}
 	}
 	return &Supervisor{Engine: engine, Server: notify.New(serverURL)}
 }
@@ -47,7 +44,7 @@ type Request struct {
 	RepoURL string `json:"repo_url"`
 	Command string `json:"command"`
 	Fake    bool   `json:"fake"`
-	FakePR  bool   `json:"fake_pr"`
+	FakePR  bool   `json:"fake_pr"` // record a fake PR Artifact (tests/demos only)
 	ACP     bool   `json:"acp"`
 	Agent   string `json:"agent"`
 	Title   string `json:"title"`
@@ -121,7 +118,7 @@ func (s *Supervisor) Execute(ctx context.Context, req Request) (*Outcome, error)
 	}
 
 	out := &Outcome{Run: run, Logs: res.Logs, Artifact: art, UsedFake: usedFake}
-	if req.FakePR || status == StatusSucceeded {
+	if req.FakePR {
 		pr, err := s.Server.OpenPR(req.TaskID, map[string]any{
 			"fake":   true,
 			"run_id": run.ID,
@@ -157,6 +154,9 @@ func (s *Supervisor) executeACP(ctx context.Context, req Request, run *notify.Ru
 		_, perr := s.Server.PostRunEvent(run.ID, ev.Kind, ev.Payload)
 		return perr
 	})
+	if name == "" {
+		name = agent
+	}
 	status := StatusSucceeded
 	detail := "acp " + name + " ok"
 	if err != nil {
@@ -177,7 +177,7 @@ func (s *Supervisor) executeACP(ctx context.Context, req Request, run *notify.Ru
 		return nil, aerr
 	}
 	out := &Outcome{Run: run, Logs: logs, Artifact: art, UsedFake: name == "fake", ACPAgent: name}
-	if req.FakePR || status == StatusSucceeded {
+	if req.FakePR {
 		pr, err := s.Server.OpenPR(req.TaskID, map[string]any{
 			"fake":   true,
 			"run_id": run.ID,
@@ -192,10 +192,4 @@ func (s *Supervisor) executeACP(ctx context.Context, req Request, run *notify.Ru
 		return out, err
 	}
 	return out, nil
-}
-
-// StartRun is kept for older callers; it only returns pending.
-func (s *Supervisor) StartRun(runID string) (Status, error) {
-	_ = runID
-	return StatusPending, nil
 }

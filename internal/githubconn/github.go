@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,7 +52,12 @@ func ListOpenIssues(ctx context.Context, token, repo string) ([]Issue, error) {
 	return issues, err
 }
 
-// OpenDraftPR creates a branch + file commit + draft PR, or a fake URL.
+// ErrNotConfigured means no token or repo was supplied for a real call.
+var ErrNotConfigured = errors.New("GitHub is not configured: set GITHUB_TOKEN and GITHUB_REPO")
+
+// OpenDraftPR creates a branch + file commit + draft PR. opt.Fake records a
+// fake URL instead (tests and demos); without it, a missing token or repo is
+// ErrNotConfigured rather than a made-up link.
 func OpenDraftPR(ctx context.Context, opt Options) (*Result, error) {
 	if opt.Title == "" {
 		opt.Title = "BuildBee Artifact"
@@ -66,23 +72,11 @@ func OpenDraftPR(ctx context.Context, opt Options) (*Result, error) {
 		opt.Branch = "buildbee/" + shortID(opt.TaskID, opt.RunID)
 	}
 
-	if opt.Fake || opt.Token == "" || opt.Repo == "" {
-		if !opt.Fake && opt.Token == "" {
-			return &Result{
-				URL:   fakeURL(opt.Repo, opt.Branch),
-				Fake:  true,
-				Repo:  opt.Repo,
-				Error: "GITHUB_TOKEN missing; recorded fake PR URL",
-			}, nil
-		}
-		if !opt.Fake && opt.Repo == "" {
-			return &Result{
-				URL:   fakeURL("example/repo", opt.Branch),
-				Fake:  true,
-				Error: "GITHUB_REPO missing; recorded fake PR URL",
-			}, nil
-		}
+	if opt.Fake {
 		return &Result{URL: fakeURL(opt.Repo, opt.Branch), Fake: true, Repo: opt.Repo}, nil
+	}
+	if opt.Token == "" || opt.Repo == "" {
+		return nil, ErrNotConfigured
 	}
 
 	url, err := createDraftPR(ctx, opt)

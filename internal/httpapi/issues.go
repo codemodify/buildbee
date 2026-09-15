@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -16,7 +17,10 @@ func (s *Server) syncIssues(w http.ResponseWriter, r *http.Request) {
 		Repo string `json:"repo"`
 		Fake bool   `json:"fake"`
 	}
-	_ = decodeJSON(r, &in)
+	if err := decodeJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
 	projectID := r.PathValue("projectID")
 	if _, err := s.store.GetProject(r.Context(), projectID); err != nil {
 		writeError(w, err)
@@ -28,7 +32,11 @@ func (s *Server) syncIssues(w http.ResponseWriter, r *http.Request) {
 		repo = s.opts.GitHub.Repo
 	}
 	var items []models.Task
-	if in.Fake || token == "" || repo == "" {
+	if !in.Fake && (token == "" || repo == "") {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": githubconn.ErrNotConfigured.Error()})
+		return
+	}
+	if in.Fake {
 		samples := []struct {
 			n int
 			t string

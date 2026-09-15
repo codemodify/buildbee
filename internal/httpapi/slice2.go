@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -162,8 +163,9 @@ func (s *Server) openPR(w http.ResponseWriter, r *http.Request) {
 		RunID   string `json:"run_id"`
 		Repo    string `json:"repo"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
-		in.Fake = true
+	if err := decodeJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
 	}
 	taskID := r.PathValue("taskID")
 	if _, err := s.store.GetTask(r.Context(), taskID); err != nil {
@@ -179,13 +181,21 @@ func (s *Server) openPR(w http.ResponseWriter, r *http.Request) {
 		Title: in.Title, Body: in.Body, Path: in.Path, Content: in.Content,
 		Fake: in.Fake, TaskID: taskID, RunID: in.RunID,
 	})
+	if errors.Is(err, githubconn.ErrNotConfigured) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
+	name := "Repo draft PR"
+	if res.Fake {
+		name = "Fake draft PR (test)"
+	}
 	a, err := s.store.CreateArtifact(r.Context(), models.Artifact{
 		TaskID: taskID, RunID: in.RunID, Kind: "pr",
-		Name: "Repo draft PR", URL: res.URL, Body: res.Error,
+		Name: name, URL: res.URL, Body: res.Error,
 	})
 	if err != nil {
 		writeError(w, err)
