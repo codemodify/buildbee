@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased — fixes from the adversarial review
+## Unreleased — Phase 4d (usage, cleanup)
+
+### Added
+- Runs keep `context_tokens`, `context_size`, `cost` and `cost_currency` from agents' usage reports; `GET /v1/usage`, `GET /v1/projects/{id}/usage`, `buildbee usage`
+
+### Removed
+- `POST /v1/tasks/{id}/pr` (single-file draft PRs from the Server). Workers open and merge PRs with their own `gh` login
+
+### Changed
+- Roadmap: desktop (Linux, Windows, macOS) and mobile (Android, iOS) apps as Phase 6, one Tauri 2 app on the web UI
+
+## Fixes from the adversarial review
 
 ### Security
 - An agent could get code run on the worker host through git metadata (hooks, `core.fsmonitor`, a redirected `.git`) in the mirror mounted into its container. Agents now work in a repo of their own that borrows the mirror's objects read-only; the worker commits their files from a worktree only it uses, and runs git with hooks and fsmonitor off

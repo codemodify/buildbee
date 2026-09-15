@@ -94,7 +94,7 @@ When a Project has a `repo_url` (`PATCH /v1/projects/{id}`), every Run works in 
 
 The worker pushes with its own git credentials (SSH keys, credential helper) and opens pull requests with its own `gh` login, the same way agents use their own logins. If the push fails, the Run fails and the branch stays in the worker's mirror so nothing is lost. A Run that changes nothing succeeds without a branch.
 
-Git runs without prompts and only over `file`, `git`, `http`, `https` and `ssh`. The Server refuses repo URLs git could read as an option or a remote helper.
+Pull requests are opened and merged by workers only; the Server holds no GitHub write access. Git runs without prompts and only over `file`, `git`, `http`, `https` and `ssh`. The Server refuses repo URLs git could read as an option or a remote helper.
 
 ## Agent logins
 

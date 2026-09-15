@@ -80,7 +80,6 @@ func TestErrorStatuses(t *testing.T) {
 		{"bad json", "POST", "/v1/projects", `{"name":`, 400},
 		{"missing name", "POST", "/v1/projects", `{}`, 400},
 		{"bad status", "PATCH", "/v1/tasks/" + task["id"].(string), `{"status":"Done "}`, 400},
-		{"github unconfigured", "POST", "/v1/tasks/" + task["id"].(string) + "/pr", `{}`, 503},
 		{"too large", "POST", "/v1/projects", `{"name":"` + strings.Repeat("x", 2<<10) + `"}`, 413},
 		{"bad cursor", "GET", "/v1/projects/" + p.ID + "/activity?before=-1", "", 400},
 	} {

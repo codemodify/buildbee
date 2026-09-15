@@ -24,7 +24,7 @@ The owner's goal is different: a Slack/Discord-style workspace where people and 
 | **Agents first** | `claude-agent-acp`, `goose acp` and `codex-acp`; OpenCode after. |
 | **Repos** | GitHub, with a per-Project repo and token. |
 | **Autonomy** | Agents commit and, by default, merge when CI is green and the Sentry review agent approves. Each Project can require human approval instead. |
-| **Desktop** | Parked. The browser on the LAN is the client. |
+| **Apps** | The browser on the LAN is the first client. Desktop (Linux, Windows, macOS) and mobile (Android, iOS) apps follow the chat UI: one Tauri 2 app wrapping `web/`, pointed at a Server on the LAN, plus the web UI installable as a PWA. (Updated 2026-09-15: was "Desktop parked".) |
 | **Fakes** | FakeACP, the fake Sandbox, fake PRs and sample Issues run only when explicitly requested. Missing configuration is an error, never a fake success. |
 
 ## Consequences

@@ -62,6 +62,11 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Builds continue the Task's branch and push with a lease; merges use `gh pr merge` or `git merge`
 - Project `instructions` reach every agent; Runs report the agent's closing message as `summary`
 
+## Phase 4d — Usage and cleanup (done)
+
+- Each Run keeps its peak context and the session cost agents report; `GET /v1/usage` and `/v1/projects/{id}/usage` sum them by agent and Project (`buildbee usage`)
+- The Server-side single-file draft PR endpoint is gone: workers open and merge PRs with their own `gh` login; the Server's GitHub token only syncs Issues
+
 ## Phase 4c — Routines that do work (done)
 
 - A Routine has a prompt; each firing opens a Task with it and hands it to Scout (or a chosen Bot), which starts a Run
@@ -84,13 +89,22 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Per-Project images
 - Permission requests as Decisions for Projects that want them, answers flowing back to the agent; mid-turn steering from chat
 - Logs and large Artifacts in object storage
-- Retire the Server-side single-file draft PR endpoint (`POST /v1/tasks/{id}/pr`) in favour of worker PRs
 
 ## Phase 4 — Autonomy, remaining
 
 - Steering from chat threads (the API and CLI exist; the UI comes with Phase 2)
-- Token and cost tracking from `usage` events
 
 ## Phase 5 — Scale and operations
 
 - Dashboard across all Projects and Runs, metrics, retention, backups, load test with dozens of concurrent Runs
+
+## Phase 6 — Desktop and mobile apps
+
+One app for every platform, built on the Phase 2 web UI, so every client gets the same features at once:
+
+- Tauri 2 app from `desktop/`: Linux (AppImage, .deb, .rpm), Windows (MSI), macOS (universal .dmg), Android (APK/AAB) and iOS, wrapping `web/` and talking to a Server on the LAN
+- First run asks for the Server's address (or finds it with mDNS on the LAN); several Servers can be saved
+- Native notifications for mentions, Decisions to answer and failed Runs; a tray/menu-bar badge on desktop
+- The web UI is also an installable PWA, for phones and machines without the app
+- CI builds and signs the packages; releases carry checksums
+- Needs, before shipping outside a trusted LAN: authentication (ADR 0002 keeps it out for now), TLS to the Server

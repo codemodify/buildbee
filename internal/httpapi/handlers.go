@@ -340,6 +340,12 @@ func (s *Server) claimRun(w http.ResponseWriter, r *http.Request) {
 	respond(s, w, http.StatusOK, c, err)
 }
 
+func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	u, err := s.core.Usage(r.Context(), r.PathValue("id"), days)
+	respond(s, w, http.StatusOK, u, err)
+}
+
 func (s *Server) steerRun(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Text      string `json:"text"`
@@ -379,15 +385,6 @@ func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request) {
 	a, err := s.core.Artifact(r.Context(), r.PathValue("id"))
 	respond(s, w, http.StatusOK, a, err)
-}
-
-func (s *Server) openPR(w http.ResponseWriter, r *http.Request) {
-	var in core.NewPR
-	if !s.decode(w, r, &in) {
-		return
-	}
-	pr, err := s.core.OpenPR(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
-	respond(s, w, http.StatusCreated, pr, err)
 }
 
 func (s *Server) listPipelines(w http.ResponseWriter, r *http.Request) {

@@ -2,11 +2,9 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/codemodify/buildbee/internal/githubconn"
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/google/uuid"
@@ -280,6 +278,10 @@ func (s *Service) AppendRunEvent(ctx context.Context, a Actor, runID, kind strin
 		}
 		out = ev
 		w.emit("run:"+runID, int64(ev.Seq), "run_event", ev)
+		if k == models.RunEventUsage {
+			used, size, cost, currency := usageOf(payload)
+			return w.st.RecordUsage(ctx, runID, used, size, cost, currency)
+		}
 		return nil
 	})
 	return out, err
@@ -326,6 +328,32 @@ func (s *Service) SteerRun(ctx context.Context, a Actor, runID, message string, 
 			map[string]any{"task_id": r.TaskID, "text": truncate(msg, 300), "interrupt": interrupt})
 	})
 	return out, err
+}
+
+// usageOf reads an ACP usage report: {used, size, cost: {amount, currency}}.
+func usageOf(p map[string]any) (used, size int64, cost float64, currency string) {
+	num := func(v any) float64 { f, _ := v.(float64); return max(f, 0) }
+	used, size = int64(num(p["used"])), int64(num(p["size"]))
+	if c, ok := p["cost"].(map[string]any); ok {
+		cost = num(c["amount"])
+		if cur, _ := c["currency"].(string); len(cur) <= 8 {
+			currency = strings.ToUpper(cur)
+		}
+	}
+	return used, size, cost, currency
+}
+
+// Usage sums what Runs used in the last days, for one Project or ("") all.
+func (s *Service) Usage(ctx context.Context, projectID string, days int) (*models.Usage, error) {
+	if days <= 0 || days > 3660 {
+		days = 30
+	}
+	if projectID != "" {
+		if _, err := s.st.GetProject(ctx, projectID); err != nil {
+			return nil, err
+		}
+	}
+	return s.st.Usage(ctx, projectID, s.now().AddDate(0, 0, -days))
 }
 
 // RunEvents returns a Run's events after seq `after`.
@@ -412,56 +440,6 @@ func (s *Service) Artifacts(ctx context.Context, taskID string) ([]models.Artifa
 		return nil, err
 	}
 	return s.st.ListArtifacts(ctx, taskID)
-}
-
-// NewPR asks for a draft PR from a Task. Fake records a fake link (tests and
-// demos only).
-type NewPR struct {
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	Path    string `json:"path"`
-	Content string `json:"content"`
-	Fake    bool   `json:"fake"`
-	RunID   string `json:"run_id"`
-	Repo    string `json:"repo"`
-}
-
-// PROpened is the Artifact recording a draft PR and GitHub's answer.
-type PROpened struct {
-	Artifact models.Artifact    `json:"artifact"`
-	PR       *githubconn.Result `json:"pr"`
-}
-
-// OpenPR opens a draft PR for a Task on the configured Repo and records it
-// as an Artifact. Without GitHub configuration it fails with ErrUnavailable.
-func (s *Service) OpenPR(ctx context.Context, a Actor, taskID string, in NewPR) (*PROpened, error) {
-	task, err := s.st.GetTask(ctx, taskID, false)
-	if err != nil {
-		return nil, err
-	}
-	repo := strings.TrimSpace(in.Repo)
-	if repo == "" {
-		repo = s.github.Repo
-	}
-	res, err := githubconn.OpenDraftPR(ctx, githubconn.Options{
-		Token: s.github.Token, Repo: repo, Title: in.Title, Body: in.Body, Path: in.Path, Content: in.Content,
-		Fake: in.Fake, TaskID: taskID, RunID: in.RunID,
-	})
-	if errors.Is(err, githubconn.ErrNotConfigured) {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: github: %v", ErrUnavailable, err)
-	}
-	name := "Repo draft PR"
-	if res.Fake {
-		name = "Fake draft PR (test)"
-	}
-	art, err := s.CreateArtifact(ctx, a, task.ID, NewArtifact{Kind: "pr", Name: name, URL: res.URL, Body: res.Error, RunID: in.RunID})
-	if err != nil {
-		return nil, err
-	}
-	return &PROpened{Artifact: *art, PR: res}, nil
 }
 
 // --- pipelines ---

@@ -1,11 +1,10 @@
-// Package githubconn talks to GitHub as a Repo / Issues / Pipelines source.
-// v0 can open a draft PR (or record a fake PR URL Artifact when no token).
+// Package githubconn reads a GitHub repository's open Issues for Issue sync.
+// Pull requests are opened and merged by workers, with their own gh login.
 package githubconn
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,25 +14,8 @@ import (
 	"time"
 )
 
-type Options struct {
-	Token   string
-	Repo    string // owner/name
-	Title   string
-	Body    string
-	Branch  string
-	Path    string
-	Content string
-	Fake    bool
-	TaskID  string
-	RunID   string
-}
-
-type Result struct {
-	URL   string `json:"url"`
-	Fake  bool   `json:"fake"`
-	Repo  string `json:"repo,omitempty"`
-	Error string `json:"error,omitempty"`
-}
+// ErrNotConfigured means no token or repo was supplied for a real call.
+var ErrNotConfigured = errors.New("GitHub is not configured: set GITHUB_TOKEN and GITHUB_REPO")
 
 type Issue struct {
 	Number  int    `json:"number"`
@@ -50,114 +32,6 @@ func ListOpenIssues(ctx context.Context, token, repo string) ([]Issue, error) {
 	err := ghJSON(ctx, &http.Client{Timeout: 20 * time.Second}, token, http.MethodGet,
 		"/repos/"+owner+"/"+name+"/issues?state=open&per_page=50", nil, &issues)
 	return issues, err
-}
-
-// ErrNotConfigured means no token or repo was supplied for a real call.
-var ErrNotConfigured = errors.New("GitHub is not configured: set GITHUB_TOKEN and GITHUB_REPO")
-
-// OpenDraftPR creates a branch + file commit + draft PR. opt.Fake records a
-// fake URL instead (tests and demos); without it, a missing token or repo is
-// ErrNotConfigured rather than a made-up link.
-func OpenDraftPR(ctx context.Context, opt Options) (*Result, error) {
-	if opt.Title == "" {
-		opt.Title = "BuildBee Artifact"
-	}
-	if opt.Path == "" {
-		opt.Path = "buildbee/artifact.md"
-	}
-	if opt.Content == "" {
-		opt.Content = "# BuildBee\n\nRecorded from a Run.\n"
-	}
-	if opt.Branch == "" {
-		opt.Branch = "buildbee/" + shortID(opt.TaskID, opt.RunID)
-	}
-
-	if opt.Fake {
-		return &Result{URL: fakeURL(opt.Repo, opt.Branch), Fake: true, Repo: opt.Repo}, nil
-	}
-	if opt.Token == "" || opt.Repo == "" {
-		return nil, ErrNotConfigured
-	}
-
-	url, err := createDraftPR(ctx, opt)
-	if err != nil {
-		return nil, err
-	}
-	return &Result{URL: url, Repo: opt.Repo}, nil
-}
-
-func fakeURL(repo, branch string) string {
-	if repo == "" {
-		repo = "example/buildbee"
-	}
-	return fmt.Sprintf("https://github.com/%s/pull/fake-%s", strings.Trim(repo, "/"), strings.ReplaceAll(branch, "/", "-"))
-}
-
-func shortID(taskID, runID string) string {
-	id := runID
-	if id == "" {
-		id = taskID
-	}
-	if id == "" {
-		return fmt.Sprintf("%d", time.Now().Unix())
-	}
-	if len(id) > 8 {
-		return id[:8]
-	}
-	return id
-}
-
-func createDraftPR(ctx context.Context, opt Options) (string, error) {
-	owner, name, ok := strings.Cut(opt.Repo, "/")
-	if !ok {
-		return "", fmt.Errorf("GITHUB_REPO must be owner/name")
-	}
-	client := &http.Client{Timeout: 20 * time.Second}
-
-	var repo struct {
-		DefaultBranch string `json:"default_branch"`
-	}
-	if err := ghJSON(ctx, client, opt.Token, http.MethodGet, "/repos/"+owner+"/"+name, nil, &repo); err != nil {
-		return "", err
-	}
-	refPath := "/repos/" + owner + "/" + name + "/git/ref/heads/" + repo.DefaultBranch
-	var ref struct {
-		Object struct {
-			SHA string `json:"sha"`
-		} `json:"object"`
-	}
-	if err := ghJSON(ctx, client, opt.Token, http.MethodGet, refPath, nil, &ref); err != nil {
-		return "", err
-	}
-	createRef := map[string]string{
-		"ref": "refs/heads/" + opt.Branch,
-		"sha": ref.Object.SHA,
-	}
-	if err := ghJSON(ctx, client, opt.Token, http.MethodPost, "/repos/"+owner+"/"+name+"/git/refs", createRef, nil); err != nil {
-		return "", err
-	}
-	putFile := map[string]any{
-		"message": opt.Title,
-		"content": base64.StdEncoding.EncodeToString([]byte(opt.Content)),
-		"branch":  opt.Branch,
-	}
-	if err := ghJSON(ctx, client, opt.Token, http.MethodPut, "/repos/"+owner+"/"+name+"/contents/"+opt.Path, putFile, nil); err != nil {
-		return "", err
-	}
-	prBody := map[string]any{
-		"title": opt.Title,
-		"body":  opt.Body,
-		"head":  opt.Branch,
-		"base":  repo.DefaultBranch,
-		"draft": true,
-	}
-	var pr struct {
-		HTMLURL string `json:"html_url"`
-	}
-	if err := ghJSON(ctx, client, opt.Token, http.MethodPost, "/repos/"+owner+"/"+name+"/pulls", prBody, &pr); err != nil {
-		return "", err
-	}
-	return pr.HTMLURL, nil
 }
 
 func ghJSON(ctx context.Context, client *http.Client, token, method, path string, body any, dest any) error {

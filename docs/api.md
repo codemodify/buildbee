@@ -48,7 +48,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `POST /v1/worker/claim` | workers: `{agents, wait_seconds ≤ 30}` → `200 {run, task, project, bot, handoffs}` or `204` |
 | `POST /v1/runs/{id}/heartbeat` | workers: renew the 60 s lease; returns the Run (status `canceled` means stop) |
 | `GET/POST /v1/tasks/{id}/artifacts`, `GET /v1/artifacts/{id}` | listings carry `size`; fetch one for its `body` |
-| `POST /v1/tasks/{id}/pr` | draft PR on the configured Repo (`503` without `GITHUB_TOKEN`/`GITHUB_REPO`) |
+| `GET /v1/usage?days=30`, `GET /v1/projects/{id}/usage?days=30` | Runs, cost (by currency) and context tokens, by agent and by Project, as agents reported them |
 | `GET/POST /v1/tasks/{id}/pipelines`, `PATCH /v1/pipelines/{id}` | CI checks; a failure notifies every Person |
 | `POST /v1/projects/{id}/issues/sync` | import open Issues as Tasks (`503` without GitHub) |
 | `GET/POST /v1/projects/{id}/routines`, `PATCH /v1/routines/{id}`, `POST /v1/routines/{id}/run` | Routines `{name, prompt, schedule, enabled, bot_member_id}`: each firing opens a Task with `prompt` for the Bot ([autopilot.md](autopilot.md#routines)); fire now |

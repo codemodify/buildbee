@@ -45,6 +45,12 @@ func run(args []string, c *client.Client) error {
 		return runRun(args[1:], c)
 	case "routine":
 		return runRoutine(args[1:], c)
+	case "usage":
+		out, err := c.Usage(flagValue(args[1:], "project"), flagValue(args[1:], "days"))
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -324,6 +330,7 @@ Usage:
   buildbee run show --id ID
   buildbee run cancel --id ID
   buildbee run steer --id ID --text TEXT [--interrupt]
+  buildbee usage [--project ID] [--days 30]
   buildbee routine list --project ID
   buildbee routine create --project ID --name NAME --prompt TEXT [--schedule 24h] [--bot MEMBER_ID] [--enabled]
   buildbee routine run --id ID

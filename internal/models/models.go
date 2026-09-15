@@ -409,27 +409,32 @@ type Activity struct {
 }
 
 type Run struct {
-	ID          string     `json:"id"`
-	TaskID      string     `json:"task_id"`
-	ProjectID   string     `json:"project_id"`
-	BotMemberID string     `json:"bot_member_id,omitempty"`
-	Status      RunStatus  `json:"status"`
-	Kind        RunKind    `json:"kind"`
-	Detail      string     `json:"detail"`
-	Summary     string     `json:"summary,omitempty"`
-	Branch      string     `json:"branch,omitempty"`
-	Commit      string     `json:"commit,omitempty"`
-	PRURL       string     `json:"pr_url,omitempty"`
-	Verdict     string     `json:"verdict,omitempty"`
-	Agent       string     `json:"agent,omitempty"`
-	Prompt      string     `json:"prompt,omitempty"`
-	Worker      string     `json:"worker,omitempty"`
-	LeaseUntil  *time.Time `json:"lease_until,omitempty"`
-	Attempts    int        `json:"attempts"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	ProjectID   string    `json:"project_id"`
+	BotMemberID string    `json:"bot_member_id,omitempty"`
+	Status      RunStatus `json:"status"`
+	Kind        RunKind   `json:"kind"`
+	Detail      string    `json:"detail"`
+	Summary     string    `json:"summary,omitempty"`
+	Branch      string    `json:"branch,omitempty"`
+	Commit      string    `json:"commit,omitempty"`
+	PRURL       string    `json:"pr_url,omitempty"`
+	Verdict     string    `json:"verdict,omitempty"`
+	// Usage, as the agent reported it: peak context and session cost.
+	ContextTokens int64      `json:"context_tokens,omitempty"`
+	ContextSize   int64      `json:"context_size,omitempty"`
+	Cost          float64    `json:"cost,omitempty"`
+	CostCurrency  string     `json:"cost_currency,omitempty"`
+	Agent         string     `json:"agent,omitempty"`
+	Prompt        string     `json:"prompt,omitempty"`
+	Worker        string     `json:"worker,omitempty"`
+	LeaseUntil    *time.Time `json:"lease_until,omitempty"`
+	Attempts      int        `json:"attempts"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 }
 
 // RunKind is what a Run is for.
@@ -584,4 +589,22 @@ type Claim struct {
 	// Seq is the Run's last event when it was claimed; steering messages
 	// after it are for the worker to pass on.
 	Seq int `json:"seq"`
+}
+
+// Usage sums what Runs used over a period.
+type Usage struct {
+	Since     time.Time          `json:"since"`
+	Runs      int                `json:"runs"`
+	Cost      map[string]float64 `json:"cost"` // by currency
+	ByAgent   []UsageRow         `json:"by_agent"`
+	ByProject []UsageRow         `json:"by_project,omitempty"`
+}
+
+// UsageRow is one group of a Usage summary.
+type UsageRow struct {
+	Key           string             `json:"key"` // agent name or Project ID
+	Name          string             `json:"name,omitempty"`
+	Runs          int                `json:"runs"`
+	Cost          map[string]float64 `json:"cost"`
+	ContextTokens int64              `json:"context_tokens"` // sum of each Run's peak
 }

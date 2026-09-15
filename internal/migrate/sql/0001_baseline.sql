@@ -165,6 +165,10 @@ CREATE TABLE runs (
     commit TEXT NOT NULL DEFAULT '',  -- build: the commit pushed; review: the one reviewed; merge: the one to merge
     pr_url TEXT NOT NULL DEFAULT '',
     verdict TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes')),
+    context_tokens BIGINT NOT NULL DEFAULT 0,  -- the most context the agent used
+    context_size BIGINT NOT NULL DEFAULT 0,    -- its context window
+    cost DOUBLE PRECISION NOT NULL DEFAULT 0,  -- the session's cost, as the agent reported it
+    cost_currency TEXT NOT NULL DEFAULT '',
     agent TEXT NOT NULL DEFAULT '',   -- '' = any agent the claiming worker offers
     prompt TEXT NOT NULL DEFAULT '',  -- what the agent is asked to do
     worker TEXT NOT NULL DEFAULT '',  -- the worker that claimed the Run

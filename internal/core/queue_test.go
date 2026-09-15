@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -290,5 +291,42 @@ func TestClaimsShareWorkersAcrossProjects(t *testing.T) {
 	bad := -1
 	if _, err := f.s.UpdateProject(f.ctx, ada, busy.ID, ProjectPatch{MaxRuns: &bad}); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("negative max_runs: %v", err)
+	}
+}
+
+func TestUsageIsTrackedPerRunAndSummed(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Spend")
+	w := WorkerActor("w1")
+	for i, reports := range [][]map[string]any{
+		{{"used": 5000.0, "size": 200000.0, "cost": map[string]any{"amount": 0.10, "currency": "usd"}},
+			{"used": 30000.0, "size": 200000.0, "cost": map[string]any{"amount": 0.42, "currency": "usd"}},
+			{"used": 12000.0, "size": 200000.0}}, // context shrank after compaction; no cost this time
+		{{"used": 1000.0, "cost": map[string]any{"amount": 0.08, "currency": "USD"}}},
+	} {
+		r := f.queue(ada, p.ID, "spend "+string(rune('a'+i)), NewRun{Agent: "fake"})
+		_, err := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0)
+		f.must(err)
+		for _, u := range reports {
+			_, err := f.s.AppendRunEvent(f.ctx, w, r.ID, "usage", u)
+			f.must(err)
+		}
+		if i == 0 {
+			got, _ := f.s.Run(f.ctx, r.ID)
+			if got.ContextTokens != 30000 || got.ContextSize != 200000 || got.Cost != 0.42 || got.CostCurrency != "USD" {
+				t.Fatalf("run usage: %+v", got)
+			}
+		}
+	}
+	u, err := f.s.Usage(f.ctx, p.ID, 7)
+	f.must(err)
+	if u.Runs != 2 || fmt.Sprintf("%.2f", u.Cost["USD"]) != "0.50" || len(u.ByAgent) != 1 || u.ByAgent[0].ContextTokens != 31000 {
+		t.Fatalf("usage: %+v", u)
+	}
+	all, err := f.s.Usage(f.ctx, "", 0)
+	f.must(err)
+	if len(all.ByProject) != 1 || all.ByProject[0].Name != "Spend" {
+		t.Fatalf("server usage: %+v", all)
 	}
 }

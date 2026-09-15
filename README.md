@@ -54,7 +54,7 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | [`internal/testdb`](internal/testdb) | Per-test Postgres databases |
 | [`web/`](web/) | Vite + React + TypeScript + Tailwind UI |
 | [`deploy/compose`](deploy/compose) | Postgres + Server (+ worker) for one LAN host |
-| [`desktop/`](desktop/) | Tauri shell, parked |
+| [`desktop/`](desktop/) | Tauri shell; becomes the desktop and mobile apps ([roadmap](docs/roadmap.md) Phase 6) |
 | [`docs/`](docs/) | Glossary, workflow, roadmap, ADRs |
 
 ## Configuration
@@ -65,7 +65,7 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_ADDR` | server | `:8080` | listen address |
 | `BUILDBEE_WEB_DIR` | server | embedded UI | serve the UI from a directory instead |
 | `BUILDBEE_MAX_BODY_BYTES` | server | 32 MiB | request body limit |
-| `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | draft PRs and Issue sync; without them those endpoints answer 503 |
+| `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | Issue sync; without them it answers 503. Workers open PRs with their own `gh` login |
 | `GITHUB_WEBHOOK_SECRET` | server | unset | require `X-Hub-Signature-256` on webhooks |
 | `BUILDBEE_URL` | worker, CLI | `http://127.0.0.1:8080` | the Server |
 | `BUILDBEE_AS` | CLI | your login name | the Person the CLI acts as |

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/codemodify/buildbee/internal/models"
@@ -11,11 +12,79 @@ import (
 )
 
 const runCols = `id, task_id, project_id, COALESCE(bot_member_id::text, ''), status, kind, detail, summary, branch, commit, pr_url,
-	verdict, agent, prompt, worker, lease_until, attempts, created_at, updated_at, started_at, finished_at`
+	verdict, context_tokens, context_size, cost, cost_currency, agent, prompt, worker, lease_until, attempts,
+	created_at, updated_at, started_at, finished_at`
 
 func scanRun(row interface{ Scan(...any) error }, r *models.Run) error {
 	return row.Scan(&r.ID, &r.TaskID, &r.ProjectID, &r.BotMemberID, &r.Status, &r.Kind, &r.Detail, &r.Summary, &r.Branch, &r.Commit, &r.PRURL,
-		&r.Verdict, &r.Agent, &r.Prompt, &r.Worker, &r.LeaseUntil, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt)
+		&r.Verdict, &r.ContextTokens, &r.ContextSize, &r.Cost, &r.CostCurrency, &r.Agent, &r.Prompt, &r.Worker, &r.LeaseUntil, &r.Attempts,
+		&r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt)
+}
+
+// RecordUsage keeps a Run's peak context use and its latest session cost
+// (agents report cost cumulatively).
+func (s *Store) RecordUsage(ctx context.Context, runID string, used, size int64, cost float64, currency string) error {
+	return one(s.q.Exec(ctx, `UPDATE runs SET context_tokens=GREATEST(context_tokens, $2), context_size=GREATEST(context_size, $3),
+		cost=GREATEST(cost, $4), cost_currency=CASE WHEN $5 <> '' THEN $5 ELSE cost_currency END WHERE id=$1`,
+		runID, used, size, cost, currency))
+}
+
+// Usage sums Runs created since, for one Project or ("") all of them.
+func (s *Store) Usage(ctx context.Context, projectID string, since time.Time) (*models.Usage, error) {
+	rows, err := s.q.Query(ctx, `SELECT r.project_id::text, p.name, r.agent, r.cost_currency, count(*), sum(r.cost), sum(r.context_tokens)
+		FROM runs r JOIN projects p ON p.id = r.project_id
+		WHERE r.created_at >= $1 AND ($2 = '' OR r.project_id::text = $2) AND r.kind <> 'merge'
+		GROUP BY 1, 2, 3, 4 ORDER BY 1, 3`, since, projectID)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	u := &models.Usage{Since: since, Cost: map[string]float64{}}
+	agents, projects := map[string]*models.UsageRow{}, map[string]*models.UsageRow{}
+	add := func(m map[string]*models.UsageRow, key, name string, n int, cost float64, cur string, ctxTokens int64) {
+		row := m[key]
+		if row == nil {
+			row = &models.UsageRow{Key: key, Name: name, Cost: map[string]float64{}}
+			m[key] = row
+		}
+		row.Runs += n
+		row.ContextTokens += ctxTokens
+		if cur != "" {
+			row.Cost[cur] += cost
+		}
+	}
+	for rows.Next() {
+		var pid, pname, agent, cur string
+		var n int
+		var cost float64
+		var ctxTokens int64
+		if err := rows.Scan(&pid, &pname, &agent, &cur, &n, &cost, &ctxTokens); err != nil {
+			return nil, err
+		}
+		if agent == "" {
+			agent = "any"
+		}
+		u.Runs += n
+		if cur != "" {
+			u.Cost[cur] += cost
+		}
+		add(agents, agent, "", n, cost, cur, ctxTokens)
+		add(projects, pid, pname, n, cost, cur, ctxTokens)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, r := range agents {
+		u.ByAgent = append(u.ByAgent, *r)
+	}
+	sort.Slice(u.ByAgent, func(i, j int) bool { return u.ByAgent[i].Key < u.ByAgent[j].Key })
+	if projectID == "" {
+		for _, r := range projects {
+			u.ByProject = append(u.ByProject, *r)
+		}
+		sort.Slice(u.ByProject, func(i, j int) bool { return u.ByProject[i].Name < u.ByProject[j].Name })
+	}
+	return u, nil
 }
 
 func (s *Store) InsertRun(ctx context.Context, r models.Run) error {

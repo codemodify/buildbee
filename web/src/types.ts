@@ -94,6 +94,10 @@ export type Run = {
   branch?: string;
   pr_url?: string;
   verdict?: string;
+  context_tokens?: number;
+  context_size?: number;
+  cost?: number;
+  cost_currency?: string;
   agent?: string;
   worker?: string;
   attempts?: number;

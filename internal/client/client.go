@@ -157,6 +157,20 @@ func (c *Client) UpdateRun(runID, status, detail string) (map[string]any, error)
 	return out, err
 }
 
+// Usage sums what Runs used, for one Project or ("") the whole Server.
+func (c *Client) Usage(projectID, days string) (map[string]any, error) {
+	path := "/v1/usage"
+	if projectID != "" {
+		path = "/v1/projects/" + projectID + "/usage"
+	}
+	if days != "" {
+		path += "?days=" + days
+	}
+	var out map[string]any
+	err := c.do(http.MethodGet, path, nil, &out)
+	return out, err
+}
+
 // SteerRun sends a message to the agent working on a Run.
 func (c *Client) SteerRun(runID, text string, interrupt bool) (map[string]any, error) {
 	var out map[string]any

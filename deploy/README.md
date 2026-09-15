@@ -18,7 +18,7 @@ Compose reads these from the environment or an `.env` file next to the compose f
 | --- | --- | --- |
 | `BUILDBEE_PORT` | `8080` | port the Server is published on |
 | `BUILDBEE_DB_PASSWORD` | `buildbee` | Postgres password; set it before the first start |
-| `GITHUB_TOKEN`, `GITHUB_REPO` | unset | draft PRs and Issue sync |
+| `GITHUB_TOKEN`, `GITHUB_REPO` | unset | Issue sync (workers open PRs with their own `gh` login) |
 | `GITHUB_WEBHOOK_SECRET` | unset | require signed GitHub webhooks |
 
 `/healthz` returns 200 only when Postgres answers; compose uses it as the Server's health check.
