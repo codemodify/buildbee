@@ -62,6 +62,13 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Builds continue the Task's branch and push with a lease; merges use `gh pr merge` or `git merge`
 - Project `instructions` reach every agent; Runs report the agent's closing message as `summary`
 
+## Phase 2a — Chat backend (done)
+
+- Threads: replies under a root message; Channels list roots with reply counts
+- Every Task has a thread: Bots post there when they start, finish, fail or need a Decision; a person's reply reaches the agent at work, and `@Bot` in it hands the Task on
+- A mention or a DM to a Bot opens a Task and starts its Run
+- DMs between chosen Members; unread counts from per-person read markers; presence of people (open sockets) and workers (claims and heartbeats)
+
 ## Phase 4d — Usage and cleanup (done)
 
 - Each Run keeps its peak context and the session cost agents report; `GET /v1/usage` and `/v1/projects/{id}/usage` sum them by agent and Project (`buildbee usage`)
@@ -80,9 +87,9 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 
 ## Phase 2 — Chat UX
 
-- Channels, threads, direct messages, @people and @agents, unread counts, presence
-- Agent output streamed live into threads
 - A client state layer fed by the single WebSocket, replacing polling loops
+- Slack-like layout: Projects, Channels, DMs with unread badges; threads beside the channel; Task threads with the live Run (reply, plan, tools, diff, PR) inline
+- Board, Decisions inbox, autopilot and Routine settings, usage, workers online
 
 ## Phase 3 — Agent harness, remaining
 

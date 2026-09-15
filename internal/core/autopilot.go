@@ -32,8 +32,12 @@ func (w *work) advance(ctx context.Context, r *models.Run) error {
 	if err != nil {
 		return err
 	}
+	speaker := w.botOf(ctx, r)
 	if r.Status != models.RunSucceeded {
 		if r.Status == models.RunFailed {
+			if err := w.note(ctx, task, speaker, "The "+string(r.Kind)+" Run failed: "+r.Detail); err != nil {
+				return err
+			}
 			return w.notifyPeople(ctx, proj.ID, nil, notice{projectID: proj.ID, kind: "run",
 				title: fmt.Sprintf("%s Run failed on %s", titleCase(string(r.Kind)), task.Title), body: r.Detail,
 				href: href(proj.ID, "tasks", task.ID)})
@@ -41,6 +45,9 @@ func (w *work) advance(ctx context.Context, r *models.Run) error {
 		return nil
 	}
 	if err := w.closeHandoffsTo(ctx, task.ID, r.BotMemberID); err != nil {
+		return err
+	}
+	if err := w.note(ctx, task, speaker, resultNote(r)); err != nil {
 		return err
 	}
 	if r.Kind == models.RunMerge {
@@ -395,6 +402,28 @@ func runPrompt(p *models.Project, bot *models.Member, task *models.Task, notes [
 }
 
 func shortSHA(c string) string { return c[:min(12, len(c))] }
+
+// resultNote is what the Bot says in the Task's thread when its Run succeeds.
+func resultNote(r *models.Run) string {
+	switch r.Kind {
+	case models.RunBuild:
+		if r.Branch == "" {
+			return "Done, without changing the repo.\n\n" + r.Summary
+		}
+		head := "Pushed " + r.Branch
+		if r.Commit != "" {
+			head += " at " + shortSHA(r.Commit)
+		}
+		if r.PRURL != "" {
+			head += " (" + r.PRURL + ")"
+		}
+		return head + ".\n\n" + r.Summary
+	case models.RunMerge:
+		return "Merged: " + r.Detail + "."
+	default:
+		return r.Summary
+	}
+}
 
 func firstNonEmpty(xs ...string) string {
 	for _, x := range xs {

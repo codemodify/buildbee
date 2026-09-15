@@ -64,6 +64,7 @@ func (s *Service) ClaimRun(ctx context.Context, a Actor, agents []string, wait t
 	if len(clean) == 0 {
 		return nil, invalid("a worker must offer at least one agent")
 	}
+	s.sawWorker(a.Worker, clean)
 	deadline := time.Now().Add(wait)
 	for {
 		ready := s.queue.wait() // before trying, so a Run queued meanwhile still wakes us
@@ -158,6 +159,7 @@ func (s *Service) Heartbeat(ctx context.Context, a Actor, runID string) (*models
 	if a.Worker == "" {
 		return nil, invalid("only a worker (X-BuildBee-Worker) can heartbeat Runs")
 	}
+	s.sawWorker(a.Worker, nil)
 	var out *models.Run
 	err := s.tx(ctx, func(w *work) error {
 		r, err := w.st.ExtendLease(ctx, runID, a.Worker, w.now.Add(LeaseTTL))

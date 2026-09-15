@@ -63,26 +63,108 @@ func paged[T any](ctx context.Context, q querier, base string, args []any, p Pag
 
 // --- messages ---
 
-const messageCols = `id, seq, channel_id, project_id, member_id, body, created_at`
+const messageCols = `id, seq, channel_id, project_id, member_id, body, COALESCE(thread_id::text, ''), reply_count, last_reply_at,
+	COALESCE(task_id::text, ''), created_at`
 
 func scanMessage(row pgx.Rows) (models.Message, error) {
 	var m models.Message
-	err := row.Scan(&m.ID, &m.Seq, &m.ChannelID, &m.ProjectID, &m.MemberID, &m.Body, &m.CreatedAt)
+	err := row.Scan(&m.ID, &m.Seq, &m.ChannelID, &m.ProjectID, &m.MemberID, &m.Body, &m.ThreadID, &m.ReplyCount, &m.LastReplyAt,
+		&m.TaskID, &m.CreatedAt)
 	return m, err
 }
 
-// InsertMessage stores m and returns it with its seq.
+// InsertMessage stores m and returns it with its seq. A reply also counts
+// on its root.
 func (s *Store) InsertMessage(ctx context.Context, m models.Message) (*models.Message, error) {
-	err := s.q.QueryRow(ctx, `INSERT INTO messages (id, channel_id, project_id, member_id, body, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING seq`,
-		m.ID, m.ChannelID, m.ProjectID, m.MemberID, m.Body, m.CreatedAt).Scan(&m.Seq)
+	err := s.q.QueryRow(ctx, `INSERT INTO messages (id, channel_id, project_id, member_id, body, thread_id, task_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING seq`,
+		m.ID, m.ChannelID, m.ProjectID, m.MemberID, m.Body, nullID(m.ThreadID), nullID(m.TaskID), m.CreatedAt).Scan(&m.Seq)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	if m.ThreadID != "" {
+		if err := one(s.q.Exec(ctx, `UPDATE messages SET reply_count = reply_count + 1, last_reply_at = $2 WHERE id = $1`,
+			m.ThreadID, m.CreatedAt)); err != nil {
+			return nil, err
+		}
+	}
+	return &m, nil
+}
+
+// GetMessage returns one message.
+func (s *Store) GetMessage(ctx context.Context, id string) (*models.Message, error) {
+	rows, err := s.q.Query(ctx, `SELECT `+messageCols+` FROM messages WHERE id=$1`, id)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, mapErr(err)
+		}
+		return nil, ErrNotFound
+	}
+	m, err := scanMessage(rows)
 	return &m, mapErr(err)
 }
 
-// ListMessages returns one page of a Channel, oldest first.
+// SetMessageTask marks a root message as the thread of a Task.
+func (s *Store) SetMessageTask(ctx context.Context, messageID, taskID string) error {
+	return one(s.q.Exec(ctx, `UPDATE messages SET task_id=$2 WHERE id=$1`, messageID, taskID))
+}
+
+// ListMessages returns one page of a Channel's root messages, oldest first.
 func (s *Store) ListMessages(ctx context.Context, channelID string, p Page) ([]models.Message, bool, error) {
-	return paged(ctx, s.q, `SELECT `+messageCols+` FROM messages WHERE channel_id=$1`,
+	return paged(ctx, s.q, `SELECT `+messageCols+` FROM messages WHERE channel_id=$1 AND thread_id IS NULL`,
 		[]any{channelID}, p, false, scanMessage)
+}
+
+// ListChannelSince returns a Channel's messages, replies included, after
+// seq: what a WebSocket subscriber missed.
+func (s *Store) ListChannelSince(ctx context.Context, channelID string, after int64, limit int) ([]models.Message, bool, error) {
+	return paged(ctx, s.q, `SELECT `+messageCols+` FROM messages WHERE channel_id=$1`,
+		[]any{channelID}, Page{After: after, Limit: limit}, false, scanMessage)
+}
+
+// ListReplies returns one page of a thread's replies, oldest first.
+func (s *Store) ListReplies(ctx context.Context, rootID string, p Page) ([]models.Message, bool, error) {
+	return paged(ctx, s.q, `SELECT `+messageCols+` FROM messages WHERE thread_id=$1`, []any{rootID}, p, false, scanMessage)
+}
+
+// MarkRead moves a Person's read marker in a Channel forward to seq.
+func (s *Store) MarkRead(ctx context.Context, personID, channelID string, seq int64) error {
+	_, err := s.q.Exec(ctx, `INSERT INTO read_markers (person_id, channel_id, last_seq) VALUES ($1, $2, $3)
+		ON CONFLICT (person_id, channel_id) DO UPDATE SET last_seq = GREATEST(read_markers.last_seq, EXCLUDED.last_seq)`,
+		personID, channelID, seq)
+	return mapErr(err)
+}
+
+// Unread counts, for each Channel of a Project the Person can see, the
+// messages others wrote after the Person's read marker.
+func (s *Store) Unread(ctx context.Context, personID, projectID string) ([]models.Unread, error) {
+	rows, err := s.q.Query(ctx, `SELECT c.id,
+			count(m.id) FILTER (WHERE m.seq > COALESCE(rm.last_seq, 0) AND (me.id IS NULL OR m.member_id <> me.id)),
+			COALESCE(max(m.seq), 0)
+		FROM channels c
+		LEFT JOIN members me ON me.project_id = c.project_id AND me.person_id = $1
+		LEFT JOIN read_markers rm ON rm.channel_id = c.id AND rm.person_id = $1
+		LEFT JOIN messages m ON m.channel_id = c.id
+		WHERE c.project_id = $2 AND c.archived_at IS NULL
+			AND (c.kind = 'channel' OR EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = c.id AND cm.member_id = me.id))
+		GROUP BY c.id ORDER BY c.id`, personID, projectID)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []models.Unread{}
+	for rows.Next() {
+		var u models.Unread
+		if err := rows.Scan(&u.ChannelID, &u.Unread, &u.LastSeq); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 // --- activity ---

@@ -315,23 +315,58 @@ type Preferences struct {
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
+// Channel kinds: open channels, and DMs between chosen Members.
+const (
+	ChannelOpen = "channel"
+	ChannelDM   = "dm"
+)
+
 type Channel struct {
 	ID         string     `json:"id"`
 	ProjectID  string     `json:"project_id"`
 	Name       string     `json:"name"`
+	Kind       string     `json:"kind"`
+	Members    []string   `json:"member_ids,omitempty"` // DMs only
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// Message is Channel chat. Seq orders messages and pages through them.
+// Allows reports whether Member memberID may read and write the Channel:
+// every Member for open Channels, only its Members for a DM.
+func (c *Channel) Allows(memberID string) bool {
+	if c.Kind != ChannelDM {
+		return true
+	}
+	for _, m := range c.Members {
+		if m == memberID {
+			return true
+		}
+	}
+	return false
+}
+
+// Message is Channel chat. Seq orders messages and pages through them. A
+// root message may start a thread of replies; a Task's thread is where its
+// Bots report progress.
 type Message struct {
-	ID        string    `json:"id"`
-	Seq       int64     `json:"seq"`
-	ChannelID string    `json:"channel_id"`
-	ProjectID string    `json:"project_id"`
-	MemberID  string    `json:"member_id"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string     `json:"id"`
+	Seq         int64      `json:"seq"`
+	ChannelID   string     `json:"channel_id"`
+	ProjectID   string     `json:"project_id"`
+	MemberID    string     `json:"member_id"`
+	Body        string     `json:"body"`
+	ThreadID    string     `json:"thread_id,omitempty"`
+	ReplyCount  int        `json:"reply_count,omitempty"`
+	LastReplyAt *time.Time `json:"last_reply_at,omitempty"`
+	TaskID      string     `json:"task_id,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// Unread is how much of a Channel a Person has not read.
+type Unread struct {
+	ChannelID string `json:"channel_id"`
+	Unread    int    `json:"unread"`
+	LastSeq   int64  `json:"last_seq"`
 }
 
 type Task struct {
@@ -348,6 +383,7 @@ type Task struct {
 	HeadCommit        string     `json:"head_commit,omitempty"`
 	PRURL             string     `json:"pr_url,omitempty"`
 	MergedAt          *time.Time `json:"merged_at,omitempty"`
+	ThreadID          string     `json:"thread_id,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }

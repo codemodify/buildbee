@@ -31,7 +31,11 @@ DELETE /v1/me                            → forget this browser's Person
 | `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions, agent}` |
 | `PATCH /v1/members/{id}` | `{display_name, instructions, agent}`; `agent` applies to Bots |
 | `GET/POST /v1/projects/{id}/channels`, `PATCH /v1/channels/{id}` | Channels; `{name, archived}` |
-| `GET/POST /v1/channels/{id}/messages` | page / post `{body}`; `@Bot` creates a Task handed to it, `@Person` notifies them |
+| `GET/POST /v1/channels/{id}/messages` | page root messages (each with `reply_count`, `task_id`) / post `{body}`; `@Bot` opens a Task handed to it, with this message as its thread, and starts the Bot's Run; `@Person` notifies them |
+| `GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies` | a thread `{root, replies, has_more}` / reply `{body}`. In a Task's thread, `@Bot` hands that Task on, and any other reply reaches the agent working on it |
+| `GET/POST /v1/projects/{id}/dms` | your DMs / open the DM with `{member_ids}` (people or Bots; one DM per set of members). A message in a DM with a Bot asks it to work, as a mention does |
+| `GET /v1/projects/{id}/unread`, `POST /v1/channels/{id}/read` | per Channel and DM: `{channel_id, unread, last_seq}` / mark read up to `{seq}` |
+| `GET /v1/presence` | people with the app open and workers seen in the last 90 s, with the agents they offer |
 | `GET /v1/projects/{id}/activity` | page of the Project log, newest first (`?type=`) |
 | `GET/POST /v1/projects/{id}/tasks` | list / create `{title, body, assignee_member_id, handoff_role, handoff_note}`; `handoff_role` defaults to `scout`, `none` skips |
 | `GET/PATCH /v1/tasks/{id}` | Task / `{title, body, status}` with status `open\|in_progress\|done\|canceled` |
@@ -73,7 +77,7 @@ Messages, Activity and notifications page by `seq`: `?limit=` (default 100, max 
 {"op": "unsubscribe", "topic": "run:<id>"}
 ```
 
-Topics: `project:<id>` (Activity), `channel:<id>` (messages), `run:<id>` (RunEvents), `person:<id>` (notifications). With `after`, missed events are replayed from the database before live ones, with no gap and no duplicates; without it only live events flow. Frames are `{"topic", "cursor", "type", "data"}`.
+Topics: `project:<id>` (Activity), `channel:<id>` (messages and thread replies; a reply has `thread_id`), `run:<id>` (RunEvents), `person:<id>` (notifications), `presence:server` (live only: someone came or went; fetch `/v1/presence`). An open `/v1/ws` also marks its Person online. With `after`, missed events are replayed from the database before live ones, with no gap and no duplicates; without it only live events flow. Frames are `{"topic", "cursor", "type", "data"}`.
 
 `GET /v1/runs/{id}/ws` and `GET /v1/channels/{id}/ws` stream one topic with bare `data` frames. A Run stream replays its whole transcript unless `?after=` is given.
 

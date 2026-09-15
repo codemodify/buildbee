@@ -338,17 +338,15 @@ func (s *Service) fire(ctx context.Context, a Actor, r *models.Routine) (bool, e
 		if err != nil {
 			return err
 		}
+		if err := w.openThread(ctx, proj, task, from, "Routine "+r.Name+" opened \""+title+"\" for "+to.DisplayName+".", ""); err != nil {
+			return err
+		}
 		if _, _, err := w.handoff(ctx, proj, task, from, to, a, "Scheduled by Routine "+r.Name+".", true); err != nil {
 			return err
 		}
 		r.LastTaskID = task.ID
 		if err := w.st.UpdateRoutine(ctx, *r); err != nil {
 			return err
-		}
-		if channels, err := w.st.ListChannels(ctx, r.ProjectID, false); err == nil && len(channels) > 0 && from != nil {
-			if _, err := w.post(ctx, proj, &channels[0], from, a, "Routine "+r.Name+" opened Task \""+title+"\" for "+to.DisplayName+"."); err != nil {
-				return err
-			}
 		}
 		if err := w.activity(ctx, r.ProjectID, by, models.TypeRoutine, "fired", r.ID,
 			map[string]any{"name": r.Name, "task_id": task.ID, "by": a.Name}); err != nil {
@@ -380,7 +378,7 @@ func (s *Service) Replay(ctx context.Context, topic string, after int64) ([]Even
 			out = append(out, Event{Topic: topic, Cursor: int64(ev.Seq), Type: "run_event", Data: ev})
 		}
 	case "channel":
-		msgs, _, err := s.st.ListMessages(ctx, id, store.Page{After: after, Limit: 1000})
+		msgs, _, err := s.st.ListChannelSince(ctx, id, after, 1000)
 		if err != nil {
 			return nil, err
 		}
@@ -395,6 +393,8 @@ func (s *Service) Replay(ctx context.Context, topic string, after int64) ([]Even
 		for i := len(acts) - 1; i >= 0; i-- { // oldest first
 			out = append(out, Event{Topic: topic, Cursor: acts[i].Seq, Type: "activity", Data: acts[i]})
 		}
+	case "presence": // live only: subscribers fetch GET /v1/presence
+		return nil, nil
 	case "person":
 		ns, _, err := s.st.ListNotifications(ctx, id, false, store.Page{After: after, Limit: 1000})
 		if err != nil {

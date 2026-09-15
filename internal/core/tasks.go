@@ -11,96 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// --- messages ---
-
-// Messages returns one page of a Channel, oldest first.
-func (s *Service) Messages(ctx context.Context, channelID string, p store.Page) ([]models.Message, bool, error) {
-	if _, err := s.st.GetChannel(ctx, channelID); err != nil {
-		return nil, false, err
-	}
-	return s.st.ListMessages(ctx, channelID, p)
-}
-
-// Posted is a new message plus what its @mentions set in motion.
-type Posted struct {
-	models.Message
-	Mentions []models.Member  `json:"mentions"`
-	Tasks    []models.Task    `json:"tasks"`
-	Handoffs []models.Handoff `json:"handoffs"`
-}
-
-// PostMessage posts to a Channel as the acting Person. Each @Bot mentioned
-// gets a Task (the message is its description) handed to it.
-func (s *Service) PostMessage(ctx context.Context, a Actor, channelID, body string) (*Posted, error) {
-	b, err := text("body", body, true, 32000)
-	if err != nil {
-		return nil, err
-	}
-	var out *Posted
-	err = s.tx(ctx, func(w *work) error {
-		ch, err := w.st.GetChannel(ctx, channelID)
-		if err != nil {
-			return err
-		}
-		if ch.ArchivedAt != nil {
-			return fmt.Errorf("%w: channel #%s is archived", store.ErrConflict, ch.Name)
-		}
-		proj, err := w.openProject(ctx, ch.ProjectID)
-		if err != nil {
-			return err
-		}
-		author, err := w.requireMember(ctx, a, ch.ProjectID)
-		if err != nil {
-			return err
-		}
-		out, err = w.post(ctx, proj, ch, author, a, b)
-		return err
-	})
-	return out, err
-}
-
-// post writes a message by author and acts on its @mentions.
-func (w *work) post(ctx context.Context, proj *models.Project, ch *models.Channel, author *models.Member, a Actor, body string) (*Posted, error) {
-	msg, err := w.st.InsertMessage(ctx, models.Message{ID: uuid.NewString(), ChannelID: ch.ID, ProjectID: ch.ProjectID,
-		MemberID: author.ID, Body: body, CreatedAt: w.now})
-	if err != nil {
-		return nil, err
-	}
-	out := &Posted{Message: *msg, Mentions: []models.Member{}, Tasks: []models.Task{}, Handoffs: []models.Handoff{}}
-	members, err := w.st.ListMembers(ctx, ch.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range models.MentionedPeople(body, members) {
-		if p.ID == author.ID {
-			continue
-		}
-		if err := w.notifyMember(ctx, &p, notice{projectID: ch.ProjectID, kind: "mention",
-			title: author.DisplayName + " mentioned you in #" + ch.Name, body: truncate(body, 500),
-			href: href(ch.ProjectID, "channels", ch.ID)}); err != nil {
-			return nil, err
-		}
-	}
-	if author.Kind == models.KindHuman {
-		for _, bot := range models.MentionedBots(body, members) {
-			bot := bot
-			task, err := w.createTask(ctx, proj, author, a, newTask{title: mentionTitle(body, ch.Name), body: body})
-			if err != nil {
-				return nil, err
-			}
-			h, t, err := w.handoff(ctx, proj, task, author, &bot, a, body, false)
-			if err != nil {
-				return nil, err
-			}
-			out.Mentions = append(out.Mentions, bot)
-			out.Tasks = append(out.Tasks, *t)
-			out.Handoffs = append(out.Handoffs, *h)
-		}
-	}
-	w.emit("channel:"+ch.ID, msg.Seq, "message", out)
-	return out, nil
-}
-
 var leadingMentions = regexp.MustCompile(`^(?:@[\p{L}\p{N}_.-]+[\s,:;]*)+`)
 
 // mentionTitle names a Task created by a mention after what was asked: the
@@ -170,6 +80,7 @@ type NewTask struct {
 	Title            string `json:"title"`
 	Body             string `json:"body"`
 	AssigneeMemberID string `json:"assignee_member_id"`
+	ChannelID        string `json:"channel_id"` // where its thread starts; default the first Channel
 	HandoffRole      string `json:"handoff_role"`
 	HandoffNote      string `json:"handoff_note"`
 }
@@ -211,6 +122,13 @@ func (s *Service) CreateTask(ctx context.Context, a Actor, projectID string, in 
 		}
 		task, err := w.createTask(ctx, proj, m, a, newTask{title: title, body: body, assignee: in.AssigneeMemberID})
 		if err != nil {
+			return err
+		}
+		opener := m
+		if opener == nil {
+			opener = w.voice(ctx, projectID)
+		}
+		if err := w.openThread(ctx, proj, task, opener, "New Task: "+title, in.ChannelID); err != nil {
 			return err
 		}
 		out = &TaskCreated{Task: *task}
@@ -438,7 +356,8 @@ func (w *work) handoff(ctx context.Context, proj *models.Project, task *models.T
 		title: "Task handed to you: " + t.Title, body: noteText(note), href: href(task.ProjectID, "tasks", task.ID)}); err != nil {
 		return nil, nil, err
 	}
-	if to.Kind == models.KindBot && worksOnTasks(to.Role) && (autorun || proj.AutoRun) {
+	nothingToReview := strings.EqualFold(to.Role, models.RoleSentry) && t.Branch == ""
+	if to.Kind == models.KindBot && worksOnTasks(to.Role) && (autorun || proj.AutoRun) && !nothingToReview {
 		run, err := w.createRun(ctx, proj, &t, to, "", "", by)
 		if err != nil {
 			return nil, nil, err

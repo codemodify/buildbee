@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased — Phase 4d (usage, cleanup)
+## Unreleased — Phase 2a (chat backend)
+
+### Added
+- Threads (`GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies`); Channels list root messages with `reply_count`
+- Every Task has a thread (`thread_id`) where its Bots report; replies there steer the working agent; `@Bot` there hands the same Task on
+- DMs (`/v1/projects/{id}/dms`); a DM with a Bot asks it to work
+- Unread counts and read markers; `GET /v1/presence` and the `presence:server` topic
+
+### Changed
+- Mentioning a Bot starts its Run at once (before: only with autopilot)
+- Handing a Task to Sentry before anything was pushed starts no review
+- Events of one topic are published in cursor order
+
+## Phase 4d (usage, cleanup)
 
 ### Added
 - Runs keep `context_tokens`, `context_size`, `cost` and `cost_currency` from agents' usage reports; `GET /v1/usage`, `GET /v1/projects/{id}/usage`, `buildbee usage`

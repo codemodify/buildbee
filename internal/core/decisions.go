@@ -147,6 +147,13 @@ func (w *work) openDecision(ctx context.Context, projectID string, by who, asker
 		map[string]any{"prompt": truncate(d.Prompt, 300), "task_id": d.TaskID}); err != nil {
 		return nil, err
 	}
+	if d.TaskID != "" {
+		if task, err := w.st.GetTask(ctx, d.TaskID, false); err == nil {
+			if err := w.note(ctx, task, w.voice(ctx, projectID), "Decision needed: "+d.Prompt); err != nil {
+				return nil, err
+			}
+		}
+	}
 	n := notice{projectID: projectID, kind: "decision", title: "Decision needed: " + d.Prompt, body: d.Prompt, href: href(projectID)}
 	if d.AssigneeMemberID != "" {
 		assignee, err := w.st.GetMember(ctx, d.AssigneeMemberID)

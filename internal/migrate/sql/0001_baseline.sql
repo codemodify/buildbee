@@ -57,8 +57,18 @@ CREATE TABLE channels (
     id UUID PRIMARY KEY,
     project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
     name TEXT NOT NULL CHECK (name <> ''),
+    kind TEXT NOT NULL DEFAULT 'channel' CHECK (kind IN ('channel', 'dm')),
+    dm_key TEXT UNIQUE,  -- a DM's sorted member IDs, so each set of Members has one DM
     archived_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((kind = 'dm') = (dm_key IS NOT NULL))
+);
+
+-- Who is in a DM. Channels are open to every Member of their Project.
+CREATE TABLE channel_members (
+    channel_id UUID NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    member_id UUID NOT NULL REFERENCES members (id) ON DELETE CASCADE,
+    PRIMARY KEY (channel_id, member_id)
 );
 CREATE INDEX channels_project_id_idx ON channels (project_id, created_at);
 
@@ -69,6 +79,10 @@ CREATE TABLE messages (
     project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
     member_id UUID NOT NULL REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     body TEXT NOT NULL,
+    thread_id UUID REFERENCES messages (id) ON DELETE CASCADE,  -- the root message this replies to
+    reply_count INT NOT NULL DEFAULT 0,  -- on a root: its replies
+    last_reply_at TIMESTAMPTZ,
+    task_id UUID,  -- on a root: the Task this thread is about
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX messages_channel_seq_idx ON messages (channel_id, seq);
@@ -252,3 +266,17 @@ CREATE INDEX notifications_person_seq_idx ON notifications (person_id, seq DESC)
 CREATE INDEX notifications_person_unread_idx ON notifications (person_id) WHERE read_at IS NULL;
 
 CREATE INDEX tasks_branch_idx ON tasks (branch) WHERE branch <> '';
+
+-- Tasks and their threads refer to each other.
+ALTER TABLE tasks ADD COLUMN thread_id UUID REFERENCES messages (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE messages ADD FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+CREATE INDEX messages_roots_idx ON messages (channel_id, seq) WHERE thread_id IS NULL;
+CREATE INDEX messages_thread_idx ON messages (thread_id, seq) WHERE thread_id IS NOT NULL;
+
+-- How far each Person has read each Channel.
+CREATE TABLE read_markers (
+    person_id UUID NOT NULL REFERENCES people (id) ON DELETE CASCADE,
+    channel_id UUID NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    last_seq BIGINT NOT NULL,
+    PRIMARY KEY (person_id, channel_id)
+);

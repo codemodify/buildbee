@@ -11,11 +11,12 @@ import (
 )
 
 const taskCols = `id, project_id, title, body, status, COALESCE(assignee_member_id::text, ''),
-	COALESCE(created_by_member_id::text, ''), COALESCE(issue_number, 0), issue_url, branch, head_commit, pr_url, merged_at, created_at, updated_at`
+	COALESCE(created_by_member_id::text, ''), COALESCE(issue_number, 0), issue_url, branch, head_commit, pr_url, merged_at,
+	COALESCE(thread_id::text, ''), created_at, updated_at`
 
 func scanTask(row interface{ Scan(...any) error }, t *models.Task) error {
 	return row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Body, &t.Status, &t.AssigneeMemberID,
-		&t.CreatedByMemberID, &t.IssueNumber, &t.IssueURL, &t.Branch, &t.HeadCommit, &t.PRURL, &t.MergedAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.CreatedByMemberID, &t.IssueNumber, &t.IssueURL, &t.Branch, &t.HeadCommit, &t.PRURL, &t.MergedAt, &t.ThreadID, &t.CreatedAt, &t.UpdatedAt)
 }
 
 // TaskByBranch finds the open Task whose Builder pushed branch.
@@ -65,8 +66,8 @@ func (s *Store) ListTasks(ctx context.Context, projectID string) ([]models.Task,
 // UpdateTask writes title, body, status, assignee, branch, PR, merged_at and updated_at.
 func (s *Store) UpdateTask(ctx context.Context, t models.Task) error {
 	return one(s.q.Exec(ctx, `UPDATE tasks SET title=$2, body=$3, status=$4, assignee_member_id=$5, updated_at=$6,
-		branch=$7, pr_url=$8, merged_at=$9, head_commit=$10 WHERE id=$1`,
-		t.ID, t.Title, t.Body, t.Status, nullID(t.AssigneeMemberID), t.UpdatedAt, t.Branch, t.PRURL, t.MergedAt, t.HeadCommit))
+		branch=$7, pr_url=$8, merged_at=$9, head_commit=$10, thread_id=$11 WHERE id=$1`,
+		t.ID, t.Title, t.Body, t.Status, nullID(t.AssigneeMemberID), t.UpdatedAt, t.Branch, t.PRURL, t.MergedAt, t.HeadCommit, nullID(t.ThreadID)))
 }
 
 // UpsertIssueTask creates or refreshes the Task for a Repo Issue in one

@@ -139,8 +139,66 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	list, more, err := s.core.Messages(r.Context(), r.PathValue("id"), p)
+	list, more, err := s.core.Messages(r.Context(), actorFrom(r.Context()), r.PathValue("id"), p)
 	respondPage(s, w, list, more, err)
+}
+
+func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
+	p, err := pageParams(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	t, err := s.core.Thread(r.Context(), actorFrom(r.Context()), r.PathValue("id"), p)
+	respond(s, w, http.StatusOK, t, err)
+}
+
+func (s *Server) postReply(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Body string `json:"body"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	m, err := s.core.Reply(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Body)
+	respond(s, w, http.StatusCreated, m, err)
+}
+
+func (s *Server) presence(w http.ResponseWriter, r *http.Request) {
+	p, err := s.core.Presence(r.Context())
+	respond(s, w, http.StatusOK, p, err)
+}
+
+func (s *Server) listDMs(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.DMs(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respondItems(s, w, list, err)
+}
+
+func (s *Server) openDM(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		MemberIDs []string `json:"member_ids"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	ch, err := s.core.OpenDM(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.MemberIDs)
+	respond(s, w, http.StatusOK, ch, err)
+}
+
+func (s *Server) listUnread(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Unread(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respondItems(s, w, list, err)
+}
+
+func (s *Server) markChannelRead(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Seq int64 `json:"seq"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	err := s.core.MarkChannelRead(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Seq)
+	respond(s, w, http.StatusOK, map[string]int64{"seq": in.Seq}, err)
 }
 
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {

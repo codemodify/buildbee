@@ -209,8 +209,21 @@ func TestMentioningABotCreatesATaskHandedToIt(t *testing.T) {
 	if h := posted.Handoffs[0]; h.FromMemberID != posted.MemberID || h.ToMemberID != builder.ID {
 		t.Fatalf("handoff: %+v", h)
 	}
-	if evs := f.pub.topic("channel:" + p.Channels[0].ID); len(evs) != 1 || evs[0].Cursor != posted.Seq {
-		t.Fatalf("channel events: %+v", evs)
+	if task.ThreadID != posted.ID || posted.TaskID != task.ID {
+		t.Fatalf("the message is the Task's thread: task %+v, message %+v", task, posted.Message)
+	}
+	runs, _ := f.s.Runs(f.ctx, task.ID)
+	if len(runs) != 1 || runs[0].Kind != models.RunBuild {
+		t.Fatalf("asking a Bot starts its Run: %+v", runs)
+	}
+	evs := f.pub.topic("channel:" + p.Channels[0].ID)
+	if len(evs) != 2 || evs[0].Cursor != posted.Seq || evs[1].Cursor <= posted.Seq {
+		t.Fatalf("the message, then the Builder's note in its thread, in order: %+v", evs)
+	}
+	th, err := f.s.Thread(f.ctx, ada, posted.ID, store.Page{})
+	f.must(err)
+	if len(th.Replies) != 1 || th.Replies[0].MemberID != builder.ID || th.Root.ReplyCount != 1 {
+		t.Fatalf("thread: %+v", th)
 	}
 }
 
@@ -542,7 +555,7 @@ func TestRoutineOpensATaskOnceAcrossConcurrentTicks(t *testing.T) {
 	if len(runs) != 1 || runs[0].Kind != models.RunPlan {
 		t.Fatalf("Scout starts on it: %+v", runs)
 	}
-	msgs, _, _ := f.s.Messages(f.ctx, p.Channels[0].ID, store.Page{})
+	msgs, _, _ := f.s.Messages(f.ctx, ada, p.Channels[0].ID, store.Page{})
 	if len(msgs) != 1 || msgs[0].MemberID != bot(p, models.RolePulse).ID || !strings.Contains(msgs[0].Body, "for Scout") {
 		t.Fatalf("Pulse says so in #general: %+v", msgs)
 	}

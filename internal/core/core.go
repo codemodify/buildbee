@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -81,12 +82,13 @@ type Options struct {
 
 // Service implements BuildBee's operations over a Store.
 type Service struct {
-	st     *store.Store
-	pub    Publisher
-	log    *slog.Logger
-	now    func() time.Time
-	github config.GitHub
-	queue  *signal // closed and replaced whenever a Run is queued
+	st       *store.Store
+	pub      Publisher
+	log      *slog.Logger
+	now      func() time.Time
+	github   config.GitHub
+	queue    *signal // closed and replaced whenever a Run is queued
+	presence *presence
 }
 
 // New returns a Service. A nil Publisher drops events.
@@ -94,7 +96,7 @@ func New(st *store.Store, pub Publisher, opts Options) *Service {
 	if pub == nil {
 		pub = nopPublisher{}
 	}
-	s := &Service{st: st, pub: pub, log: opts.Logger, now: opts.Now, github: opts.GitHub, queue: newSignal()}
+	s := &Service{st: st, pub: pub, log: opts.Logger, now: opts.Now, github: opts.GitHub, queue: newSignal(), presence: newPresence()}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -126,13 +128,35 @@ func (s *Service) tx(ctx context.Context, fn func(w *work) error) error {
 	if err != nil {
 		return err
 	}
-	for _, e := range w.events {
+	for _, e := range inTopicOrder(w.events) {
 		s.pub.Publish(e)
 	}
 	if w.queued {
 		s.queue.notify()
 	}
 	return nil
+}
+
+// inTopicOrder sorts each topic's events by cursor, keeping the slots each
+// topic had among the others: a transaction may write a message, then emit
+// a reply to it before the message itself.
+func inTopicOrder(events []Event) []Event {
+	slots := map[string][]int{}
+	for i, e := range events {
+		slots[e.Topic] = append(slots[e.Topic], i)
+	}
+	out := make([]Event, len(events))
+	for _, idx := range slots {
+		group := make([]Event, len(idx))
+		for j, i := range idx {
+			group[j] = events[i]
+		}
+		sort.SliceStable(group, func(a, b int) bool { return group[a].Cursor < group[b].Cursor })
+		for j, i := range idx {
+			out[i] = group[j]
+		}
+	}
+	return out
 }
 
 func (w *work) emit(topic string, cursor int64, typ string, data any) {

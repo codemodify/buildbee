@@ -19,6 +19,8 @@ export type Channel = {
   id: string;
   project_id: string;
   name: string;
+  kind?: "channel" | "dm" | string;
+  member_ids?: string[];
   archived_at?: string;
 };
 
@@ -42,6 +44,10 @@ export type Message = {
   channel_id: string;
   member_id: string;
   body: string;
+  thread_id?: string;
+  reply_count?: number;
+  last_reply_at?: string;
+  task_id?: string;
   created_at: string;
 };
 
@@ -58,6 +64,8 @@ export type Task = {
   branch?: string;
   pr_url?: string;
   merged_at?: string;
+  thread_id?: string;
+  head_commit?: string;
 };
 
 export type Handoff = {

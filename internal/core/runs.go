@@ -114,8 +114,27 @@ func (w *work) createRun(ctx context.Context, proj *models.Project, task *models
 	if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
 		return nil, err
 	}
+	if err := w.note(ctx, task, bot, startNote(r)); err != nil {
+		return nil, err
+	}
 	return &r, w.activity(ctx, task.ProjectID, by, models.TypeRun, "created", r.ID,
 		map[string]any{"task_id": task.ID, "bot_member_id": r.BotMemberID, "agent": r.Agent, "kind": r.Kind})
+}
+
+// startNote is what a Bot says in the Task's thread when its Run is queued.
+func startNote(r models.Run) string {
+	with := ""
+	if r.Agent != "" {
+		with = " with " + r.Agent
+	}
+	switch r.Kind {
+	case models.RunPlan:
+		return "I'll look into this and write a plan" + with + "."
+	case models.RunReview:
+		return "Reviewing the changes" + with + "."
+	default:
+		return "Working on this" + with + "."
+	}
 }
 
 // RunReport is a worker's report on a Run. Summary, Branch and PRURL are
@@ -312,22 +331,28 @@ func (s *Service) SteerRun(ctx context.Context, a Actor, runID, message string, 
 		if r.Kind == models.RunMerge {
 			return invalid("a merge Run has no agent to talk to")
 		}
-		if r.Status == models.RunPending {
-			if err := w.st.UpdateRunPrompt(ctx, r.ID, r.Prompt+"\n\nMessage from "+m.DisplayName+": "+msg+"\n"); err != nil {
-				return err
-			}
-		}
-		ev, err := w.st.AppendRunEvent(ctx, r.ID, models.RunEventSteer,
-			map[string]any{"text": msg, "by": m.DisplayName, "interrupt": interrupt, "queued": r.Status == models.RunPending}, w.now)
-		if err != nil {
-			return err
-		}
-		out = ev
-		w.emit("run:"+r.ID, int64(ev.Seq), "run_event", ev)
-		return w.activity(ctx, r.ProjectID, whoOf(m, a), models.TypeRun, "steered", r.ID,
-			map[string]any{"task_id": r.TaskID, "text": truncate(msg, 300), "interrupt": interrupt})
+		out, err = w.steer(ctx, r, m, a, msg, interrupt)
+		return err
 	})
 	return out, err
+}
+
+// steer records a person's message for the agent on r: in the prompt of a
+// queued Run, as a steer event its worker delivers for a running one.
+func (w *work) steer(ctx context.Context, r *models.Run, m *models.Member, a Actor, msg string, interrupt bool) (*models.RunEvent, error) {
+	if r.Status == models.RunPending {
+		if err := w.st.UpdateRunPrompt(ctx, r.ID, r.Prompt+"\n\nMessage from "+m.DisplayName+": "+msg+"\n"); err != nil {
+			return nil, err
+		}
+	}
+	ev, err := w.st.AppendRunEvent(ctx, r.ID, models.RunEventSteer,
+		map[string]any{"text": msg, "by": m.DisplayName, "interrupt": interrupt, "queued": r.Status == models.RunPending}, w.now)
+	if err != nil {
+		return nil, err
+	}
+	w.emit("run:"+r.ID, int64(ev.Seq), "run_event", ev)
+	return ev, w.activity(ctx, r.ProjectID, whoOf(m, a), models.TypeRun, "steered", r.ID,
+		map[string]any{"task_id": r.TaskID, "text": truncate(msg, 300), "interrupt": interrupt})
 }
 
 // usageOf reads an ACP usage report: {used, size, cost: {amount, currency}}.

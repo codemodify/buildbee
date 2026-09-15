@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"github.com/codemodify/buildbee/internal/models"
 )
@@ -109,15 +111,25 @@ func (s *Store) ListMembers(ctx context.Context, projectID string) ([]models.Mem
 
 // --- channels ---
 
-const channelCols = `id, project_id, name, archived_at, created_at`
+const channelCols = `id, project_id, name, kind, archived_at, created_at,
+	COALESCE((SELECT array_agg(member_id::text ORDER BY member_id) FROM channel_members cm WHERE cm.channel_id = channels.id), '{}')`
 
 func scanChannel(row interface{ Scan(...any) error }, c *models.Channel) error {
-	return row.Scan(&c.ID, &c.ProjectID, &c.Name, &c.ArchivedAt, &c.CreatedAt)
+	if err := row.Scan(&c.ID, &c.ProjectID, &c.Name, &c.Kind, &c.ArchivedAt, &c.CreatedAt, &c.Members); err != nil {
+		return err
+	}
+	if len(c.Members) == 0 {
+		c.Members = nil
+	}
+	return nil
 }
 
 func (s *Store) InsertChannel(ctx context.Context, c models.Channel) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO channels (id, project_id, name, created_at) VALUES ($1, $2, $3, $4)`,
-		c.ID, c.ProjectID, c.Name, c.CreatedAt)
+	if c.Kind == "" {
+		c.Kind = models.ChannelOpen
+	}
+	_, err := s.q.Exec(ctx, `INSERT INTO channels (id, project_id, name, kind, created_at) VALUES ($1, $2, $3, $4, $5)`,
+		c.ID, c.ProjectID, c.Name, c.Kind, c.CreatedAt)
 	return mapErr(err)
 }
 
@@ -127,10 +139,42 @@ func (s *Store) GetChannel(ctx context.Context, id string) (*models.Channel, err
 	return &c, mapErr(err)
 }
 
-// ListChannels returns a Project's Channels, oldest first; archived on request.
+// ListChannels returns a Project's open Channels, oldest first; archived on request.
 func (s *Store) ListChannels(ctx context.Context, projectID string, includeArchived bool) ([]models.Channel, error) {
-	rows, err := s.q.Query(ctx, `SELECT `+channelCols+` FROM channels
-		WHERE project_id=$1 AND ($2 OR archived_at IS NULL) ORDER BY created_at, id`, projectID, includeArchived)
+	return s.channels(ctx, `SELECT `+channelCols+` FROM channels
+		WHERE project_id=$1 AND kind='channel' AND ($2 OR archived_at IS NULL) ORDER BY created_at, id`, projectID, includeArchived)
+}
+
+// ListDMs returns the DMs of a Project that memberID is in, newest first.
+func (s *Store) ListDMs(ctx context.Context, projectID, memberID string) ([]models.Channel, error) {
+	return s.channels(ctx, `SELECT `+channelCols+` FROM channels WHERE project_id=$1 AND kind='dm'
+		AND EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = channels.id AND cm.member_id = $2)
+		ORDER BY created_at DESC, id`, projectID, memberID)
+}
+
+// OpenDM returns the DM between exactly memberIDs, creating it if needed.
+// Safe under races: the sorted member list is unique.
+func (s *Store) OpenDM(ctx context.Context, c models.Channel, memberIDs []string) (*models.Channel, error) {
+	ids := slices.Clone(memberIDs)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	key := c.ProjectID + ":" + strings.Join(ids, ",")
+	var id string
+	err := s.q.QueryRow(ctx, `INSERT INTO channels (id, project_id, name, kind, dm_key, created_at) VALUES ($1, $2, $3, 'dm', $4, $5)
+		ON CONFLICT (dm_key) DO UPDATE SET dm_key = EXCLUDED.dm_key RETURNING id`, c.ID, c.ProjectID, c.Name, key, c.CreatedAt).Scan(&id)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	for _, m := range ids {
+		if _, err := s.q.Exec(ctx, `INSERT INTO channel_members (channel_id, member_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, m); err != nil {
+			return nil, mapErr(err)
+		}
+	}
+	return s.GetChannel(ctx, id)
+}
+
+func (s *Store) channels(ctx context.Context, sql string, args ...any) ([]models.Channel, error) {
+	rows, err := s.q.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -146,7 +190,6 @@ func (s *Store) ListChannels(ctx context.Context, projectID string, includeArchi
 	return out, rows.Err()
 }
 
-// UpdateChannel writes name and archived_at.
 func (s *Store) UpdateChannel(ctx context.Context, c models.Channel) error {
 	return one(s.q.Exec(ctx, `UPDATE channels SET name=$2, archived_at=$3 WHERE id=$1`, c.ID, c.Name, c.ArchivedAt))
 }

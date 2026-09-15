@@ -56,7 +56,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/me/preferences", s.patchPreferences)
 
 	// live streams
-	mux.HandleFunc("GET /v1/ws", s.hub.ServeMulti)
+	mux.HandleFunc("GET /v1/ws", func(w http.ResponseWriter, r *http.Request) {
+		if a := actorFrom(r.Context()); a.IsPerson() {
+			defer s.core.Online(a.PersonID)() // online while the app is open
+		}
+		s.hub.ServeMulti(w, r)
+	})
+	mux.HandleFunc("GET /v1/presence", s.presence)
 	mux.HandleFunc("GET /v1/channels/{id}/ws", s.hub.ServeTopic(func(r *http.Request) string { return "channel:" + r.PathValue("id") }, false))
 	mux.HandleFunc("GET /v1/runs/{id}/ws", s.hub.ServeTopic(func(r *http.Request) string { return "run:" + r.PathValue("id") }, true))
 
@@ -74,6 +80,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/channels/{id}", s.patchChannel)
 	mux.HandleFunc("GET /v1/channels/{id}/messages", s.listMessages)
 	mux.HandleFunc("POST /v1/channels/{id}/messages", s.postMessage)
+	mux.HandleFunc("POST /v1/channels/{id}/read", s.markChannelRead)
+	mux.HandleFunc("GET /v1/messages/{id}/thread", s.getThread)
+	mux.HandleFunc("POST /v1/messages/{id}/replies", s.postReply)
+	mux.HandleFunc("GET /v1/projects/{id}/dms", s.listDMs)
+	mux.HandleFunc("POST /v1/projects/{id}/dms", s.openDM)
+	mux.HandleFunc("GET /v1/projects/{id}/unread", s.listUnread)
 	mux.HandleFunc("GET /v1/projects/{id}/activity", s.listActivity)
 
 	// tasks and handoffs
