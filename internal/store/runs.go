@@ -39,7 +39,7 @@ func (s *Store) Usage(ctx context.Context, projectID string, since time.Time) (*
 		return nil, mapErr(err)
 	}
 	defer rows.Close()
-	u := &models.Usage{Since: since, Cost: map[string]float64{}}
+	u := &models.Usage{Since: since, Cost: map[string]float64{}, ByAgent: []models.UsageRow{}}
 	agents, projects := map[string]*models.UsageRow{}, map[string]*models.UsageRow{}
 	add := func(m map[string]*models.UsageRow, key, name string, n int, cost float64, cur string, ctxTokens int64) {
 		row := m[key]

@@ -2,9 +2,13 @@
 
 ## Unreleased — Phase 2c (client feedback)
 
+### Fixed
+- `GET /v1/usage` with no Runs returned `by_agent: null`
+
 ### Changed
 - Every Project starts with `#tasks` instead of `#general`: pinned first, cannot be renamed or archived. Every Task's thread lives there; asking a Bot in another channel links that message to the Task's thread in `#tasks`
-- `GET /v1/members` and the client's `# members`: everyone on the Server, people and Bots, and who created, joined or left which Project. Joins and leaves are no longer posted in chat
+- `GET /v1/members` and the client's pinned `# status`: workers online, people (Invite, Switch), Bots (Add bot), usage, and who created, joined or left which Project. It replaces the sidebar footer and the Usage page. Joins and leaves are no longer posted in chat
+- Invite: add a person by name to Projects and share a link (`#/hi/<name>`) that opens with their name filled in
 - `POST /v1/projects/{id}/leave`; Members who left keep their name on past messages (`left_at`) and rejoin by writing again
 - The sidebar lists every Project as a section that opens and closes (all at once too), remembered per browser; it hides entirely with the menu button or Ctrl+\\
 - The thread panel is resizable (drag or arrow keys; double-click resets)

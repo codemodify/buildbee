@@ -50,6 +50,7 @@ export function Sidebar({
   const allClosed = projects.length > 0 && projects.every((p) => closed[p.id]);
   const setAll = (value: boolean) => setClosed(Object.fromEntries(projects.map((p) => [p.id, value])));
   const online = new Set((presence?.people ?? []).map((p) => p.id));
+  const live = useLiveStatus();
   return (
     <nav className="flex h-full w-full flex-col bg-bb-sidebar">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-bb-border px-3">
@@ -68,21 +69,26 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => {
-            go({ view: "members" });
+            go({ view: "status" });
             onNavigate();
           }}
           className={cx(
             "mb-1 flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-left text-[13.5px]",
-            route.view === "members" ? "bg-bb-accent-soft font-medium text-bb-fg" : "text-bb-muted hover:bg-bb-hover hover:text-bb-fg",
+            route.view === "status" ? "bg-bb-accent-soft font-medium text-bb-fg" : "text-bb-muted hover:bg-bb-hover hover:text-bb-fg",
           )}
         >
           <span className="w-3 text-center text-bb-subtle">#</span>
-          members
-          {online.size > 0 && (
-            <span className="ml-auto flex items-center gap-1 text-[11px] text-bb-subtle" title={`${online.size} online`}>
-              <span className="h-1.5 w-1.5 rounded-full bg-bb-success" />
-              {online.size}
-            </span>
+          status
+          <span className="text-[10px] text-bb-subtle" title="Pinned">📌</span>
+          {live !== "open" ? (
+            <span className="bb-pulse ml-auto h-1.5 w-1.5 rounded-full bg-amber-500" title="Reconnecting" />
+          ) : (
+            online.size > 0 && (
+              <span className="ml-auto flex items-center gap-1 text-[11px] text-bb-subtle" title={`${online.size} online`}>
+                <span className="h-1.5 w-1.5 rounded-full bg-bb-success" />
+                {online.size}
+              </span>
+            )
           )}
         </button>
         {projects.map((p) => (
@@ -98,7 +104,6 @@ export function Sidebar({
           />
         ))}
       </div>
-      <Footer me={me.name} presence={presence} onNavigate={onNavigate} />
       {creating && (
         <NewProject
           onClose={() => {
@@ -241,46 +246,6 @@ function Glyph({ d }: { d: string }) {
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="w-3.5 shrink-0">
       <path d={d} />
     </svg>
-  );
-}
-
-function Footer({ me, presence, onNavigate }: { me: string; presence?: Presence; onNavigate: () => void }) {
-  const status = useLiveStatus();
-  const workers = presence?.workers ?? [];
-  const agents = [...new Set(workers.flatMap((w) => w.agents))];
-  return (
-    <div className="shrink-0 space-y-1 border-t border-bb-border px-3 py-2.5 text-[12px] text-bb-subtle">
-      <p className="flex items-center gap-1.5" title={workers.map((w) => `${w.name}: ${w.agents.join(", ")}`).join("\n")}>
-        <span className={cx("h-2 w-2 rounded-full", workers.length ? "bg-emerald-500" : "bg-bb-border")} />
-        {workers.length ? `${workers.length} worker${workers.length > 1 ? "s" : ""} · ${agents.join(", ")}` : "No workers"}
-        <button
-          type="button"
-          className="ml-auto hover:text-bb-fg"
-          onClick={() => {
-            go({ view: "usage" });
-            onNavigate();
-          }}
-        >
-          Usage
-        </button>
-      </p>
-      <p className="flex items-center justify-between">
-        <span className="truncate">
-          <span className={cx("mr-1.5 inline-block h-2 w-2 rounded-full", status === "open" ? "bg-emerald-500" : "bb-pulse bg-amber-500")} />
-          {me}
-        </span>
-        <button
-          type="button"
-          className="hover:text-bb-fg"
-          onClick={async () => {
-            await api.forgetMe();
-            window.location.reload();
-          }}
-        >
-          Switch
-        </button>
-      </p>
-    </div>
   );
 }
 

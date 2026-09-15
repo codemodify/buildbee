@@ -329,3 +329,12 @@ func TestMembersListsTheServer(t *testing.T) {
 		t.Fatalf("events: %+v", r.Events)
 	}
 }
+
+func TestUsageWithNoRunsIsEmptyNotNull(t *testing.T) {
+	s := newStack(t, Options{})
+	s.project("Ada", "Chat")
+	rec := s.call(http.MethodGet, "/v1/usage", "", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"by_agent":[]`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}

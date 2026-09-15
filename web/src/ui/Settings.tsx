@@ -7,7 +7,7 @@ import type { Member, Routine, Usage } from "../types";
 import { useCtx } from "./context";
 import { Avatar, Button, Empty, ErrorNote, Field, Pill, Toggle, cx, inputBase, inputClass } from "./kit";
 
-const agents = ["", "claude", "codex", "grok", "opencode", "goose", "fake"];
+export const agents = ["", "claude", "codex", "grok", "opencode", "goose", "fake"];
 
 /** Decisions lists the questions waiting for people, and lets them answer. */
 export function Decisions({ header }: { header: ReactNode }) {
@@ -262,12 +262,12 @@ function NewRoutine({ bots, onDone, onCancel }: { bots: Member[]; onDone: () => 
   );
 }
 
-/** UsageView sums what agents used, by agent and by Project. */
-export function UsageView({ header, projectId }: { header: ReactNode; projectId?: string }) {
+/** UsagePanel sums what agents used, by agent and by Project. */
+export function UsagePanel() {
   const [days, setDays] = useState(30);
-  const { data: u, error } = useLoad<Usage>(() => api.usage(projectId, days), [projectId, days]);
+  const { data: u, error } = useLoad<Usage>(() => api.usage(undefined, days), [days]);
   return (
-    <Page header={header}>
+    <div className="space-y-4">
       <div className="flex items-center gap-2">
         {[1, 7, 30, 90].map((d) => (
           <Button key={d} size="sm" tone={d === days ? "primary" : "plain"} onClick={() => setDays(d)}>
@@ -288,7 +288,7 @@ export function UsageView({ header, projectId }: { header: ReactNode; projectId?
           <p className="text-[12px] text-bb-subtle">As reported by agents.</p>
         </>
       )}
-    </Page>
+    </div>
   );
 }
 

@@ -8,16 +8,16 @@ export type Route =
   | { view: "task"; projectId: string; taskId: string }
   | { view: "decisions"; projectId: string }
   | { view: "settings"; projectId: string }
-  | { view: "usage"; projectId?: string }
-  | { view: "members" };
+  | { view: "status" };
 
 export function parse(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
   const params = new URLSearchParams(query);
   const threadId = params.get("thread") || undefined;
   const [p, projectId, section, id] = path.split("/").filter(Boolean);
-  if (p === "usage") return { view: "usage" };
-  if (p === "members") return { view: "members" };
+  // #/usage and #/members were the Server's pages before #/status held them
+  if (p === "status" || p === "usage" || p === "members") return { view: "status" };
+  if (p === "hi") return { view: "home" };
   if (p === "projects") return fromServerLink(path) ?? { view: "home" };
   if (p !== "p" || !projectId) return { view: "home" };
   switch (section) {
@@ -29,8 +29,6 @@ export function parse(hash: string): Route {
       return { view: "decisions", projectId };
     case "settings":
       return { view: "settings", projectId };
-    case "usage":
-      return { view: "usage", projectId };
     default:
       return { view: "channel", projectId, threadId };
   }
@@ -51,10 +49,8 @@ export function href(r: Route): string {
       return `#/p/${r.projectId}/decisions`;
     case "settings":
       return `#/p/${r.projectId}/settings`;
-    case "usage":
-      return r.projectId ? `#/p/${r.projectId}/usage` : "#/usage";
-    case "members":
-      return "#/members";
+    case "status":
+      return "#/status";
   }
 }
 

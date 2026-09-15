@@ -6,10 +6,10 @@ import { useLoad, useMemberIndex, usePresence, useProject } from "./store";
 import type { Message, Person, Presence, Project } from "./types";
 import { ChannelHeader, ChannelView, MenuButton } from "./ui/Channel";
 import { InboxBell } from "./ui/Inbox";
-import { Members } from "./ui/Members";
 import { ProjectCtx, type Ctx } from "./ui/context";
 import { Button, Empty, ErrorNote, cx, inputClass } from "./ui/kit";
-import { Decisions, Settings, UsageView } from "./ui/Settings";
+import { Decisions, Settings } from "./ui/Settings";
+import { Status, invitedName } from "./ui/Status";
 import { Sidebar, dmName } from "./ui/Sidebar";
 import { Board, TaskPage } from "./ui/Tasks";
 import { ThreadPanel } from "./ui/Thread";
@@ -31,7 +31,7 @@ export default function App() {
 
 /** Start asks who you are, and for a first Project when there is none. */
 function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Person) => void }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(invitedName);
   const [project, setProject] = useState("");
   const [error, setError] = useState("");
   const ready = name.trim() && (!needProject || project.trim());
@@ -39,6 +39,7 @@ function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Pers
     e.preventDefault();
     try {
       const { person } = await api.setMe(name.trim());
+      if (window.location.hash.startsWith("#/hi/")) go({ view: "home" });
       if (needProject) {
         const p = await api.createProject(project.trim());
         go({ view: "channel", projectId: p.id });
@@ -110,13 +111,9 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
       <main className="flex min-w-0 flex-1">
         {projectId ? (
           <ProjectView key={projectId} me={me} route={route} projectId={projectId} presence={presence} onMenu={menu} />
-        ) : route.view === "members" ? (
+        ) : route.view === "status" ? (
           <div className="min-w-0 flex-1">
-            <Members header={<TopBar title="# members" onMenu={menu} />} />
-          </div>
-        ) : route.view === "usage" ? (
-          <div className="min-w-0 flex-1">
-            <UsageView header={<TopBar title="Usage" onMenu={menu} />} />
+            <Status me={me} projects={projects} presence={presence} header={<TopBar title="# status" onMenu={menu} />} />
           </div>
         ) : (
           <div className="flex min-w-0 flex-1 flex-col">
@@ -165,9 +162,6 @@ function ProjectView({ me, route, projectId, presence, onMenu }: { me: Person; r
       break;
     case "settings":
       main = <Settings header={titled("Settings")} />;
-      break;
-    case "usage":
-      main = <UsageView header={titled("Usage")} projectId={projectId} />;
       break;
     default:
       main = channel ? (
