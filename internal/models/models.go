@@ -398,6 +398,16 @@ type Message struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
+// SearchHit is a message found by search, with where it is.
+type SearchHit struct {
+	Message
+	ChannelName string `json:"channel_name"`
+	ChannelKind string `json:"channel_kind"`
+	ProjectName string `json:"project_name,omitempty"` // empty for DMs between people
+	AuthorName  string `json:"author_name"`
+	AuthorKind  string `json:"author_kind"`
+}
+
 // Unread is how much of a Channel a Person has not read.
 type Unread struct {
 	ChannelID string `json:"channel_id"`

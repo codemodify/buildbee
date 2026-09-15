@@ -3,7 +3,7 @@
  * would not hear about over the socket: the Project list (archiving) and
  * your DM list (closing one).
  */
-export type Signal = "projects" | "dms";
+export type Signal = "projects" | "dms" | "switcher";
 
 export function signal(s: Signal) {
   window.dispatchEvent(new Event(`buildbee:${s}`));

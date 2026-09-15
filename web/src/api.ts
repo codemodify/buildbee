@@ -14,6 +14,7 @@ import type {
   Presence,
   Project,
   Roster,
+  SearchHit,
   Routine,
   Run,
   RunEvent,
@@ -148,6 +149,7 @@ export const api = {
     request<Usage>(`${projectId ? `/v1/projects/${projectId}/usage` : "/v1/usage"}${q({ days })}`),
   presence: () => request<Presence>("/v1/presence"),
   roster: () => request<Roster>("/v1/members"),
+  search: (query: string, projectId?: string) => request<Items<SearchHit>>(`/v1/search${q({ q: query, project_id: projectId })}`),
 
   notifications: () =>
     request<{ items: Notification[]; unread: number; has_more: boolean }>(`/v1/me/notifications${q({ limit: 50 })}`),

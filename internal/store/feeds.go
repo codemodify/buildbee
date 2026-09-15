@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/jackc/pgx/v5"
@@ -65,6 +67,62 @@ func paged[T any](ctx context.Context, q querier, base string, args []any, p Pag
 
 const messageCols = `id, seq, channel_id, project_id, member_id, body, COALESCE(thread_id::text, ''), reply_count, last_reply_at,
 	COALESCE(task_id::text, ''), edited_at, deleted_at, created_at`
+
+// SearchMessages finds messages matching every word of query as a word or
+// prefix, in open Channels of open Projects and in the Person's DMs, best
+// first. projectID narrows to one Project.
+func (s *Store) SearchMessages(ctx context.Context, personID, projectID, query string, limit int) ([]models.SearchHit, error) {
+	tsq := prefixQuery(query)
+	if tsq == "" {
+		return []models.SearchHit{}, nil
+	}
+	rows, err := s.q.Query(ctx, `SELECT `+messageColsM+`, c.name, c.kind, CASE WHEN pr.kind = 'direct' THEN '' ELSE pr.name END,
+			au.display_name, au.kind
+		FROM messages m
+		JOIN members au ON au.id = m.member_id
+		JOIN channels c ON c.id = m.channel_id AND c.archived_at IS NULL
+		JOIN projects pr ON pr.id = c.project_id AND pr.archived_at IS NULL
+		WHERE m.search @@ to_tsquery('simple', $2) AND m.deleted_at IS NULL
+			AND ($3 = '' OR c.project_id::text = $3)
+			AND (c.kind = 'channel' OR EXISTS (SELECT 1 FROM channel_members cm JOIN members me ON me.id = cm.member_id
+				WHERE cm.channel_id = c.id AND me.person_id = $1))
+		ORDER BY ts_rank(m.search, to_tsquery('simple', $2)) DESC, m.seq DESC
+		LIMIT $4`, personID, tsq, projectID, limit)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []models.SearchHit{}
+	for rows.Next() {
+		var h models.SearchHit
+		m := &h.Message
+		if err := rows.Scan(&m.ID, &m.Seq, &m.ChannelID, &m.ProjectID, &m.MemberID, &m.Body, &m.ThreadID, &m.ReplyCount, &m.LastReplyAt,
+			&m.TaskID, &m.EditedAt, &m.DeletedAt, &m.CreatedAt, &h.ChannelName, &h.ChannelKind, &h.ProjectName,
+			&h.AuthorName, &h.AuthorKind); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// prefixQuery turns free text into a tsquery that needs every word, each
+// as a prefix: "deploy fai" -> "deploy:* & fai:*". Only letters and digits
+// pass, so the result is always valid tsquery syntax.
+func prefixQuery(q string) string {
+	var words []string
+	for _, w := range strings.FieldsFunc(strings.ToLower(q), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if len(words) == 8 {
+			break
+		}
+		words = append(words, w+":*")
+	}
+	return strings.Join(words, " & ")
+}
+
+// messageColsM are messageCols for a query that names messages m.
+const messageColsM = `m.id, m.seq, m.channel_id, m.project_id, m.member_id, m.body, COALESCE(m.thread_id::text, ''), m.reply_count,
+	m.last_reply_at, COALESCE(m.task_id::text, ''), m.edited_at, m.deleted_at, m.created_at`
 
 // EditMessage replaces a message's body.
 func (s *Store) EditMessage(ctx context.Context, id, body string, at time.Time) error {

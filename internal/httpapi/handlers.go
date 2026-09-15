@@ -182,6 +182,13 @@ func (s *Server) listDMs(w http.ResponseWriter, r *http.Request) {
 	respondItems(s, w, list, err)
 }
 
+func (s *Server) search(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	hits, err := s.core.Search(r.Context(), actorFrom(r.Context()), q.Get("q"), q.Get("project_id"), limit)
+	respondItems(s, w, hits, err)
+}
+
 func (s *Server) editMessage(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Body string `json:"body"`

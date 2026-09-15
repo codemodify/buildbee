@@ -288,6 +288,15 @@ export type DM = Channel & {
   last_at: string;
 };
 
+/** SearchHit is a message found by search, with where it is. */
+export type SearchHit = Message & {
+  channel_name: string;
+  channel_kind: string;
+  project_name?: string;
+  author_name: string;
+  author_kind: string;
+};
+
 /** BotTemplate is one of the autopilot's Bots, offered when adding a Bot. */
 export type BotTemplate = { name: string; role: string; instructions: string };
 

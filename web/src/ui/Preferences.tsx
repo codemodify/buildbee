@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { api } from "../api";
+import { desktopOn, desktopPossible, setDesktop } from "../desktop";
 import { loadLook, saveLook, type Look } from "../look";
 import { useMe } from "../me";
 import { useLoad } from "../store";
@@ -28,6 +29,7 @@ function PreferencesSheet({ onClose }: { onClose: () => void }) {
   const [look, setLook] = useState<Look>(loadLook);
   const { data: prefs, setData: setPrefs } = useLoad<Prefs>(() => api.preferences(), []);
   const [err, setErr] = useState("");
+  const [desktop, setDesktopState] = useState(desktopOn);
   const change = (next: Look) => {
     setLook(next);
     saveLook(next);
@@ -87,6 +89,13 @@ function PreferencesSheet({ onClose }: { onClose: () => void }) {
           />
         </Section>
         <Section title="Notifications">
+          <label className="flex items-center justify-between text-[13.5px]">
+            <span>
+              On this computer
+              {!desktopPossible && <span className="block text-[12px] text-bb-subtle">Browsers allow it only over HTTPS or on localhost.</span>}
+            </span>
+            <Toggle label="Desktop notifications" checked={desktop} onChange={(v) => void setDesktop(v).then(setDesktopState)} />
+          </label>
           <label className="flex items-center justify-between text-[13.5px]">
             Mentions and DMs
             <Toggle label="Mentions" checked={!prefs?.mute_mentions} onChange={(v) => void mute({ mute_mentions: !v })} />

@@ -7,7 +7,8 @@ export type Route =
   | { view: "task"; projectId: string; taskId: string }
   | { view: "settings"; projectId: string }
   | { view: "status" }
-  | { view: "decisions" };
+  | { view: "decisions" }
+  | { view: "search"; q: string };
 
 export function parse(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
@@ -17,6 +18,7 @@ export function parse(hash: string): Route {
   // #/usage and #/members were the Server's pages before #/status held them
   if (p === "status" || p === "usage" || p === "members") return { view: "status" };
   if (p === "decisions") return { view: "decisions" };
+  if (p === "search") return { view: "search", q: params.get("q") ?? "" };
   if (p === "hi") return { view: "home" };
   if (p === "projects") return fromServerLink(path) ?? { view: "home" };
   if (p !== "p" || !projectId) return { view: "home" };
@@ -46,6 +48,8 @@ export function href(r: Route): string {
       return `#/p/${r.projectId}/tasks/${r.taskId}`;
     case "decisions":
       return "#/decisions";
+    case "search":
+      return `#/search?q=${encodeURIComponent(r.q)}`;
     case "settings":
       return `#/p/${r.projectId}/settings`;
     case "status":

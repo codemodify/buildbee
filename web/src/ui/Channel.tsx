@@ -8,6 +8,7 @@ import { Composer } from "./Composer";
 import { useCtx } from "./context";
 import { InboxBell } from "./Inbox";
 import { PrefsButton } from "./Preferences";
+import { SearchButton } from "./Switcher";
 import { Avatar, Button, Confirm, Empty, ErrorNote, Menu, Sheet, inputClass, type MenuItem } from "./kit";
 import { MessageList } from "./Messages";
 
@@ -111,6 +112,7 @@ export function ChannelHeader({ channel, onMenu }: { channel: Channel; onMenu: (
         {here.length > 0 && <span className="pl-3 text-[12px] text-bb-subtle">{here.length} here</span>}
       </div>
       <ChannelMenu channel={channel} />
+      <SearchButton />
       <InboxBell />
       <PrefsButton />
     </header>

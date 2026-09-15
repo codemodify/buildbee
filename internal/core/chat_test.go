@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -421,5 +422,58 @@ func TestPeopleEditAndDeleteTheirOwnMessages(t *testing.T) {
 	}
 	if _, err := f.s.EditMessage(f.ctx, ada, posted.ID, "back"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("a deleted message stays deleted: %v", err)
+	}
+}
+
+func TestSearchFindsWhatYouCanRead(t *testing.T) {
+	f := newFixture(t)
+	ada, bob, cy := f.person("Ada"), f.person("Bob"), f.person("Cy")
+	p := f.project(ada, "Search")
+	other := f.project(bob, "Other")
+	ch := p.Channels[0].ID
+	_, err := f.s.PostMessage(f.ctx, ada, ch, "The deploy failed on staging")
+	f.must(err)
+	root, err := f.s.PostMessage(f.ctx, ada, ch, "unrelated")
+	f.must(err)
+	_, err = f.s.Reply(f.ctx, bob, root.ID, "deployment notes are in the wiki")
+	f.must(err)
+	_, err = f.s.PostMessage(f.ctx, bob, other.Channels[0].ID, "deploy Other on Friday")
+	f.must(err)
+	dm, err := f.s.OpenDirect(f.ctx, ada, NewDirect{PersonIDs: []string{bob.PersonID}})
+	f.must(err)
+	_, err = f.s.PostMessage(f.ctx, ada, dm.ID, "private deploy key rotation")
+	f.must(err)
+	gone, err := f.s.PostMessage(f.ctx, ada, ch, "deploy typo")
+	f.must(err)
+	f.must(f.s.DeleteMessage(f.ctx, ada, gone.ID))
+
+	bodies := func(a Actor, q, project string) []string {
+		hits, err := f.s.Search(f.ctx, a, q, project, 0)
+		f.must(err)
+		var out []string
+		for _, h := range hits {
+			out = append(out, h.Body)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := bodies(ada, "depl", ""); len(got) != 4 {
+		t.Fatalf("ada, prefix across channels, replies and her DM: %q", got)
+	}
+	if got := bodies(cy, "depl", ""); len(got) != 3 || slices.Contains(got, "private deploy key rotation") {
+		t.Fatalf("cy does not see the DM: %q", got)
+	}
+	if got := bodies(ada, "deploy staging", ""); len(got) != 1 || got[0] != "The deploy failed on staging" {
+		t.Fatalf("every word: %q", got)
+	}
+	if got := bodies(ada, "deploy", other.ID); len(got) != 1 || got[0] != "deploy Other on Friday" {
+		t.Fatalf("one project: %q", got)
+	}
+	if got := bodies(ada, "'&|!(", ""); len(got) != 0 {
+		t.Fatalf("punctuation only: %q", got)
+	}
+	hits, _ := f.s.Search(f.ctx, ada, "rotation", "", 0)
+	if len(hits) != 1 || hits[0].ChannelKind != models.ChannelDM || hits[0].ProjectName != "" {
+		t.Fatalf("dm hit: %+v", hits)
 	}
 }

@@ -362,6 +362,18 @@ func (s *Service) DMs(ctx context.Context, a Actor, projectID string) ([]models.
 	return s.st.ListDMs(ctx, projectID, m.ID)
 }
 
+// Search finds messages the acting Person can read that contain every
+// word of query (as words or prefixes), best first; projectID narrows it.
+func (s *Service) Search(ctx context.Context, a Actor, query, projectID string, limit int) ([]models.SearchHit, error) {
+	if !a.IsPerson() {
+		return nil, ErrNoActor
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	return s.st.SearchMessages(ctx, a.PersonID, projectID, query, limit)
+}
+
 // EditMessage changes the text of the acting Person's own message. Mentions
 // in the new text start nothing: a message does its work when posted.
 func (s *Service) EditMessage(ctx context.Context, a Actor, id, body string) (*models.Message, error) {

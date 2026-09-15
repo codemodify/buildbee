@@ -48,7 +48,13 @@ function useThrottled(fn: () => void, ms: number) {
   const ref = useRef(fn);
   ref.current = fn;
   const timer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(timer.current);
+      timer.current = undefined; // a cleared timer must not block later calls
+    },
+    [],
+  );
   return useCallback(() => {
     if (timer.current !== undefined) return;
     timer.current = window.setTimeout(() => {
@@ -91,7 +97,24 @@ export function useProject(projectId: string | undefined) {
   }, [projectId]);
   const refresh = useThrottled(reload, 400);
   useTopic(projectId ? `project:${projectId}` : null, null, refresh);
+  useRefreshOnReconnect(refresh);
   return { data: data ?? undefined, error, reload };
+}
+
+/**
+ * useRefreshOnReconnect reloads after the socket comes back: live-only
+ * subscriptions miss what happened while it was down.
+ */
+function useRefreshOnReconnect(refresh: () => void) {
+  const status = useLiveStatus();
+  const dropped = useRef(false);
+  useEffect(() => {
+    if (status === "offline") dropped.current = true;
+    if (status === "open" && dropped.current) {
+      dropped.current = false;
+      refresh();
+    }
+  }, [status, refresh]);
 }
 
 /** useChannel holds a Channel's root messages, live. */
@@ -250,6 +273,7 @@ export function useDMs(personId: string, activeId: string | undefined) {
   const refresh = useThrottled(reload, 300);
   useTopic(`person:${personId}`, null, refresh);
   useEffect(() => onSignal("dms", refresh), [refresh]);
+  useRefreshOnReconnect(refresh);
   const dms = data ?? [];
   const key = dms.map((d) => d.id).join(",");
   useEffect(() => {

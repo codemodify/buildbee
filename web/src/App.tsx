@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api } from "./api";
+import { useDesktopNotifications } from "./desktop";
 import { MeContext } from "./me";
 import { onSignal } from "./signals";
 import { go, useRoute, type Route } from "./route";
@@ -10,6 +11,8 @@ import { InboxBell } from "./ui/Inbox";
 import { ProjectCtx } from "./ui/context";
 import { Decisions } from "./ui/Decisions";
 import { PrefsButton } from "./ui/Preferences";
+import { SearchView } from "./ui/Search";
+import { SearchButton, Switcher } from "./ui/Switcher";
 import { useProjectCtx } from "./ui/scope";
 import { Button, Empty, ErrorNote, cx, inputClass } from "./ui/kit";
 import { Settings } from "./ui/Settings";
@@ -77,6 +80,9 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
   const route = useRoute();
   const presence = usePresence();
   const [drawer, setDrawer] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  useDesktopNotifications(me.id);
+  useEffect(() => onSignal("switcher", () => setSwitching(true)), []);
   // On wide screens the sidebar can be hidden to leave the channel and thread.
   const [hidden, setHidden] = useState(() => stored("buildbee.sidebar.hidden") === "1");
   useEffect(() => store("buildbee.sidebar.hidden", hidden ? "1" : "0"), [hidden]);
@@ -85,6 +91,10 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
       if ((e.ctrlKey || e.metaKey) && e.key === "\\") {
         e.preventDefault();
         setHidden((h) => !h);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSwitching((s) => !s);
       }
     };
     window.addEventListener("keydown", on);
@@ -129,6 +139,10 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
           <div className="min-w-0 flex-1">
             <Status me={me} projects={projects} presence={presence} header={<TopBar title="# status" onMenu={menu} />} />
           </div>
+        ) : route.view === "search" ? (
+          <div className="min-w-0 flex-1">
+            <SearchView q={route.q} header={<TopBar title="Search" onMenu={menu} />} />
+          </div>
         ) : route.view === "decisions" ? (
           <div className="min-w-0 flex-1">
             <Decisions me={me} projects={projects} presence={presence} header={<TopBar title="# decisions" onMenu={menu} />} />
@@ -140,6 +154,7 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
           </div>
         )}
       </main>
+      {switching && <Switcher me={me} projects={projects} onClose={() => setSwitching(false)} />}
     </div>
   );
 }
@@ -198,6 +213,7 @@ function TopBar({ title, sub, onMenu }: { title: string; sub?: string; onMenu: (
       <h1 className="text-[15px] font-semibold">{title}</h1>
       {sub && <span className="truncate text-[13px] text-bb-subtle">{sub}</span>}
       <div className="ml-auto flex items-center">
+        <SearchButton />
         <InboxBell />
         <PrefsButton />
       </div>

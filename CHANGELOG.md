@@ -12,6 +12,9 @@
 - New Projects start with you and `#tasks`, no Bots (`default_bots: true` on `POST /v1/projects` adds the autopilot's four)
 
 ### Added (chat)
+- Message search (`GET /v1/search`, migration 0003): words and prefixes across channels, threads and your DMs
+- Ctrl+K (or the magnifier) jumps to any channel, DM, person, Project settings or pinned place, or searches messages
+- Desktop notifications, from Your settings (browsers allow them on HTTPS or localhost)
 - Edit and delete your own messages (`PATCH`/`DELETE /v1/messages/{id}`): "(edited)" marks edits, a deleted message keeps its thread
 
 ### Added (managing)
@@ -21,6 +24,7 @@
 - Delete a DM for everyone (`DELETE /v1/dms/{id}`), or close it for yourself, from its ⋯ menu
 
 ### Changed
+- Project and DM lists reload after the live connection comes back, so nothing missed while it was down stays stale
 - The database baseline is frozen: schema changes ship as new migrations, and a test pins every released file's checksum
 - DMs are between people only: no DMs with Bots; `POST /v1/projects/{id}/dms` is gone
 - A worker in a container offers only the agents its user is logged in to

@@ -42,6 +42,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `POST /v1/dms/{id}/close` | take a DM out of your list; it comes back with a new message or when you open it again. Nothing is deleted |
 | `GET /v1/projects/{id}/unread`, `POST /v1/channels/{id}/read` | per Channel and DM: `{channel_id, unread, last_seq}` / mark read up to `{seq}` |
 | `GET /v1/members` | everyone on the Server: `people` with their Projects (`left_at` if they left), `bots` with `project_name`, and recent `events` (created, joined, left, added), newest first |
+| `GET /v1/search?q=&project_id=` | messages you can read (open channels of open Projects, your DMs) with every word of `q` as a word or prefix, best first, up to 50; each with `channel_name`, `channel_kind`, `project_name` and `author_name` |
 | `GET /v1/presence` | people with the app open; workers seen in the last 90 s with their agents, `slots` and `running`; `agents` (each agent's `workers`, `running`, `queued`; `any` is Runs that take whichever); `local`, the Server's own worker (`state` off, starting, running or unavailable, with `reason` and `isolation`) |
 | `GET /v1/projects/{id}/activity` | page of the Project log, newest first (`?type=`) |
 | `GET/POST /v1/projects/{id}/tasks` | list / create `{title, body, assignee_member_id, handoff_role, handoff_note}`; `handoff_role` defaults to `scout`, `none` skips |

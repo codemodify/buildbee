@@ -96,7 +96,7 @@ export function MessageItem({
         ) : m.deleted_at ? (
           <p className="text-[13.5px] text-bb-subtle italic">Message deleted</p>
         ) : (
-          <div className="text-[14px] leading-relaxed text-bb-fg">
+          <div className={cx("text-[14px] leading-relaxed text-bb-fg", m.edited_at && "[&_p:last-child]:inline")}>
             <Markdown text={m.body} mentions={names} />
             {m.edited_at && (
               <span className="ml-1 text-[11px] text-bb-subtle" title={`Edited ${new Date(m.edited_at).toLocaleString()}`}>
