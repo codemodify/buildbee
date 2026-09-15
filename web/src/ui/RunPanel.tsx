@@ -38,7 +38,7 @@ export function RunPanel({ runId, defaultOpen = true }: { runId: string; default
       </button>
       {open && (
         <div className="space-y-3 border-t border-bb-border px-3 py-3">
-          {run.status === "pending" && <p className="text-[13px] text-bb-subtle">Waiting for a worker that offers {run.agent || "an agent"}.</p>}
+          {run.status === "pending" && <p className="text-[13px] text-bb-subtle">Waiting for a worker{run.agent ? ` (${run.agent})` : ""}.</p>}
           {view.plan.length > 0 && <PlanView entries={view.plan} />}
           {view.steps.length > 0 && <Steps steps={view.steps} />}
           {view.reply && (
@@ -221,7 +221,7 @@ function Steer({ run }: { run: Run }) {
         <input
           className={inputClass}
           value={text}
-          placeholder="Tell the agent something…"
+          placeholder="Message the agent"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void send(false)}
         />
@@ -235,7 +235,7 @@ function Steer({ run }: { run: Run }) {
       <div className="flex items-center justify-between">
         <span className="text-[11.5px] text-bb-danger">{err}</span>
         <Button size="sm" tone="danger" disabled={busy} onClick={() => void api.cancelRun(run.id).catch((e: unknown) => setErr(String(e)))}>
-          Cancel Run
+          Cancel
         </Button>
       </div>
     </div>

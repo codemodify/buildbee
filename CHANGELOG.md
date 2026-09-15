@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased — Phase 2b (chat client)
+## Unreleased — Phase 2c (client feedback)
+
+### Changed
+- Every Project starts with `#ping` instead of `#general`: pinned first, cannot be renamed or archived, and Pulse posts joins and leaves there
+- `POST /v1/projects/{id}/leave`; Members who left keep their name on past messages (`left_at`) and rejoin by writing again
+- The sidebar lists every Project as a section that opens and closes (all at once too), remembered per browser; it hides entirely with the menu button or Ctrl+\\
+- The thread panel is resizable (drag or arrow keys; double-click resets)
+- First start asks for your name, and a Project name when the Server has none; nothing else is seeded
+- Shorter copy across the client and in Bots' thread notes
+
+## Phase 2b (chat client)
 
 ### Changed
 - The web client is rewritten around one live WebSocket: Channels, DMs, threads, Task threads with the live Run, board, Task pages, Decisions, settings, usage, notifications; light and dark; phone layouts

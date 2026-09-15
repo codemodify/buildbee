@@ -130,7 +130,7 @@ func (s *Service) CreateTask(ctx context.Context, a Actor, projectID string, in 
 		if opener == nil {
 			opener = w.voice(ctx, projectID)
 		}
-		if err := w.openThread(ctx, proj, task, opener, "New Task: "+title, in.ChannelID); err != nil {
+		if err := w.openThread(ctx, proj, task, opener, "Task: "+title, in.ChannelID); err != nil {
 			return err
 		}
 		out = &TaskCreated{Task: *task}

@@ -202,7 +202,10 @@ func (w *work) member(ctx context.Context, a Actor, projectID string, join bool)
 		return nil, nil
 	}
 	m, err := w.st.MemberForPerson(ctx, projectID, a.PersonID)
-	if err == nil || !errors.Is(err, store.ErrNotFound) || !join {
+	if err == nil && (m.LeftAt == nil || !join) {
+		return m, nil
+	}
+	if err != nil && (!errors.Is(err, store.ErrNotFound) || !join) {
 		return m, err
 	}
 	p, err := w.st.GetPerson(ctx, a.PersonID)
@@ -219,6 +222,9 @@ func (w *work) member(ctx context.Context, a Actor, projectID string, join bool)
 	if joined {
 		if err := w.activity(ctx, projectID, whoOf(m, a), models.TypeMember, "joined", m.ID,
 			map[string]any{"kind": m.Kind, "role": m.Role, "name": m.DisplayName}); err != nil {
+			return nil, err
+		}
+		if err := w.ping(ctx, projectID, m.DisplayName+" joined."); err != nil {
 			return nil, err
 		}
 	}

@@ -27,10 +27,10 @@ DELETE /v1/me                            → forget this browser's Person
 | --- | --- |
 | `GET/POST /v1/projects` | list (`?archived=1` includes archived) / create `{name, auto_run}` |
 | `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, merge_policy: auto\|approval, max_runs, instructions, repo_url, default_branch, archived}`; `auto_run` is [autopilot](autopilot.md) |
-| `POST /v1/projects/{id}/join` | join as `member` |
+| `POST /v1/projects/{id}/join`, `POST /v1/projects/{id}/leave` | join as `member` / leave (messages keep your name; writing again rejoins). Both are announced in `#ping` |
 | `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions, agent}` |
 | `PATCH /v1/members/{id}` | `{display_name, instructions, agent}`; `agent` applies to Bots |
-| `GET/POST /v1/projects/{id}/channels`, `PATCH /v1/channels/{id}` | Channels; `{name, archived}` |
+| `GET/POST /v1/projects/{id}/channels`, `PATCH /v1/channels/{id}` | Channels; `{name, archived}`. Every Project starts with `#ping` (`locked`: first, cannot be renamed or archived), where joins and leaves are posted |
 | `GET/POST /v1/channels/{id}/messages` | page root messages (each with `reply_count`, `task_id`) / post `{body}`; `@Bot` opens a Task handed to it, with this message as its thread, and starts the Bot's Run; `@Person` notifies them |
 | `GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies` | a thread `{root, replies, has_more}` / reply `{body}`. In a Task's thread, `@Bot` hands that Task on, and any other reply reaches the agent working on it |
 | `GET/POST /v1/projects/{id}/dms` | your DMs / open the DM with `{member_ids}` (people or Bots; one DM per set of members). A message in a DM with a Bot asks it to work, as a mention does |

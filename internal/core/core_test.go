@@ -129,8 +129,20 @@ func TestCreateProjectSeedsOwnerBotsAndChannel(t *testing.T) {
 			t.Fatalf("missing bot %s", role)
 		}
 	}
-	if len(p.Channels) != 1 || p.Channels[0].Name != "general" {
+	if len(p.Channels) != 1 || p.Channels[0].Name != "ping" || !p.Channels[0].Locked {
 		t.Fatalf("channels: %+v", p.Channels)
+	}
+	msgs, _, err := f.s.Messages(f.ctx, ada, p.Channels[0].ID, store.Page{})
+	f.must(err)
+	if len(msgs) != 2 || msgs[0].Body != "Ada joined." || msgs[1].Body != "Scout, Builder, Sentry, Pulse joined." {
+		t.Fatalf("#ping: %+v", msgs)
+	}
+	name, yes := "lobby", true
+	if _, err := f.s.UpdateChannel(f.ctx, ada, p.Channels[0].ID, ChannelPatch{Name: &name}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("#ping cannot be renamed: %v", err)
+	}
+	if _, err := f.s.UpdateChannel(f.ctx, ada, p.Channels[0].ID, ChannelPatch{Archived: &yes}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("#ping cannot be archived: %v", err)
 	}
 	if rs, err := f.s.Routines(f.ctx, p.ID); err != nil || len(rs) != 0 {
 		t.Fatalf("no Routines until someone schedules one: %+v %v", rs, err)
@@ -195,6 +207,7 @@ func TestMentioningABotCreatesATaskHandedToIt(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
 	p := f.project(ada, "M")
+	before := len(f.pub.topic("channel:" + p.Channels[0].ID))
 	posted, err := f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "@Builder add rate limiting to /login\nuse 10 req/min")
 	f.must(err)
 	builder := bot(p, models.RoleBuilder)
@@ -216,7 +229,7 @@ func TestMentioningABotCreatesATaskHandedToIt(t *testing.T) {
 	if len(runs) != 1 || runs[0].Kind != models.RunBuild {
 		t.Fatalf("asking a Bot starts its Run: %+v", runs)
 	}
-	evs := f.pub.topic("channel:" + p.Channels[0].ID)
+	evs := f.pub.topic("channel:" + p.Channels[0].ID)[before:]
 	if len(evs) != 2 || evs[0].Cursor != posted.Seq || evs[1].Cursor <= posted.Seq {
 		t.Fatalf("the message, then the Builder's note in its thread, in order: %+v", evs)
 	}
@@ -561,8 +574,9 @@ func TestRoutineOpensATaskOnceAcrossConcurrentTicks(t *testing.T) {
 		t.Fatalf("Scout starts on it: %+v", runs)
 	}
 	msgs, _, _ := f.s.Messages(f.ctx, ada, p.Channels[0].ID, store.Page{})
-	if len(msgs) != 1 || msgs[0].MemberID != bot(p, models.RolePulse).ID || !strings.Contains(msgs[0].Body, "for Scout") {
-		t.Fatalf("Pulse says so in #general: %+v", msgs)
+	last := msgs[len(msgs)-1]
+	if last.MemberID != bot(p, models.RolePulse).ID || !strings.Contains(last.Body, "→ Scout") || last.TaskID == "" {
+		t.Fatalf("Pulse opens the Task's thread in #ping: %+v", msgs)
 	}
 	if n := f.inbox(ada); len(n) != 1 || n[0].Kind != "routine" {
 		t.Fatalf("inbox: %+v", n)

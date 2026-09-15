@@ -77,6 +77,7 @@ export const api = {
     projectId: string,
     body: { display_name: string; kind: string; role?: string; agent?: string; instructions?: string },
   ) => request<Member>(`/v1/projects/${projectId}/members`, post(body)),
+  leave: (projectId: string) => request<unknown>(`/v1/projects/${projectId}/leave`, post()),
   updateMember: (id: string, body: { display_name?: string; instructions?: string; agent?: string }) =>
     request<Member>(`/v1/members/${id}`, patch(body)),
 

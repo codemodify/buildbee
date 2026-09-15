@@ -96,7 +96,8 @@ func TestErrorStatuses(t *testing.T) {
 func TestMessagesPageByCursor(t *testing.T) {
 	s := newStack(t, Options{})
 	p := s.project("Ada", "Chat")
-	ch := "/v1/channels/" + p.Channels[0].ID + "/messages"
+	fresh := ok[obj](t, s.call(http.MethodPost, "/v1/projects/"+p.ID+"/channels", "Ada", obj{"name": "chat"}), http.StatusCreated)
+	ch := "/v1/channels/" + fresh["id"].(string) + "/messages"
 	for _, b := range []string{"one", "two", "three"} {
 		ok[obj](t, s.call(http.MethodPost, ch, "Ada", obj{"body": b}), http.StatusCreated)
 	}
@@ -248,7 +249,7 @@ func TestWebSocketStreamsThroughTheStack(t *testing.T) {
 	srv := httptest.NewServer(s.h)
 	t.Cleanup(srv.Close)
 	p := s.project("Ada", "Live")
-	ch := p.Channels[0].ID
+	ch := ok[obj](t, s.call(http.MethodPost, "/v1/projects/"+p.ID+"/channels", "Ada", obj{"name": "live"}), http.StatusCreated)["id"].(string)
 	ok[obj](t, s.call(http.MethodPost, "/v1/channels/"+ch+"/messages", "Ada", obj{"body": "before"}), http.StatusCreated)
 
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/v1/ws", nil)

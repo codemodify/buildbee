@@ -17,7 +17,7 @@ export function Decisions({ header }: { header: ReactNode }) {
     <Page header={header}>
       <ErrorNote>{err}</ErrorNote>
       {data.decisions.length === 0 ? (
-        <Empty title="Nothing to decide">Questions from Bots and autopilot (such as “Merge it?”) show up here.</Empty>
+        <Empty title="No open decisions" />
       ) : (
         <div className="space-y-3">
           {data.decisions.map((d) => (
@@ -45,7 +45,7 @@ export function Decisions({ header }: { header: ReactNode }) {
                 ))}
                 {d.task_id && (
                   <button type="button" className="ml-auto text-[12.5px] text-bb-muted hover:text-bb-fg" onClick={() => go({ view: "task", projectId: data.project.id, taskId: d.task_id! })}>
-                    Open Task
+                    Task
                   </button>
                 )}
               </div>
@@ -74,31 +74,31 @@ export function Settings({ header }: { header: ReactNode }) {
   return (
     <Page header={header}>
       <ErrorNote>{err}</ErrorNote>
-      <Card title="Autopilot" subtitle="Bots take each Task from plan to merged code by themselves.">
-        <Row label="Autopilot" hint="New Tasks go to Scout, then Builder, Sentry and merge; changes and failed CI go back to Builder.">
+      <Card title="Autopilot">
+        <Row label="Autopilot" hint="Scout → Builder → Sentry → merge, unattended.">
           <Toggle label="Autopilot" checked={!!p.auto_run} onChange={(v) => void save({ auto_run: v })} />
         </Row>
-        <Row label="Merging" hint="Auto merges approved work once CI passes; Approval asks people with a Decision.">
+        <Row label="Merging" hint="Auto: after approval and green CI. Approval: ask first.">
           <select className={cx(inputBase, "w-40")} value={p.merge_policy ?? "auto"} onChange={(e) => void save({ merge_policy: e.target.value })}>
             <option value="auto">Auto</option>
             <option value="approval">Approval</option>
           </select>
         </Row>
-        <Row label="Runs at once" hint="0 means no limit; workers serve quieter Projects first.">
+        <Row label="Runs at once" hint="0 = no limit.">
           <NumberInput value={p.max_runs ?? 0} onSave={(v) => void save({ max_runs: v })} />
         </Row>
       </Card>
 
-      <Card title="Repository" subtitle="Every Run works in its own checkout; builds push a branch and open a pull request.">
+      <Card title="Repository">
         <TextSetting label="Repo URL" value={p.repo_url ?? ""} placeholder="git@github.com:acme/app.git" onSave={(v) => save({ repo_url: v })} />
         <TextSetting label="Default branch" value={p.default_branch ?? ""} placeholder="main" onSave={(v) => save({ default_branch: v })} />
       </Card>
 
-      <Card title="Project instructions" subtitle="Every agent reads these first: conventions, commands, what not to touch.">
-        <TextSetting multiline value={p.instructions ?? ""} placeholder={"Run `make test` before you finish.\nNever edit files under vendor/."} onSave={(v) => save({ instructions: v })} />
+      <Card title="Instructions" subtitle="Read by every agent.">
+        <TextSetting multiline value={p.instructions ?? ""} onSave={(v) => save({ instructions: v })} />
       </Card>
 
-      <Card title="Bots" subtitle="Which agent each Bot runs as, and what it should always keep in mind.">
+      <Card title="Bots">
         <div className="divide-y divide-bb-border">
           {data.members
             .filter((m) => m.kind === "bot")
@@ -109,6 +109,25 @@ export function Settings({ header }: { header: ReactNode }) {
       </Card>
 
       <Routines />
+
+      <Card title="Membership">
+        <Row label="Leave Project" hint="Your messages stay. Writing here again brings you back.">
+          <Button
+            size="sm"
+            tone="danger"
+            onClick={async () => {
+              try {
+                await api.leave(p.id);
+                reload();
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+              }
+            }}
+          >
+            Leave
+          </Button>
+        </Row>
+      </Card>
     </Page>
   );
 }
@@ -168,10 +187,10 @@ function Routines() {
     }
   }
   return (
-    <Card title="Routines" subtitle="Work on a schedule: each firing opens a Task with the prompt and hands it to a Bot." action={<Button size="sm" onClick={() => setAdding(true)}>New Routine</Button>}>
+    <Card title="Routines" subtitle="Scheduled prompts; each run opens a Task." action={<Button size="sm" onClick={() => setAdding(true)}>New</Button>}>
       <ErrorNote>{err}</ErrorNote>
       {adding && <NewRoutine bots={bots} onDone={() => (setAdding(false), reload())} onCancel={() => setAdding(false)} />}
-      {(list?.items ?? []).length === 0 && !adding && <p className="text-[13px] text-bb-subtle">For example: “Update dependencies” every week.</p>}
+
       <div className="divide-y divide-bb-border">
         {(list?.items ?? []).map((r: Routine) => (
           <div key={r.id} className="flex items-start gap-3 py-3">
@@ -184,7 +203,7 @@ function Routines() {
               {r.last_run_at && <p className="text-[11.5px] text-bb-subtle">Last {ago(r.last_run_at)} ago</p>}
             </div>
             <Button size="sm" onClick={() => void act(() => api.fireRoutine(r.id))}>
-              Run now
+              Run
             </Button>
           </div>
         ))}
@@ -213,8 +232,8 @@ function NewRoutine({ bots, onDone, onCancel }: { bots: Member[]; onDone: () => 
         }
       }}
     >
-      <input className={inputClass} placeholder="Update dependencies" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-      <textarea className={cx(inputClass, "min-h-20")} placeholder="Update dependencies to their latest compatible versions, fix what breaks, keep the change small." value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <input className={inputClass} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      <textarea className={cx(inputClass, "min-h-20")} placeholder="Prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
       <div className="flex flex-wrap gap-2">
         <select className={cx(inputBase, "w-auto")} value={schedule} onChange={(e) => setSchedule(e.target.value)} aria-label="Schedule">
           <option value="1h">Every hour</option>
@@ -266,7 +285,7 @@ export function UsageView({ header, projectId }: { header: ReactNode; projectId?
           </div>
           <UsageTable title="By agent" rows={u.by_agent} />
           {u.by_project && <UsageTable title="By Project" rows={u.by_project} />}
-          <p className="text-[12px] text-bb-subtle">Costs are what agents report; subscription logins may report none.</p>
+          <p className="text-[12px] text-bb-subtle">As reported by agents.</p>
         </>
       )}
     </Page>

@@ -338,7 +338,7 @@ func (s *Service) fire(ctx context.Context, a Actor, r *models.Routine) (bool, e
 		if err != nil {
 			return err
 		}
-		if err := w.openThread(ctx, proj, task, from, "Routine "+r.Name+" opened \""+title+"\" for "+to.DisplayName+".", ""); err != nil {
+		if err := w.openThread(ctx, proj, task, from, "Routine "+r.Name+": "+title+" → "+to.DisplayName+".", ""); err != nil {
 			return err
 		}
 		if _, _, err := w.handoff(ctx, proj, task, from, to, a, "Scheduled by Routine "+r.Name+".", true); err != nil {

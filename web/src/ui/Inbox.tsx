@@ -38,7 +38,7 @@ export function InboxBell() {
             )}
           </div>
           <ul className="max-h-96 divide-y divide-bb-border overflow-y-auto">
-            {items.length === 0 && <li className="px-3 py-6 text-center text-[13px] text-bb-subtle">You're all caught up.</li>}
+            {items.length === 0 && <li className="px-3 py-6 text-center text-[13px] text-bb-subtle">Nothing new.</li>}
             {items.map((n) => (
               <li key={n.id}>
                 <button

@@ -125,15 +125,15 @@ func (w *work) createRun(ctx context.Context, proj *models.Project, task *models
 func startNote(r models.Run) string {
 	with := ""
 	if r.Agent != "" {
-		with = " with " + r.Agent
+		with = " (" + r.Agent + ")"
 	}
 	switch r.Kind {
 	case models.RunPlan:
-		return "I'll look into this and write a plan" + with + "."
+		return "Planning" + with + "."
 	case models.RunReview:
-		return "Reviewing the changes" + with + "."
+		return "Reviewing" + with + "."
 	default:
-		return "Working on this" + with + "."
+		return "Building" + with + "."
 	}
 }
 

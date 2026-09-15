@@ -149,7 +149,7 @@ func (w *work) openDecision(ctx context.Context, projectID string, by who, asker
 	}
 	if d.TaskID != "" {
 		if task, err := w.st.GetTask(ctx, d.TaskID, false); err == nil {
-			if err := w.note(ctx, task, w.voice(ctx, projectID), "Decision needed: "+d.Prompt); err != nil {
+			if err := w.note(ctx, task, w.voice(ctx, projectID), "Decision: "+d.Prompt); err != nil {
 				return nil, err
 			}
 		}

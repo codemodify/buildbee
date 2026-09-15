@@ -99,6 +99,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	respond(s, w, http.StatusCreated, m, err)
 }
 
+func (s *Server) leaveProject(w http.ResponseWriter, r *http.Request) {
+	err := s.core.Leave(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, map[string]bool{"left": true}, err)
+}
+
 func (s *Server) patchMember(w http.ResponseWriter, r *http.Request) {
 	var in core.MemberPatch
 	if !s.decode(w, r, &in) {

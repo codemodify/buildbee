@@ -13,6 +13,7 @@ export type Member = {
   role: string;
   instructions?: string;
   agent?: string;
+  left_at?: string;
 };
 
 export type Channel = {
@@ -20,6 +21,7 @@ export type Channel = {
   project_id: string;
   name: string;
   kind?: "channel" | "dm" | string;
+  locked?: boolean;
   member_ids?: string[];
   archived_at?: string;
 };

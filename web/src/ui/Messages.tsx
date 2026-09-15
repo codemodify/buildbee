@@ -108,7 +108,7 @@ export function MessageItem({
           onClick={() => onOpenThread(m)}
           className="absolute top-1 right-3 hidden rounded-md border border-bb-border bg-bb-surface px-2 py-0.5 text-[12px] text-bb-muted shadow-sm group-hover:block"
         >
-          Reply in thread
+          Reply
         </button>
       )}
     </div>
@@ -127,7 +127,7 @@ export function TaskCard({ taskId, onOpen }: { taskId: string; onOpen?: () => vo
         <button type="button" onClick={onOpen} className="min-w-0 text-left">
           <p className="truncate text-[13.5px] font-semibold hover:underline">{task.title}</p>
           <p className="mt-0.5 text-[12px] text-bb-subtle">
-            {assignee ? `With ${assignee.display_name}` : "Unassigned"}
+            {assignee?.display_name ?? "Unassigned"}
             {task.branch && (
               <>
                 {" · "}
@@ -147,7 +147,7 @@ export function TaskCard({ taskId, onOpen }: { taskId: string; onOpen?: () => vo
           }}
           className="text-bb-muted hover:text-bb-fg"
         >
-          Open Task
+          Open
         </a>
         {task.pr_url && (
           <a href={task.pr_url} target="_blank" rel="noreferrer noopener" className="text-bb-accent hover:underline">

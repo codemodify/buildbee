@@ -50,8 +50,8 @@ export function ThreadPanel({ rootId, onClose }: { rootId: string; onClose: () =
       <div className="shrink-0 p-3">
         <Composer
           members={data.members}
-          placeholder={taskId ? "Reply, or @Bot to hand it on" : "Reply"}
-          hint={taskId ? "Replies reach the agent while it works" : undefined}
+          placeholder="Reply"
+          hint={taskId ? "Reaches the agent while it works · @Bot hands it on" : undefined}
           onSend={async (body) => add(await api.reply(rootId, body))}
         />
       </div>
@@ -101,7 +101,7 @@ function TaskHeader({ taskId }: { taskId: string }) {
         <button type="button" className="min-w-0 text-left" onClick={() => go({ view: "task", projectId: data.project.id, taskId })}>
           <h3 className="text-[15px] leading-snug font-semibold hover:underline">{detail.title}</h3>
           <p className="mt-0.5 text-[12px] text-bb-subtle">
-            {assignee ? `With ${assignee.display_name}` : "Unassigned"}
+            {assignee?.display_name ?? "Unassigned"}
             {detail.branch && <span className="font-mono"> · {detail.branch}</span>}
           </p>
         </button>
@@ -119,26 +119,26 @@ function TaskHeader({ taskId }: { taskId: string }) {
         {!active && detail.status !== "done" && (
           <>
             <Button size="sm" disabled={busy} onClick={() => void handTo("scout")}>
-              Ask Scout to plan
+              Plan
             </Button>
             <Button size="sm" disabled={busy} onClick={() => void handTo("builder")}>
-              Ask Builder to build
+              Build
             </Button>
             {detail.branch && (
               <Button size="sm" disabled={busy} onClick={() => void handTo("sentry")}>
-                Ask Sentry to review
+                Review
               </Button>
             )}
           </>
         )}
         {detail.status !== "done" && detail.status !== "canceled" && (
           <Button size="sm" tone="ghost" disabled={busy} onClick={() => void act(() => api.updateTask(taskId, { status: "done" }))}>
-            Mark done
+            Done
           </Button>
         )}
         {detail.status !== "canceled" && detail.status !== "done" && (
           <Button size="sm" tone="ghost" disabled={busy} onClick={() => void act(() => api.updateTask(taskId, { status: "canceled" }))}>
-            Cancel Task
+            Cancel
           </Button>
         )}
       </div>

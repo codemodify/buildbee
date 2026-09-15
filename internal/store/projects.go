@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/codemodify/buildbee/internal/models"
 )
@@ -58,10 +59,10 @@ func (s *Store) UpdateProject(ctx context.Context, p models.Project) error {
 
 // --- members ---
 
-const memberCols = `id, project_id, COALESCE(person_id::text, ''), kind, display_name, role, instructions, agent, created_at`
+const memberCols = `id, project_id, COALESCE(person_id::text, ''), kind, display_name, role, instructions, agent, left_at, created_at`
 
 func scanMember(row interface{ Scan(...any) error }, m *models.Member) error {
-	return row.Scan(&m.ID, &m.ProjectID, &m.PersonID, &m.Kind, &m.DisplayName, &m.Role, &m.Instructions, &m.Agent, &m.CreatedAt)
+	return row.Scan(&m.ID, &m.ProjectID, &m.PersonID, &m.Kind, &m.DisplayName, &m.Role, &m.Instructions, &m.Agent, &m.LeftAt, &m.CreatedAt)
 }
 
 func (s *Store) InsertMember(ctx context.Context, m models.Member) error {
@@ -111,11 +112,11 @@ func (s *Store) ListMembers(ctx context.Context, projectID string) ([]models.Mem
 
 // --- channels ---
 
-const channelCols = `id, project_id, name, kind, archived_at, created_at,
+const channelCols = `id, project_id, name, kind, locked, archived_at, created_at,
 	COALESCE((SELECT array_agg(member_id::text ORDER BY member_id) FROM channel_members cm WHERE cm.channel_id = channels.id), '{}')`
 
 func scanChannel(row interface{ Scan(...any) error }, c *models.Channel) error {
-	if err := row.Scan(&c.ID, &c.ProjectID, &c.Name, &c.Kind, &c.ArchivedAt, &c.CreatedAt, &c.Members); err != nil {
+	if err := row.Scan(&c.ID, &c.ProjectID, &c.Name, &c.Kind, &c.Locked, &c.ArchivedAt, &c.CreatedAt, &c.Members); err != nil {
 		return err
 	}
 	if len(c.Members) == 0 {
@@ -128,8 +129,8 @@ func (s *Store) InsertChannel(ctx context.Context, c models.Channel) error {
 	if c.Kind == "" {
 		c.Kind = models.ChannelOpen
 	}
-	_, err := s.q.Exec(ctx, `INSERT INTO channels (id, project_id, name, kind, created_at) VALUES ($1, $2, $3, $4, $5)`,
-		c.ID, c.ProjectID, c.Name, c.Kind, c.CreatedAt)
+	_, err := s.q.Exec(ctx, `INSERT INTO channels (id, project_id, name, kind, locked, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		c.ID, c.ProjectID, c.Name, c.Kind, c.Locked, c.CreatedAt)
 	return mapErr(err)
 }
 
@@ -142,7 +143,7 @@ func (s *Store) GetChannel(ctx context.Context, id string) (*models.Channel, err
 // ListChannels returns a Project's open Channels, oldest first; archived on request.
 func (s *Store) ListChannels(ctx context.Context, projectID string, includeArchived bool) ([]models.Channel, error) {
 	return s.channels(ctx, `SELECT `+channelCols+` FROM channels
-		WHERE project_id=$1 AND kind='channel' AND ($2 OR archived_at IS NULL) ORDER BY created_at, id`, projectID, includeArchived)
+		WHERE project_id=$1 AND kind='channel' AND ($2 OR archived_at IS NULL) ORDER BY locked DESC, created_at, id`, projectID, includeArchived)
 }
 
 // ListDMs returns the DMs of a Project that memberID is in, newest first.
@@ -190,16 +191,27 @@ func (s *Store) channels(ctx context.Context, sql string, args ...any) ([]models
 	return out, rows.Err()
 }
 
+// LeaveProject marks a Person's Member as gone; false if already gone.
+func (s *Store) LeaveProject(ctx context.Context, memberID string, at time.Time) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE members SET left_at=$2 WHERE id=$1 AND left_at IS NULL AND kind='human'`, memberID, at)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (s *Store) UpdateChannel(ctx context.Context, c models.Channel) error {
 	return one(s.q.Exec(ctx, `UPDATE channels SET name=$2, archived_at=$3 WHERE id=$1`, c.ID, c.Name, c.ArchivedAt))
 }
 
 // JoinPerson makes m (a human Member) part of its Project unless the Person
-// already is, and returns the Person's Member either way. Safe under races.
+// already is, bringing back one who left, and returns the Person's Member
+// either way; joined reports a join or return. Safe under races.
 func (s *Store) JoinPerson(ctx context.Context, m models.Member) (*models.Member, bool, error) {
 	tag, err := s.q.Exec(ctx, `INSERT INTO members (id, project_id, person_id, kind, display_name, role, instructions, created_at)
 		VALUES ($1, $2, $3, 'human', $4, $5, '', $6)
-		ON CONFLICT (project_id, person_id) WHERE person_id IS NOT NULL DO NOTHING`,
+		ON CONFLICT (project_id, person_id) WHERE person_id IS NOT NULL
+		DO UPDATE SET left_at = NULL WHERE members.left_at IS NOT NULL`,
 		m.ID, m.ProjectID, m.PersonID, m.DisplayName, m.Role, m.CreatedAt)
 	if err != nil {
 		return nil, false, mapErr(err)

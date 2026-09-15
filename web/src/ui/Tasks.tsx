@@ -22,9 +22,7 @@ export function Board({ header }: { header: ReactNode }) {
     <section className="flex h-full min-w-0 flex-col">
       {header}
       <div className="flex items-center justify-between px-4 pt-3">
-        <p className="text-[13px] text-bb-subtle">
-          {data.project.auto_run ? "Autopilot is on: Bots take each Task from plan to merge." : "Autopilot is off: hand Tasks to Bots yourself."}
-        </p>
+        <p className="text-[13px] text-bb-subtle">{data.project.auto_run ? "Autopilot on" : "Autopilot off"}</p>
         <Button tone="primary" size="sm" onClick={() => setCreating(true)}>
           New Task
         </Button>
@@ -41,7 +39,7 @@ export function Board({ header }: { header: ReactNode }) {
                 {tasks.map((t) => (
                   <TaskTile key={t.id} task={t} />
                 ))}
-                {tasks.length === 0 && <p className="rounded-lg border border-dashed border-bb-border px-3 py-6 text-center text-[12.5px] text-bb-subtle">Nothing here</p>}
+                {tasks.length === 0 && <p className="rounded-lg border border-dashed border-bb-border px-3 py-6 text-center text-[12.5px] text-bb-subtle">—</p>}
               </div>
             </div>
           );
@@ -95,22 +93,22 @@ function NewTask({ onClose }: { onClose: () => void }) {
           }
         }}
       >
-        <Field label="What needs doing">
-          <input className={inputClass} autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add rate limiting to /login" />
+        <Field label="Title">
+          <input className={inputClass} autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
         </Field>
-        <Field label="Details" hint="Context, acceptance criteria, links. Markdown works.">
+        <Field label="Details">
           <textarea className={cx(inputClass, "min-h-28")} value={body} onChange={(e) => setBody(e.target.value)} />
         </Field>
-        <Field label="Start with">
+        <Field label="Start">
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="scout">Scout plans it first</option>
-            <option value="builder">Builder starts building</option>
-            <option value="none">Nobody yet</option>
+            <option value="scout">Scout — plan</option>
+            <option value="builder">Builder — build</option>
+            <option value="none">Nobody</option>
           </select>
         </Field>
         <ErrorNote>{err}</ErrorNote>
         <Button tone="primary" type="submit" disabled={!title.trim()}>
-          Create Task
+          Create
         </Button>
       </form>
     </Sheet>
@@ -140,7 +138,7 @@ export function TaskPage({ taskId, header, onOpenThread }: { taskId: string; hea
               )}
               {t.thread_id && (
                 <Button size="sm" tone="ghost" onClick={() => onOpenThread(t.thread_id!)}>
-                  Open thread
+                  Thread
                 </Button>
               )}
             </div>
@@ -157,7 +155,7 @@ export function TaskPage({ taskId, header, onOpenThread }: { taskId: string; hea
           <div>
             <h2 className="mb-2 text-[13px] font-semibold text-bb-muted">Runs</h2>
             {t.runs.length === 0 ? (
-              <p className="text-[13px] text-bb-subtle">No Runs yet. Hand the Task to a Bot from its thread.</p>
+              <p className="text-[13px] text-bb-subtle">None.</p>
             ) : (
               <div className="space-y-2">
                 {t.runs

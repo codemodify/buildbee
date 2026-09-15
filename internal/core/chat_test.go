@@ -13,7 +13,9 @@ func TestThreadsKeepRepliesOutOfTheChannel(t *testing.T) {
 	f := newFixture(t)
 	ada, bob := f.person("Ada"), f.person("Bob")
 	p := f.project(ada, "Chat")
-	general := p.Channels[0].ID
+	lunch, err := f.s.CreateChannel(f.ctx, ada, p.ID, "lunch")
+	f.must(err)
+	general := lunch.ID
 	root, err := f.s.PostMessage(f.ctx, ada, general, "Lunch?")
 	f.must(err)
 	_, err = f.s.Reply(f.ctx, bob, root.ID, "Sure")
@@ -84,7 +86,7 @@ func TestTaskThreadsCarryTheWork(t *testing.T) {
 		said = append(said, m.Body)
 	}
 	all := strings.Join(said, "\n")
-	for _, want := range []string{"Working on this.", "Pushed buildbee/cache-1.", "Added a Redis cache", "Reviewing the changes."} {
+	for _, want := range []string{"Building.", "Pushed buildbee/cache-1.", "Added a Redis cache", "Reviewing."} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("thread lacks %q:\n%s", want, all)
 		}
@@ -133,21 +135,34 @@ func TestUnreadCounts(t *testing.T) {
 	f := newFixture(t)
 	ada, bob := f.person("Ada"), f.person("Bob")
 	p := f.project(ada, "Unread")
-	general := p.Channels[0].ID
-	_, err := f.s.PostMessage(f.ctx, ada, general, "mine")
+	chat, err := f.s.CreateChannel(f.ctx, ada, p.ID, "chat")
+	f.must(err)
+	general := chat.ID
+	_, err = f.s.PostMessage(f.ctx, ada, general, "mine")
 	f.must(err)
 	for _, m := range []string{"one", "two"} {
 		_, err := f.s.PostMessage(f.ctx, bob, general, m)
 		f.must(err)
 	}
-	u, err := f.s.Unread(f.ctx, ada, p.ID)
-	f.must(err)
-	if len(u) != 1 || u[0].Unread != 2 {
+	unread := func() models.Unread {
+		t.Helper()
+		us, err := f.s.Unread(f.ctx, ada, p.ID)
+		f.must(err)
+		for _, u := range us {
+			if u.ChannelID == general {
+				return u
+			}
+		}
+		t.Fatalf("no unread entry for the channel: %+v", us)
+		return models.Unread{}
+	}
+	u := unread()
+	if u.Unread != 2 {
 		t.Fatalf("Ada has two unread from Bob: %+v", u)
 	}
-	f.must(f.s.MarkChannelRead(f.ctx, ada, general, u[0].LastSeq))
+	f.must(f.s.MarkChannelRead(f.ctx, ada, general, u.LastSeq))
 	f.must(f.s.MarkChannelRead(f.ctx, ada, general, 1)) // markers never move back
-	if u, _ := f.s.Unread(f.ctx, ada, p.ID); u[0].Unread != 0 {
+	if u := unread(); u.Unread != 0 {
 		t.Fatalf("after reading: %+v", u)
 	}
 }
@@ -191,5 +206,34 @@ func TestPresence(t *testing.T) {
 	}
 	if n := len(f.pub.topic("presence:server")); n < 3 {
 		t.Fatalf("presence changes are published: %d events", n)
+	}
+}
+
+func TestLeavingAndComingBackIsAnnouncedInPing(t *testing.T) {
+	f := newFixture(t)
+	ada, bob := f.person("Ada"), f.person("Bob")
+	p := f.project(ada, "People")
+	ping := p.Channels[0].ID
+	_, err := f.s.Join(f.ctx, bob, p.ID)
+	f.must(err)
+	f.must(f.s.Leave(f.ctx, bob, p.ID))
+	f.must(f.s.Leave(f.ctx, bob, p.ID)) // once is enough
+	members, _ := f.s.Members(f.ctx, p.ID)
+	for _, m := range members {
+		if m.DisplayName == "Bob" && m.LeftAt == nil {
+			t.Fatal("Bob left")
+		}
+	}
+	_, err = f.s.PostMessage(f.ctx, bob, ping, "back") // writing brings Bob back
+	f.must(err)
+	_, err = f.s.AddMember(f.ctx, ada, p.ID, NewMember{Kind: "bot", DisplayName: "Docs", Role: "writer"})
+	f.must(err)
+	msgs, _, _ := f.s.Messages(f.ctx, ada, ping, store.Page{})
+	var lines []string
+	for _, m := range msgs[2:] { // after the Project's first two lines
+		lines = append(lines, m.Body)
+	}
+	if got := strings.Join(lines, " | "); got != "Bob joined. | Bob left. | Bob joined. | back | Docs joined." {
+		t.Fatalf("#ping: %s", got)
 	}
 }

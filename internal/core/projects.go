@@ -48,8 +48,23 @@ func (s *Service) CreateProject(ctx context.Context, a Actor, projectName string
 			}
 			members = append(members, m)
 		}
-		ch := models.Channel{ID: uuid.NewString(), ProjectID: p.ID, Name: "general", CreatedAt: w.now}
+		ch := models.Channel{ID: uuid.NewString(), ProjectID: p.ID, Name: models.PingChannel, Kind: models.ChannelOpen,
+			Locked: true, CreatedAt: w.now}
 		if err := w.st.InsertChannel(ctx, ch); err != nil {
+			return err
+		}
+		var bots []string
+		for _, m := range members {
+			if m.Kind == models.KindBot {
+				bots = append(bots, m.DisplayName)
+			}
+		}
+		if owner != nil {
+			if err := w.ping(ctx, p.ID, owner.DisplayName+" joined."); err != nil {
+				return err
+			}
+		}
+		if err := w.ping(ctx, p.ID, strings.Join(bots, ", ")+" joined."); err != nil {
 			return err
 		}
 		if err := w.activity(ctx, p.ID, whoOf(owner, a), models.TypeProject, "created", p.ID,
@@ -211,6 +226,48 @@ type NewMember struct {
 	Agent        string `json:"agent"`
 }
 
+// Leave takes the acting Person out of a Project. Their messages keep
+// their name; writing to the Project again brings them back.
+func (s *Service) Leave(ctx context.Context, a Actor, projectID string) error {
+	if !a.IsPerson() {
+		return ErrNoActor
+	}
+	return s.tx(ctx, func(w *work) error {
+		if _, err := w.openProject(ctx, projectID); err != nil {
+			return err
+		}
+		m, err := w.st.MemberForPerson(ctx, projectID, a.PersonID)
+		if err != nil {
+			return err
+		}
+		left, err := w.st.LeaveProject(ctx, m.ID, w.now)
+		if err != nil || !left {
+			return err
+		}
+		if err := w.activity(ctx, projectID, whoOf(m, a), models.TypeMember, "left", m.ID, map[string]any{"name": m.DisplayName}); err != nil {
+			return err
+		}
+		return w.ping(ctx, projectID, m.DisplayName+" left.")
+	})
+}
+
+// ping posts a status line in the Project's #ping, as Pulse.
+func (w *work) ping(ctx context.Context, projectID, line string) error {
+	voice := w.voice(ctx, projectID)
+	chs, err := w.st.ListChannels(ctx, projectID, false)
+	if err != nil || voice == nil || len(chs) == 0 || !chs[0].Locked {
+		return err
+	}
+	msg, err := w.st.InsertMessage(ctx, models.Message{ID: uuid.NewString(), ChannelID: chs[0].ID, ProjectID: projectID,
+		MemberID: voice.ID, Body: line, CreatedAt: w.now})
+	if err != nil {
+		return err
+	}
+	w.emit("channel:"+chs[0].ID, msg.Seq, "message", &Posted{Message: *msg, Mentions: []models.Member{}, Tasks: []models.Task{},
+		Handoffs: []models.Handoff{}})
+	return nil
+}
+
 // AddMember adds a Person (by name, created if new) or a Bot to a Project.
 // Adding a Person who is already a Member returns that Member.
 func (s *Service) AddMember(ctx context.Context, a Actor, projectID string, in NewMember) (*models.Member, error) {
@@ -263,6 +320,9 @@ func (s *Service) AddMember(ctx context.Context, a Actor, projectID string, in N
 				return err
 			}
 			out = &m
+			if err := w.ping(ctx, projectID, m.DisplayName+" joined."); err != nil {
+				return err
+			}
 		} else {
 			person, err := w.st.UpsertPerson(ctx, n)
 			if err != nil {
@@ -276,6 +336,9 @@ func (s *Service) AddMember(ctx context.Context, a Actor, projectID string, in N
 			out = m
 			if !joined {
 				return nil
+			}
+			if err := w.ping(ctx, projectID, m.DisplayName+" joined."); err != nil {
+				return err
 			}
 		}
 		return w.activity(ctx, projectID, whoOf(actor, a), models.TypeMember, "added", out.ID,
@@ -414,6 +477,9 @@ func (s *Service) UpdateChannel(ctx context.Context, a Actor, id string, patch C
 		m, err := w.member(ctx, a, ch.ProjectID, true)
 		if err != nil {
 			return err
+		}
+		if ch.Locked && (patch.Name != nil || patch.Archived != nil) {
+			return fmt.Errorf("%w: #%s is fixed", store.ErrConflict, ch.Name)
 		}
 		changes := map[string]any{}
 		if patch.Name != nil {

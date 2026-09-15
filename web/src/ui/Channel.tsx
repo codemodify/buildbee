@@ -37,7 +37,7 @@ export function ChannelView({
   const placeholder =
     channel.kind === "dm"
       ? bots.length
-        ? `Ask ${bots.map((b) => b?.display_name).join(", ")} to do something`
+        ? `Tell ${bots.map((b) => b?.display_name).join(", ")} what to do`
         : `Message ${channel.name}`
       : `Message #${channel.name}`;
 
@@ -73,11 +73,7 @@ export function ChannelView({
           </div>
         )}
         {messages.length === 0 && !error ? (
-          <Empty title={channel.kind === "dm" ? `This is your conversation with ${channel.name}` : `This is the start of #${channel.name}`}>
-            {channel.kind === "dm" && bots.length
-              ? "Write what you need; the Bot opens a Task and starts working on it."
-              : "Mention @Builder with what you need, and the Builder opens a Task and starts working. Every Task gets a thread here."}
-          </Empty>
+          <Empty title="No messages" />
         ) : (
           <div className="pb-2">
             <MessageList messages={messages} onOpenThread={onOpenThread} />
@@ -93,7 +89,7 @@ export function ChannelView({
             atBottom.current = true;
             add(await api.postMessage(channel.id, body));
           }}
-          hint={channel.kind === "dm" ? "Enter sends · Shift+Enter new line" : "@Builder, @Scout or @Sentry asks a Bot to work"}
+          hint={channel.kind === "dm" ? undefined : "@Builder to delegate"}
         />
       </div>
     </section>
@@ -102,13 +98,15 @@ export function ChannelView({
 
 /** ChannelHeader names the Channel and shows who is here. */
 export function ChannelHeader({ channel, onMenu }: { channel: Channel; onMenu: () => void }) {
-  const { members, online } = useCtx();
+  const { members, online, data } = useCtx();
+  const project = data.project;
   const people = channel.kind === "dm" ? (channel.member_ids ?? []).map((id) => members.get(id)).filter(Boolean) : [...members.values()];
   const here = people.filter((m) => m?.person_id && online.has(m.person_id));
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-bb-border px-4">
       <MenuButton onClick={onMenu} />
       <h1 className="min-w-0 truncate text-[15px] font-semibold">{channel.kind === "dm" ? channel.name : `# ${channel.name}`}</h1>
+      <span className="truncate text-[13px] text-bb-subtle">{project.name}</span>
       <div className="ml-auto flex items-center -space-x-1.5">
         {here.slice(0, 5).map((m) => m && <Avatar key={m.id} member={m} size={22} />)}
         {here.length > 0 && <span className="pl-3 text-[12px] text-bb-subtle">{here.length} here</span>}
@@ -120,7 +118,7 @@ export function ChannelHeader({ channel, onMenu }: { channel: Channel; onMenu: (
 
 export function MenuButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="-ml-1 rounded-md p-1.5 text-bb-muted hover:bg-bb-hover lg:hidden" aria-label="Menu">
+    <button type="button" onClick={onClick} className="-ml-1 rounded-md p-1.5 text-bb-muted hover:bg-bb-hover" aria-label="Toggle sidebar" title="Toggle sidebar (Ctrl+\\)">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M3 5h12M3 9h12M3 13h12" />
       </svg>

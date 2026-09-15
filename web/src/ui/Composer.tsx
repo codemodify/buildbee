@@ -43,6 +43,7 @@ export function Composer({
   const matches = useMemo(() => {
     if (mention === null) return [];
     return members
+      .filter((m) => !m.left_at)
       .filter((m) => m.display_name.toLowerCase().startsWith(mention) || m.role.toLowerCase().startsWith(mention))
       .slice(0, 6);
   }, [mention, members]);

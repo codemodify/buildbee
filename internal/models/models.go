@@ -196,15 +196,16 @@ type ProjectBundle struct {
 
 // Member is a Person or a Bot in one Project.
 type Member struct {
-	ID           string    `json:"id"`
-	ProjectID    string    `json:"project_id"`
-	PersonID     string    `json:"person_id,omitempty"`
-	Kind         string    `json:"kind"`
-	DisplayName  string    `json:"display_name"`
-	Role         string    `json:"role"`
-	Instructions string    `json:"instructions,omitempty"`
-	Agent        string    `json:"agent,omitempty"` // Bots: the agent CLI they run as
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string     `json:"id"`
+	ProjectID    string     `json:"project_id"`
+	PersonID     string     `json:"person_id,omitempty"`
+	Kind         string     `json:"kind"`
+	DisplayName  string     `json:"display_name"`
+	Role         string     `json:"role"`
+	Instructions string     `json:"instructions,omitempty"`
+	Agent        string     `json:"agent,omitempty"` // Bots: the agent CLI they run as
+	LeftAt       *time.Time `json:"left_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 // BotSeed is the Role + instructions blurb for a seeded Bot Member.
@@ -315,6 +316,10 @@ type Preferences struct {
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
+// PingChannel is every Project's first Channel: where people meet and
+// where joins and leaves are announced. It cannot be renamed or archived.
+const PingChannel = "ping"
+
 // Channel kinds: open channels, and DMs between chosen Members.
 const (
 	ChannelOpen = "channel"
@@ -326,6 +331,7 @@ type Channel struct {
 	ProjectID  string     `json:"project_id"`
 	Name       string     `json:"name"`
 	Kind       string     `json:"kind"`
+	Locked     bool       `json:"locked,omitempty"`     // #ping
 	Members    []string   `json:"member_ids,omitempty"` // DMs only
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`

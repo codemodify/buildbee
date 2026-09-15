@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/projects/{id}", s.getProject)
 	mux.HandleFunc("PATCH /v1/projects/{id}", s.patchProject)
 	mux.HandleFunc("POST /v1/projects/{id}/join", s.joinProject)
+	mux.HandleFunc("POST /v1/projects/{id}/leave", s.leaveProject)
 	mux.HandleFunc("GET /v1/projects/{id}/members", s.listMembers)
 	mux.HandleFunc("POST /v1/projects/{id}/members", s.addMember)
 	mux.HandleFunc("PATCH /v1/members/{id}", s.patchMember)

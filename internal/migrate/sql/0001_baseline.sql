@@ -46,6 +46,7 @@ CREATE TABLE members (
     role TEXT NOT NULL,
     instructions TEXT NOT NULL DEFAULT '',
     agent TEXT NOT NULL DEFAULT '', -- the agent CLI a Bot runs as (claude, grok, codex, ...)
+    left_at TIMESTAMPTZ,  -- a Person who left; kept so their messages keep their name
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- every human Member is a Person; a Bot never is
     CHECK ((kind = 'human') = (person_id IS NOT NULL))
@@ -59,6 +60,7 @@ CREATE TABLE channels (
     name TEXT NOT NULL CHECK (name <> ''),
     kind TEXT NOT NULL DEFAULT 'channel' CHECK (kind IN ('channel', 'dm')),
     dm_key TEXT UNIQUE,  -- a DM's sorted member IDs, so each set of Members has one DM
+    locked BOOLEAN NOT NULL DEFAULT false,  -- #ping: cannot be renamed or archived
     archived_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK ((kind = 'dm') = (dm_key IS NOT NULL))

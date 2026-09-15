@@ -35,7 +35,7 @@ func (w *work) advance(ctx context.Context, r *models.Run) error {
 	speaker := w.botOf(ctx, r)
 	if r.Status != models.RunSucceeded {
 		if r.Status == models.RunFailed {
-			if err := w.note(ctx, task, speaker, "The "+string(r.Kind)+" Run failed: "+r.Detail); err != nil {
+			if err := w.note(ctx, task, speaker, "Failed: "+r.Detail); err != nil {
 				return err
 			}
 			return w.notifyPeople(ctx, proj.ID, nil, notice{projectID: proj.ID, kind: "run",
@@ -408,7 +408,7 @@ func resultNote(r *models.Run) string {
 	switch r.Kind {
 	case models.RunBuild:
 		if r.Branch == "" {
-			return "Done, without changing the repo.\n\n" + r.Summary
+			return "No changes.\n\n" + r.Summary
 		}
 		head := "Pushed " + r.Branch
 		if r.Commit != "" {
@@ -419,7 +419,7 @@ func resultNote(r *models.Run) string {
 		}
 		return head + ".\n\n" + r.Summary
 	case models.RunMerge:
-		return "Merged: " + r.Detail + "."
+		return "Merged " + strings.TrimPrefix(r.Detail, "merged ") + "."
 	default:
 		return r.Summary
 	}
