@@ -182,6 +182,16 @@ func (s *Server) listDMs(w http.ResponseWriter, r *http.Request) {
 	respondItems(s, w, list, err)
 }
 
+func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
+	err := s.core.RemoveMember(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, map[string]bool{"removed": true}, err)
+}
+
+func (s *Server) deleteDirect(w http.ResponseWriter, r *http.Request) {
+	err := s.core.DeleteDM(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, map[string]bool{"deleted": true}, err)
+}
+
 func (s *Server) closeDirect(w http.ResponseWriter, r *http.Request) {
 	err := s.core.CloseDM(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
 	respond(s, w, http.StatusOK, map[string]bool{"closed": true}, err)

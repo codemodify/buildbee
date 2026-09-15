@@ -335,6 +335,44 @@ func (s *Service) AddMember(ctx context.Context, a Actor, projectID string, in N
 	return out, err
 }
 
+// RemoveMember takes a person or Bot out of a Project. Their messages keep
+// their name. A removed Bot's queued and running Runs stop and it takes no
+// more work; a removed person comes back by writing to the Project, as
+// after leaving.
+func (s *Service) RemoveMember(ctx context.Context, a Actor, id string) error {
+	return s.tx(ctx, func(w *work) error {
+		m, err := w.st.GetMember(ctx, id)
+		if err != nil {
+			return err
+		}
+		if _, err := w.openProject(ctx, m.ProjectID); err != nil {
+			return err
+		}
+		actor, err := w.member(ctx, a, m.ProjectID, true)
+		if err != nil {
+			return err
+		}
+		gone, err := w.st.RemoveMember(ctx, m.ID, w.now)
+		if err != nil || !gone {
+			return err
+		}
+		if m.Kind == models.KindBot {
+			runs, err := w.st.StopBotRuns(ctx, m.ID, m.DisplayName+" was removed", w.now)
+			if err != nil {
+				return err
+			}
+			for _, r := range runs {
+				if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
+					return err
+				}
+				w.load = true
+			}
+		}
+		return w.activity(ctx, m.ProjectID, whoOf(actor, a), models.TypeMember, "removed", m.ID,
+			map[string]any{"kind": m.Kind, "role": m.Role, "name": m.DisplayName})
+	})
+}
+
 // MemberPatch changes only the fields that are set. Agent applies to Bots.
 type MemberPatch struct {
 	DisplayName  *string `json:"display_name"`

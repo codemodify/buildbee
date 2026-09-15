@@ -1,4 +1,4 @@
-import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Member } from "../types";
 
@@ -193,5 +193,83 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
     >
       <span className={cx("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all", checked ? "left-[18px]" : "left-0.5")} />
     </button>
+  );
+}
+
+/** Confirm asks before something that cannot be undone. */
+export function Confirm({ title, children, action, onConfirm, onClose }: { title: string; children: ReactNode; action: string; onConfirm: () => Promise<void> | void; onClose: () => void }) {
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <Sheet title={title} onClose={onClose}>
+      <div className="space-y-4 text-[13.5px]">
+        <div className="text-bb-muted">{children}</div>
+        {err && <p className="text-[12px] text-bb-danger">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            tone="danger"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm();
+                onClose();
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+                setBusy(false);
+              }
+            }}
+          >
+            {action}
+          </Button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+export type MenuItem = { label: string; danger?: boolean; onClick: () => void };
+
+/** Menu is a ⋯ button with a short list of actions. */
+export function Menu({ label, items }: { label: string; items: MenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", away);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("mousedown", away);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  if (items.length === 0) return null;
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-label={label} title={label} aria-expanded={open} className="rounded-md px-2 py-1 text-[16px] leading-none text-bb-muted hover:bg-bb-hover hover:text-bb-fg">
+        ⋯
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-40 mt-1 min-w-44 overflow-hidden rounded-lg border border-bb-border bg-bb-surface py-1 shadow-xl">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+              className={cx("block w-full px-3 py-1.5 text-left text-[13.5px] hover:bg-bb-hover", it.danger && "text-bb-danger")}
+            >
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

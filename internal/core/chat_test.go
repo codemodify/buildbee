@@ -332,3 +332,56 @@ func TestDirectMessagesSpanTheServer(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovingABotStopsItsWork(t *testing.T) {
+	f := newFixture(t)
+	ada, bob := f.person("Ada"), f.person("Bob")
+	p := f.project(ada, "Rm")
+	builder := bot(p, models.RoleBuilder)
+	r := f.queue(ada, p.ID, "work", NewRun{BotMemberID: builder.ID, Agent: "fake"})
+	f.must(f.s.RemoveMember(f.ctx, ada, builder.ID))
+	f.must(f.s.RemoveMember(f.ctx, ada, builder.ID)) // once is enough
+	got, err := f.s.Run(f.ctx, r.ID)
+	f.must(err)
+	if got.Status != models.RunCanceled {
+		t.Fatalf("its Run: %s", got.Status)
+	}
+	posted, err := f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "@Builder are you there")
+	f.must(err)
+	if len(posted.Tasks) != 0 {
+		t.Fatalf("a removed Bot takes no work: %+v", posted.Tasks)
+	}
+	_, err = f.s.Join(f.ctx, bob, p.ID)
+	f.must(err)
+	f.must(f.s.RemoveMember(f.ctx, ada, f.memberOf(p.ID, bob).ID))
+	if m := f.memberOf(p.ID, bob); m.LeftAt == nil {
+		t.Fatal("Bob is out")
+	}
+	if acts := f.activity(p.ID); acts[0].Action != "removed" {
+		t.Fatalf("activity: %+v", acts[0])
+	}
+}
+
+func TestDeletingADMDeletesItForEveryone(t *testing.T) {
+	f := newFixture(t)
+	ada, bob, cy := f.person("Ada"), f.person("Bob"), f.person("Cy")
+	dm, err := f.s.OpenDirect(f.ctx, ada, NewDirect{PersonIDs: []string{bob.PersonID}})
+	f.must(err)
+	_, err = f.s.PostMessage(f.ctx, ada, dm.ID, "secret")
+	f.must(err)
+	if err := f.s.DeleteDM(f.ctx, cy, dm.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("only its people delete it: %v", err)
+	}
+	f.must(f.s.DeleteDM(f.ctx, bob, dm.ID))
+	for _, who := range []Actor{ada, bob} {
+		if dms, _ := f.s.DirectMessages(f.ctx, who); len(dms) != 0 {
+			t.Fatalf("still listed: %+v", dms)
+		}
+	}
+	if _, _, err := f.s.Messages(f.ctx, ada, dm.ID, store.Page{}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("messages remain: %v", err)
+	}
+	if n := f.inbox(ada); n[0].Title != "Bob deleted your direct message" {
+		t.Fatalf("ada is told: %+v", n[0])
+	}
+}

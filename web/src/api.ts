@@ -73,7 +73,7 @@ export const api = {
   rename: (name: string) => request<{ person: Person }>("/v1/me", patch({ name })),
   forgetMe: () => request<unknown>("/v1/me", { method: "DELETE" }),
 
-  projects: () => request<Items<Project>>("/v1/projects"),
+  projects: (archived = false) => request<Items<Project>>(`/v1/projects${q({ archived })}`),
   createProject: (name: string) => request<Project>("/v1/projects", post({ name })),
   project: (id: string) => request<Project>(`/v1/projects/${id}`),
   updateProject: (id: string, body: ProjectPatch) => request<Project>(`/v1/projects/${id}`, patch(body)),
@@ -85,7 +85,10 @@ export const api = {
   updateMember: (id: string, body: { display_name?: string; instructions?: string; agent?: string }) =>
     request<Member>(`/v1/members/${id}`, patch(body)),
 
-  channels: (projectId: string) => request<Items<Channel>>(`/v1/projects/${projectId}/channels`),
+  channels: (projectId: string, archived = false) => request<Items<Channel>>(`/v1/projects/${projectId}/channels${q({ archived })}`),
+  updateChannel: (id: string, body: { name?: string; archived?: boolean }) => request<Channel>(`/v1/channels/${id}`, patch(body)),
+  removeMember: (id: string) => request<unknown>(`/v1/members/${id}`, { method: "DELETE" }),
+  deleteDM: (id: string) => request<unknown>(`/v1/dms/${id}`, { method: "DELETE" }),
   createChannel: (projectId: string, name: string) =>
     request<Channel>(`/v1/projects/${projectId}/channels`, post({ name })),
   directMessages: () => request<Items<DM>>("/v1/dms"),

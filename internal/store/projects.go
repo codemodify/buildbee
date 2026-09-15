@@ -289,6 +289,20 @@ func (s *Store) LeaveProject(ctx context.Context, memberID string, at time.Time)
 	return tag.RowsAffected() == 1, nil
 }
 
+// RemoveMember marks any Member gone; false if already gone.
+func (s *Store) RemoveMember(ctx context.Context, memberID string, at time.Time) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE members SET left_at=$2 WHERE id=$1 AND left_at IS NULL`, memberID, at)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// DeleteChannel deletes a Channel and everything in it.
+func (s *Store) DeleteChannel(ctx context.Context, id string) error {
+	return one(s.q.Exec(ctx, `DELETE FROM channels WHERE id=$1`, id))
+}
+
 func (s *Store) UpdateChannel(ctx context.Context, c models.Channel) error {
 	return one(s.q.Exec(ctx, `UPDATE channels SET name=$2, archived_at=$3 WHERE id=$1`, c.ID, c.Name, c.ArchivedAt))
 }

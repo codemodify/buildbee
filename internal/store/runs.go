@@ -209,6 +209,25 @@ func (s *Store) GetRun(ctx context.Context, id string, forUpdate bool) (*models.
 }
 
 // ListRuns returns a Task's Runs, newest first.
+// StopBotRuns cancels a Bot's queued and running Runs, returning them.
+func (s *Store) StopBotRuns(ctx context.Context, botID, detail string, at time.Time) ([]models.Run, error) {
+	rows, err := s.q.Query(ctx, `UPDATE runs SET status='canceled', detail=$2, finished_at=$3, updated_at=$3, lease_until=NULL
+		WHERE bot_member_id=$1 AND status IN ('pending', 'running') RETURNING `+runCols, botID, detail, at)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []models.Run
+	for rows.Next() {
+		var r models.Run
+		if err := scanRun(rows, &r); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListRuns(ctx context.Context, taskID string) ([]models.Run, error) {
 	rows, err := s.q.Query(ctx, `SELECT `+runCols+` FROM runs WHERE task_id=$1 ORDER BY created_at DESC, id`, taskID)
 	if err != nil {

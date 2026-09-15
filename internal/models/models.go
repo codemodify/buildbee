@@ -253,11 +253,11 @@ func DefaultBots() []BotSeed {
 	}
 }
 
-// MemberByRole returns the earliest Member with the given Role.
+// MemberByRole returns the earliest current Member with the given Role.
 func MemberByRole(members []Member, role string) *Member {
 	want := strings.ToLower(strings.TrimSpace(role))
 	for i := range members {
-		if strings.ToLower(members[i].Role) == want {
+		if strings.ToLower(members[i].Role) == want && members[i].LeftAt == nil {
 			return &members[i]
 		}
 	}
@@ -291,7 +291,7 @@ func mentioned(body string, members []Member, kind string) []Member {
 	var out []Member
 	seen := map[string]bool{}
 	for _, mem := range members {
-		if mem.Kind != kind || seen[mem.ID] {
+		if mem.Kind != kind || seen[mem.ID] || (kind == KindBot && mem.LeftAt != nil) { // removed Bots do nothing
 			continue
 		}
 		hit := want[handle(mem.DisplayName)]

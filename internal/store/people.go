@@ -108,7 +108,7 @@ func (s *Store) Roster(ctx context.Context, events int) (*models.Roster, error) 
 	}
 	bots, err := s.q.Query(ctx, `SELECT m.id, m.project_id, '', m.kind, m.display_name, m.role, m.instructions, m.agent, m.left_at,
 		m.created_at, pr.name FROM members m JOIN projects pr ON pr.id = m.project_id
-		WHERE m.kind = 'bot' AND pr.archived_at IS NULL ORDER BY pr.name, m.created_at`)
+		WHERE m.kind = 'bot' AND m.left_at IS NULL AND pr.archived_at IS NULL ORDER BY pr.name, m.created_at`)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -127,7 +127,7 @@ func (s *Store) Roster(ctx context.Context, events int) (*models.Roster, error) 
 	}
 	evs, err := s.q.Query(ctx, `SELECT CASE WHEN a.type = 'project' THEN a.actor ELSE COALESCE(a.payload->>'name', a.actor) END, a.action, a.project_id, pr.name, a.created_at
 		FROM activity a JOIN projects pr ON pr.id = a.project_id
-		WHERE pr.kind = 'project' AND ((a.type = 'member' AND a.action IN ('joined', 'left', 'added')) OR (a.type = 'project' AND a.action = 'created'))
+		WHERE pr.kind = 'project' AND ((a.type = 'member' AND a.action IN ('joined', 'left', 'added', 'removed')) OR (a.type = 'project' AND a.action = 'created'))
 		ORDER BY a.created_at DESC, a.seq DESC LIMIT $1`, events)
 	if err != nil {
 		return nil, mapErr(err)

@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { go } from "../route";
+import { signal } from "../signals";
 import { useChannel } from "../store";
 import type { Channel, Message } from "../types";
 import { Composer } from "./Composer";
 import { useCtx } from "./context";
 import { InboxBell } from "./Inbox";
 import { PrefsButton } from "./Preferences";
-import { Avatar, Button, Empty, ErrorNote } from "./kit";
+import { Avatar, Button, Confirm, Empty, ErrorNote, Menu, Sheet, inputClass, type MenuItem } from "./kit";
 import { MessageList } from "./Messages";
 
 /** ChannelView is a Channel or DM: its messages and a composer. */
@@ -108,9 +110,100 @@ export function ChannelHeader({ channel, onMenu }: { channel: Channel; onMenu: (
         {here.slice(0, 5).map((m) => m && <Avatar key={m.id} member={m} size={22} />)}
         {here.length > 0 && <span className="pl-3 text-[12px] text-bb-subtle">{here.length} here</span>}
       </div>
+      <ChannelMenu channel={channel} />
       <InboxBell />
       <PrefsButton />
     </header>
+  );
+}
+
+/** ChannelMenu renames or archives a channel, or closes or deletes a DM. */
+function ChannelMenu({ channel }: { channel: Channel }) {
+  const { data, reload } = useCtx();
+  const [dialog, setDialog] = useState<"rename" | "archive" | "delete" | null>(null);
+  const leave = () => go(channel.kind === "dm" ? { view: "status" } : { view: "channel", projectId: data.project.id });
+  const items: MenuItem[] =
+    channel.kind === "dm"
+      ? [
+          {
+            label: "Close",
+            onClick: async () => {
+              await api.closeDM(channel.id).catch(() => undefined);
+              signal("dms");
+              leave();
+            },
+          },
+          { label: "Delete for everyone", danger: true, onClick: () => setDialog("delete") },
+        ]
+      : channel.locked
+        ? []
+        : [
+            { label: "Rename", onClick: () => setDialog("rename") },
+            { label: "Archive", danger: true, onClick: () => setDialog("archive") },
+          ];
+  return (
+    <>
+      <Menu label="Channel actions" items={items} />
+      {dialog === "rename" && <RenameChannel channel={channel} onClose={() => setDialog(null)} onDone={reload} />}
+      {dialog === "archive" && (
+        <Confirm
+          title={`Archive #${channel.name}`}
+          action="Archive"
+          onClose={() => setDialog(null)}
+          onConfirm={async () => {
+            await api.updateChannel(channel.id, { archived: true });
+            reload();
+            leave();
+          }}
+        >
+          It leaves the sidebar and takes no new messages. Its messages stay; unarchive it in the Project's Settings.
+        </Confirm>
+      )}
+      {dialog === "delete" && (
+        <Confirm
+          title="Delete this DM"
+          action="Delete for everyone"
+          onClose={() => setDialog(null)}
+          onConfirm={async () => {
+            await api.deleteDM(channel.id);
+            signal("dms");
+            leave();
+          }}
+        >
+          Every message in it is deleted, for everyone in it. This cannot be undone.
+        </Confirm>
+      )}
+    </>
+  );
+}
+
+function RenameChannel({ channel, onClose, onDone }: { channel: Channel; onClose: () => void; onDone: () => void }) {
+  const [name, setName] = useState(channel.name);
+  const [err, setErr] = useState("");
+  return (
+    <Sheet title="Rename channel" onClose={onClose}>
+      <form
+        className="space-y-3"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await api.updateChannel(channel.id, { name: name.trim().replace(/^#/, "") });
+            onDone();
+            onClose();
+          } catch (e2) {
+            setErr(e2 instanceof Error ? e2.message : String(e2));
+          }
+        }}
+      >
+        <input id="rename-channel" className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="channel name" aria-label="Channel name" />
+        {err && <p className="text-[12px] text-bb-danger">{err}</p>}
+        <div className="flex justify-end">
+          <Button tone="primary" type="submit" disabled={!name.trim() || name.trim() === channel.name}>
+            Rename
+          </Button>
+        </div>
+      </form>
+    </Sheet>
   );
 }
 

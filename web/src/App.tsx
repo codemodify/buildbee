@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api } from "./api";
 import { MeContext } from "./me";
+import { onSignal } from "./signals";
 import { go, useRoute, type Route } from "./route";
 import { useLoad, usePresence } from "./store";
 import type { Message, Person, Presence, Project } from "./types";
@@ -23,6 +24,7 @@ export default function App() {
   useEffect(() => {
     api.me().then((r) => setMe(r.person), () => setMe(null));
   }, []);
+  useEffect(() => onSignal("projects", reload), [reload]);
   if (me === undefined || !projects) return <main className="h-dvh" />;
   if (me === null) return <Start needProject={projects.length === 0} onDone={setMe} />;
   return (

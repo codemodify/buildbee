@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api";
 import { useLiveStatus, useTopic } from "../live";
 import { go } from "../route";
+import { signal } from "../signals";
 import { useLoad } from "../store";
 import { ago } from "../text";
 import type { AgentLoad, Person, Presence, Project, Roster } from "../types";
@@ -124,6 +125,8 @@ export function Status({ me, projects, presence, header }: { me: Person; project
             <UsagePanel />
           </section>
 
+          <ArchivedProjects />
+
           <Group title="Recent">
             {(r?.events ?? []).length === 0 && <p className="px-3 py-2 text-[13px] text-bb-subtle">—</p>}
             {(r?.events ?? []).map((e, i) => (
@@ -140,6 +143,33 @@ export function Status({ me, projects, presence, header }: { me: Person; project
       {dialog === "invite" && <Invite projects={projects} onClose={() => setDialog(null)} onDone={reload} />}
       {dialog === "bot" && <AddBot projects={projects} onClose={() => setDialog(null)} onDone={reload} />}
     </section>
+  );
+}
+
+/** ArchivedProjects are Projects taken out of use, to bring back. */
+function ArchivedProjects() {
+  const { data, reload } = useLoad(() => api.projects(true).then((r) => r.items.filter((p) => p.archived_at)), []);
+  if (!data?.length) return null;
+  return (
+    <Group title="Archived projects" count={data.length}>
+      {data.map((p) => (
+        <Row key={p.id}>
+          <span className="font-medium">{p.name}</span>
+          <span className="text-[12px] text-bb-subtle">archived {ago(p.archived_at)} ago</span>
+          <Button
+            className="ml-auto"
+            size="sm"
+            onClick={async () => {
+              await api.updateProject(p.id, { archived: false });
+              reload();
+              signal("projects");
+            }}
+          >
+            Unarchive
+          </Button>
+        </Row>
+      ))}
+    </Group>
   );
 }
 
@@ -220,7 +250,7 @@ function load(a: AgentLoad): string {
   return bits.length ? bits.join(" · ") : "idle";
 }
 
-const verb: Record<string, string> = { added: "was added to", left: "left", joined: "joined", created: "created" };
+const verb: Record<string, string> = { added: "was added to", removed: "was removed from", left: "left", joined: "joined", created: "created" };
 
 /** Invite adds a person to Projects and gives a link that signs them in by name. */
 function Invite({ projects, onClose, onDone }: { projects: Project[]; onClose: () => void; onDone: () => void }) {

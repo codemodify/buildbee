@@ -32,10 +32,12 @@ DELETE /v1/me                            → forget this browser's Person
 | `POST /v1/projects/{id}/join`, `POST /v1/projects/{id}/leave` | join as `member` / leave (messages keep your name; writing again rejoins). Both show in `GET /v1/members` |
 | `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions, agent}` |
 | `PATCH /v1/members/{id}` | `{display_name, instructions, agent}`; `agent` applies to Bots |
+| `DELETE /v1/members/{id}` | remove a person or Bot from its Project (`left_at`); messages keep the name. A removed Bot's queued and running Runs are canceled and it takes no more work; a removed person comes back by writing |
 | `GET/POST /v1/projects/{id}/channels`, `PATCH /v1/channels/{id}` | Channels; `{name, archived}`. Every Project starts with `#tasks` (`locked`: first, cannot be renamed or archived), where every Task's thread lives |
 | `GET/POST /v1/channels/{id}/messages` | page root messages (each with `reply_count`, `task_id`) / post `{body}`; `@Bot` opens a Task handed to it, with this message as its thread, and starts the Bot's Run; `@Person` notifies them |
 | `GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies` | a thread `{root, replies, has_more}` / reply `{body}`. In a Task's thread, `@Bot` hands that Task on, and any other reply reaches the agent working on it |
 | `GET/POST /v1/dms` | DMs are between people. Every DM you are in and have not closed, newest first, with `with` (the others) and `unread` / open one with `{person_ids}`: one conversation per set of people, whichever Projects they share. Writing in a DM notifies the others in it; Bots are asked in channels |
+| `DELETE /v1/dms/{id}` | delete a DM and its messages for everyone in it; the others are notified |
 | `POST /v1/dms/{id}/close` | take a DM out of your list; it comes back with a new message or when you open it again. Nothing is deleted |
 | `GET /v1/projects/{id}/unread`, `POST /v1/channels/{id}/read` | per Channel and DM: `{channel_id, unread, last_seq}` / mark read up to `{seq}` |
 | `GET /v1/members` | everyone on the Server: `people` with their Projects (`left_at` if they left), `bots` with `project_name`, and recent `events` (created, joined, left, added), newest first |

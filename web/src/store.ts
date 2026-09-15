@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { live, useLiveStatus, useTopic } from "./live";
+import { onSignal } from "./signals";
 import type {
   Channel,
   Decision,
@@ -236,6 +237,7 @@ export function useDMs(personId: string, activeId: string | undefined) {
   const { data, reload } = useLoad<DM[]>(() => api.directMessages().then((r) => r.items), [personId]);
   const refresh = useThrottled(reload, 300);
   useTopic(`person:${personId}`, null, refresh);
+  useEffect(() => onSignal("dms", refresh), [refresh]);
   const dms = data ?? [];
   const key = dms.map((d) => d.id).join(",");
   useEffect(() => {

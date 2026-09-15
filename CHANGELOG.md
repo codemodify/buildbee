@@ -11,6 +11,12 @@
 - Your settings (next to notifications): name (`PATCH /v1/me`), theme, rounded or sharp corners, notifications
 - New Projects start with you and `#tasks`, no Bots (`default_bots: true` on `POST /v1/projects` adds the autopilot's four)
 
+### Added (managing)
+- Rename and archive channels from the channel's ⋯ menu; unarchive in the Project's Settings
+- Remove people and Bots from a Project (`DELETE /v1/members/{id}`): a removed Bot's Runs stop and it takes no more work
+- Archive a Project from its Settings; unarchive from `# status`
+- Delete a DM for everyone (`DELETE /v1/dms/{id}`), or close it for yourself, from its ⋯ menu
+
 ### Changed
 - The database baseline is frozen: schema changes ship as new migrations, and a test pins every released file's checksum
 - DMs are between people only: no DMs with Bots; `POST /v1/projects/{id}/dms` is gone

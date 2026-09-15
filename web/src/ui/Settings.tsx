@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, type ProjectPatch } from "../api";
 import { go } from "../route";
+import { signal } from "../signals";
 import { useLoad } from "../store";
 import { ago, Markdown, money, tokens } from "../text";
 import type { Member, Routine, Usage } from "../types";
 import { AddBot } from "./AddBot";
 import { useCtx } from "./context";
-import { Avatar, Button, ErrorNote, Field, Pill, Toggle, cx, inputBase, inputClass } from "./kit";
+import { Avatar, Button, Confirm, ErrorNote, Field, Pill, Toggle, cx, inputBase, inputClass } from "./kit";
 
 export const agents = ["", "claude", "codex", "grok", "opencode", "goose", "fake"];
 
@@ -66,7 +67,11 @@ export function Settings({ header }: { header: ReactNode }) {
   const p = data.project;
   const [err, setErr] = useState("");
   const [addingBot, setAddingBot] = useState(false);
+  const [removing, setRemoving] = useState<Member | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const { myMember } = useCtx();
   const bots = data.members.filter((m) => m.kind === "bot" && !m.left_at);
+  const people = data.members.filter((m) => m.kind === "human" && !m.left_at);
   const missing = ["scout", "builder", "sentry"].filter((r) => !bots.some((b) => b.role === r));
   async function save(patch: ProjectPatch) {
     setErr("");
@@ -115,7 +120,7 @@ export function Settings({ header }: { header: ReactNode }) {
         {bots.length === 0 && <p className="text-[13px] text-bb-subtle">None yet. Bots do the work you @mention them for.</p>}
         <div className="divide-y divide-bb-border">
           {bots.map((m) => (
-            <BotRow key={m.id} bot={m} onSaved={reload} />
+            <BotRow key={m.id} bot={m} onSaved={reload} onRemove={() => setRemoving(m)} />
           ))}
         </div>
       </Card>
@@ -123,8 +128,29 @@ export function Settings({ header }: { header: ReactNode }) {
 
       <Routines />
 
-      <Card title="Membership">
-        <Row label="Leave Project" hint="Your messages stay. Writing here again brings you back.">
+      <Card title="People">
+        <div className="divide-y divide-bb-border">
+          {people.map((m) => (
+            <div key={m.id} className="flex items-center gap-2.5 py-2">
+              <Avatar member={m} size={24} />
+              <span className="font-medium">{m.display_name}</span>
+              <span className="text-[12px] text-bb-subtle">{m.role}</span>
+              {m.id === myMember?.id ? (
+                <span className="ml-auto text-[12px] text-bb-subtle">you</span>
+              ) : (
+                <Button className="ml-auto" size="sm" tone="ghost" onClick={() => setRemoving(m)}>
+                  Remove
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <ArchivedChannels projectId={p.id} onChanged={reload} />
+
+      <Card title="Project">
+        <Row label="Leave" hint="Your messages stay. Writing here again brings you back.">
           <Button
             size="sm"
             tone="danger"
@@ -140,12 +166,46 @@ export function Settings({ header }: { header: ReactNode }) {
             Leave
           </Button>
         </Row>
+        <Row label="Archive" hint="For everyone: it leaves the sidebar and takes no new work. Unarchive it from # status.">
+          <Button size="sm" tone="danger" onClick={() => setArchiving(true)}>
+            Archive
+          </Button>
+        </Row>
       </Card>
+      {removing && (
+        <Confirm
+          title={`Remove ${removing.display_name}`}
+          action="Remove"
+          onClose={() => setRemoving(null)}
+          onConfirm={async () => {
+            await api.removeMember(removing.id);
+            reload();
+          }}
+        >
+          {removing.kind === "bot"
+            ? "Its queued and running work stops, and it takes no more. Its messages stay."
+            : "Their messages stay. They come back if they write here again."}
+        </Confirm>
+      )}
+      {archiving && (
+        <Confirm
+          title={`Archive ${p.name}`}
+          action="Archive"
+          onClose={() => setArchiving(false)}
+          onConfirm={async () => {
+            await api.updateProject(p.id, { archived: true });
+            signal("projects");
+            go({ view: "status" });
+          }}
+        >
+          It leaves everyone's sidebar and takes no new messages or work. Nothing is deleted; unarchive it from # status.
+        </Confirm>
+      )}
     </Page>
   );
 }
 
-function BotRow({ bot, onSaved }: { bot: Member; onSaved: () => void }) {
+function BotRow({ bot, onSaved, onRemove }: { bot: Member; onSaved: () => void; onRemove: () => void }) {
   const [instr, setInstr] = useState(bot.instructions ?? "");
   const [err, setErr] = useState("");
   useEffect(() => {
@@ -172,6 +232,9 @@ function BotRow({ bot, onSaved }: { bot: Member; onSaved: () => void }) {
             </option>
           ))}
         </select>
+        <Button size="sm" tone="ghost" onClick={onRemove}>
+          Remove
+        </Button>
       </div>
       <textarea
         className={cx(inputClass, "min-h-16 text-[13px]")}
@@ -272,6 +335,35 @@ function NewRoutine({ bots, onDone, onCancel }: { bots: Member[]; onDone: () => 
       </div>
       <ErrorNote>{err}</ErrorNote>
     </form>
+  );
+}
+
+/** ArchivedChannels lists a Project's archived channels, to bring back. */
+function ArchivedChannels({ projectId, onChanged }: { projectId: string; onChanged: () => void }) {
+  const { data, reload } = useLoad(() => api.channels(projectId, true).then((r) => r.items.filter((c) => c.archived_at)), [projectId]);
+  if (!data?.length) return null;
+  return (
+    <Card title="Archived channels">
+      <div className="divide-y divide-bb-border">
+        {data.map((c) => (
+          <div key={c.id} className="flex items-center gap-2 py-2">
+            <span className="text-bb-subtle">#</span>
+            <span>{c.name}</span>
+            <Button
+              className="ml-auto"
+              size="sm"
+              onClick={async () => {
+                await api.updateChannel(c.id, { archived: false });
+                reload();
+                onChanged();
+              }}
+            >
+              Unarchive
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

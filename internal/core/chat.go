@@ -442,6 +442,42 @@ func (s *Service) CloseDM(ctx context.Context, a Actor, channelID string) error 
 	})
 }
 
+// DeleteDM deletes a DM and its messages for everyone in it. The others
+// are told, which also takes it out of their lists.
+func (s *Service) DeleteDM(ctx context.Context, a Actor, channelID string) error {
+	if !a.IsPerson() {
+		return ErrNoActor
+	}
+	return s.tx(ctx, func(w *work) error {
+		ch, err := w.st.GetChannel(ctx, channelID)
+		if err != nil {
+			return err
+		}
+		me, err := w.st.MemberForPerson(ctx, ch.ProjectID, a.PersonID)
+		if err != nil || ch.Kind != models.ChannelDM || !ch.Allows(me.ID) {
+			return store.ErrNotFound
+		}
+		members, err := w.st.ListMembers(ctx, ch.ProjectID)
+		if err != nil {
+			return err
+		}
+		if err := w.st.DeleteChannel(ctx, ch.ID); err != nil {
+			return err
+		}
+		for i := range members {
+			m := &members[i]
+			if m.ID == me.ID || !ch.Allows(m.ID) {
+				continue
+			}
+			if err := w.notifyMember(ctx, m, notice{projectID: ch.ProjectID, kind: "dm",
+				title: me.DisplayName + " deleted your direct message"}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // DirectMessages lists every DM the acting Person is in, across the Server.
 func (s *Service) DirectMessages(ctx context.Context, a Actor) ([]models.DM, error) {
 	if !a.IsPerson() {
