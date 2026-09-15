@@ -5,35 +5,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/codemodify/buildbee/internal/githubconn"
 	"github.com/codemodify/buildbee/internal/models"
-	"github.com/codemodify/buildbee/internal/routines"
 )
-
-func (s *Server) authMe(w http.ResponseWriter, r *http.Request) {
-	ident, mode, ok := s.auth.Me(r)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"mode":      mode,
-		"oauth":     !s.auth.Dev(),
-		"signed_in": ok,
-		"identity":  ident,
-		"dev":       s.auth.Dev(),
-	})
-}
-
-func (s *Server) authGitHub(w http.ResponseWriter, r *http.Request) {
-	s.auth.StartGitHub(w, r)
-}
-
-func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
-	s.auth.Callback(w, r)
-}
-
-func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
-	s.auth.Logout(w, r)
-}
 
 func (s *Server) syncIssues(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -58,9 +35,9 @@ func (s *Server) syncIssues(w http.ResponseWriter, r *http.Request) {
 			t string
 		}{{1, "Sample Issue: welcome"}, {2, "Sample Issue: follow-up"}}
 		for _, sm := range samples {
-			url := "https://github.com/example/buildbee/issues/" + itoa(sm.n)
+			url := "https://github.com/example/buildbee/issues/" + strconv.Itoa(sm.n)
 			if repo != "" {
-				url = "https://github.com/" + repo + "/issues/" + itoa(sm.n)
+				url = "https://github.com/" + repo + "/issues/" + strconv.Itoa(sm.n)
 			}
 			tk, err := s.store.UpsertIssueTask(r.Context(), projectID, sm.n, sm.t, url)
 			if err != nil {
@@ -136,53 +113,4 @@ func (s *Server) issuesWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, tk)
-}
-
-func (s *Server) listRoutines(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListRoutines(r.Context(), r.PathValue("projectID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeItems(w, items)
-}
-
-func (s *Server) createRoutine(w http.ResponseWriter, r *http.Request) {
-	var in models.Routine
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Name) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
-		return
-	}
-	in.ProjectID = r.PathValue("projectID")
-	out, err := s.store.CreateRoutine(r.Context(), in)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, out)
-}
-
-func (s *Server) fireRoutine(w http.ResponseWriter, r *http.Request) {
-	out, err := routines.Fire(r.Context(), s.store, r.PathValue("routineID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	s.notifyHumans(r.Context(), out.ProjectID, "routine",
-		"Routine: "+out.Name, out.Name, "#/projects/"+out.ProjectID)
-	writeJSON(w, http.StatusOK, out)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [12]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

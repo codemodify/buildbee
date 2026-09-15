@@ -10,12 +10,6 @@ go test ./...
 echo "== web build =="
 (cd web && npm ci && npm run build)
 
-if command -v cargo >/dev/null 2>&1 && (pkg-config --exists webkit2gtk-4.1 || pkg-config --exists webkit2gtk-4.0); then
-  echo "== desktop cargo check =="
-  (cd desktop/src-tauri && cargo check && cargo test)
-else
-  echo "== desktop cargo check skipped (need cargo + webkit2gtk) =="
-fi
 
 echo "== e2e (Postgres Server) =="
 need_stop=0
@@ -39,8 +33,6 @@ export BUILDBEE_URL="${BUILDBEE_URL:-http://127.0.0.1:8080}"
 ./scripts/e2e.sh
 ./scripts/e2e-roles-acp.sh
 ./scripts/e2e-notifications.sh
-./scripts/e2e-invites.sh
-./scripts/e2e-polish.sh
 ./scripts/e2e-acp-stream.sh
 if [ "$need_stop" = 1 ] && [ -f /tmp/buildbee-server-ci.pid ]; then
   kill "$(cat /tmp/buildbee-server-ci.pid)" >/dev/null 2>&1 || true

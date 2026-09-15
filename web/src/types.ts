@@ -90,17 +90,9 @@ export type TaskDetail = Task & {
 };
 
 export type Preferences = {
-  identity: string;
+  member_id: string;
   mute_mentions: boolean;
   mute_routines: boolean;
-};
-
-export type AuthMe = {
-  mode: string;
-  oauth: boolean;
-  signed_in: boolean;
-  dev: boolean;
-  identity?: { display_name?: string; github_login?: string };
 };
 
 export type Routine = {
@@ -108,21 +100,6 @@ export type Routine = {
   name: string;
   schedule: string;
   enabled: boolean;
-};
-
-export type Invite = {
-  id: string;
-  project_id: string;
-  project_name?: string;
-  email?: string;
-  github_login?: string;
-  role: string;
-  token?: string;
-  path?: string;
-  status: string;
-  invited_by_member_id?: string;
-  accepted_member_id?: string;
-  created_at: string;
 };
 
 export type Notification = {

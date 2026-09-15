@@ -12,15 +12,12 @@ func (s *Server) notify(ctx context.Context, projectID, memberID, kind, title, b
 	if memberID == "" || projectID == "" {
 		return
 	}
-	if mem, err := s.store.GetMember(ctx, memberID); err == nil && mem != nil {
-		prefs, _ := s.store.GetPreferences(ctx, models.PreferencesKey(*mem))
-		if prefs != nil {
-			if kind == "mention" && prefs.MuteMentions {
-				return
-			}
-			if kind == "routine" && prefs.MuteRoutines {
-				return
-			}
+	if prefs, _ := s.store.GetPreferences(ctx, memberID); prefs != nil {
+		if kind == "mention" && prefs.MuteMentions {
+			return
+		}
+		if kind == "routine" && prefs.MuteRoutines {
+			return
 		}
 	}
 	_, _ = s.store.CreateNotification(ctx, models.Notification{

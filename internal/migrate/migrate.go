@@ -29,12 +29,18 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	names := make([]string, 0, len(entries))
+	known := map[string]bool{}
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
 			names = append(names, e.Name())
+			known[e.Name()] = true
 		}
 	}
 	sort.Strings(names)
+
+	if err := checkKnown(ctx, pool, known); err != nil {
+		return err
+	}
 
 	for _, name := range names {
 		var exists bool
@@ -54,6 +60,35 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 		if _, err := pool.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkKnown refuses a database that recorded migrations this build does not
+// ship: it was created by a pre-rebuild or a newer BuildBee.
+func checkKnown(ctx context.Context, pool *pgxpool.Pool, known map[string]bool) error {
+	rows, err := pool.Query(ctx, `SELECT version FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var unknown []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return err
+		}
+		if !known[v] {
+			unknown = append(unknown, v)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("database has migrations this build does not know (%s); "+
+			"it was created by an older or newer BuildBee — recreate it (docker compose down -v)",
+			strings.Join(unknown, ", "))
 	}
 	return nil
 }

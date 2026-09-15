@@ -35,11 +35,6 @@ func main() {
 
 	go routines.StartWorker(ctx, st, 15*time.Second)
 	h := httpapi.NewServer(st, ws.NewHub()).Handler()
-	if os.Getenv("GITHUB_CLIENT_ID") == "" {
-		log.Print("auth: DEV mode (GITHUB_CLIENT_ID unset); mutating /v1 is open; Identity is Member You")
-	} else {
-		log.Print("auth: GitHub OAuth enabled")
-	}
 	log.Printf("buildbee server listening on %s", addr)
 	if err := http.ListenAndServe(addr, h); err != nil {
 		log.Fatal(err)

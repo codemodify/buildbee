@@ -4,7 +4,6 @@ import { Empty, formatError, renderMentions } from "./ui";
 import type {
   Channel,
   Decision,
-  Invite,
   Member,
   Message,
   Project,
@@ -48,10 +47,6 @@ export function ProjectPane({
   const [activity, setActivity] = useState<
     { id: string; type: string; payload: Record<string, unknown>; created_at: string }[]
   >([]);
-  const [invites, setInvites] = useState<Invite[]>([]);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteGithub, setInviteGithub] = useState("");
-  const [inviteRole, setInviteRole] = useState("member");
   const [assigneeId, setAssigneeId] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
   const [toast, setToast] = useState("");
@@ -64,14 +59,13 @@ export function ProjectPane({
 
   const human = members.find((m) => m.kind === "human");
   const bots = members.filter((m) => m.kind === "bot");
-  const canInvite = human?.role === "owner" || human?.role === "admin";
 
   async function loadProject() {
     const p = await api.getProject(projectId);
     setProject(p);
     const m = await api.listMembers(projectId);
     const me = m.items.find((x) => x.kind === "human");
-    const [c, t, d, rts, act, inv] = await Promise.all([
+    const [c, t, d, rts, act] = await Promise.all([
       api.listChannels(projectId),
       api.listTasks(projectId),
       api.listDecisions(
@@ -80,7 +74,6 @@ export function ProjectPane({
       ),
       api.listRoutines(projectId),
       api.listActivity(projectId),
-      api.listInvites(projectId).catch(() => ({ items: [] as Invite[] })),
     ]);
     setActivity(act.items.slice(0, 12));
     setMembers(m.items);
@@ -88,7 +81,6 @@ export function ProjectPane({
     setTasks(t.items);
     setDecisions(d.items);
     setRoutines(rts.items);
-    setInvites(inv.items);
     return c.items;
   }
 
@@ -461,108 +453,6 @@ export function ProjectPane({
                       ))}
                     </div>
                   )}
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="rounded-lg border border-bb-border bg-bb-surface p-3">
-            <h2 className="text-sm font-medium text-bb-muted">Invites</h2>
-            {canInvite ? (
-              <form
-                className="mt-2 space-y-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!inviteEmail.trim() && !inviteGithub.trim()) {
-                    setError("Email or GitHub login is required");
-                    return;
-                  }
-                  void api
-                    .createInvite(projectId, {
-                      email: inviteEmail.trim() || undefined,
-                      github_login: inviteGithub.trim() || undefined,
-                      role: inviteRole,
-                    })
-                    .then(async () => {
-                      setInviteEmail("");
-                      setInviteGithub("");
-                      setInvites((await api.listInvites(projectId)).items);
-                      setError("");
-                      setToast("Invite created");
-                    })
-                    .catch((err) => setError(formatError(err)));
-                }}
-              >
-                <input
-                  className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="email"
-                />
-                <input
-                  className="w-full rounded border border-bb-border bg-bb-surface px-2 py-1 text-sm"
-                  value={inviteGithub}
-                  onChange={(e) => setInviteGithub(e.target.value)}
-                  placeholder="GitHub login"
-                />
-                <div className="flex gap-1">
-                  <select
-                    className="rounded border border-bb-border bg-bb-surface px-1 text-xs"
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    aria-label="Invite Role"
-                  >
-                    <option value="member">member</option>
-                    <option value="admin">admin</option>
-                  </select>
-                  <button className="rounded bg-amber-400 px-2 text-sm text-zinc-950" type="submit">
-                    Invite
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <Empty>Only owner or admin can send Invites.</Empty>
-            )}
-            <ul className="mt-3 space-y-2">
-              {invites.length === 0 ? (
-                <li>
-                  <Empty>No pending Invites.</Empty>
-                </li>
-              ) : null}
-              {invites.map((inv) => (
-                <li key={inv.id} className="text-xs">
-                  <p className="font-medium text-bb-fg">
-                    {inv.email || inv.github_login}{" "}
-                    <span className="uppercase text-bb-subtle">{inv.role}</span>
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    <button
-                      type="button"
-                      className="rounded bg-bb-inset px-2 py-0.5"
-                      onClick={() => {
-                        const link = `${window.location.origin}/${inv.path ?? `#/invite/${inv.token}`}`;
-                        void navigator.clipboard.writeText(link).then(
-                          () => setToast("Invite link copied"),
-                          () => setToast(link),
-                        );
-                      }}
-                    >
-                      Copy link
-                    </button>
-                    {canInvite ? (
-                      <button
-                        type="button"
-                        className="rounded bg-bb-inset px-2 py-0.5"
-                        onClick={() => {
-                          void api.revokeInvite(inv.id).then(async () => {
-                            setInvites((await api.listInvites(projectId)).items);
-                          });
-                        }}
-                      >
-                        Revoke
-                      </button>
-                    ) : null}
-                  </div>
                 </li>
               ))}
             </ul>

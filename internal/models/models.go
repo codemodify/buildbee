@@ -26,7 +26,6 @@ const (
 	TypeMention      = "mention"
 	TypeMemory       = "memory"
 	TypeNotification = "notification"
-	TypeInvite       = "invite"
 	TypeRunEvent     = "run_event"
 )
 
@@ -60,12 +59,6 @@ const (
 	RolePulse   = "pulse"
 )
 
-// CanManageInvites is true for Project owner or admin.
-func CanManageInvites(role string) bool {
-	r := strings.ToLower(strings.TrimSpace(role))
-	return r == RoleOwner || r == RoleAdmin
-}
-
 type Project struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -87,9 +80,6 @@ type Member struct {
 	DisplayName  string    `json:"display_name"`
 	Role         string    `json:"role"`
 	Instructions string    `json:"instructions,omitempty"`
-	Identity     string    `json:"identity"`
-	GitHubLogin  string    `json:"github_login,omitempty"`
-	GitHubID     string    `json:"github_id,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -172,35 +162,9 @@ func DecisionFingerprint(prompt string) string {
 	return strings.Join(strings.Fields(b.String()), " ")
 }
 
-// Identity is who a Member is (GitHub OAuth for humans; server-issued for Bots).
-type Identity struct {
-	ID          string    `json:"id"`
-	Kind        string    `json:"kind"`
-	DisplayName string    `json:"display_name"`
-	GitHubLogin string    `json:"github_login,omitempty"`
-	GitHubID    string    `json:"github_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-}
-
-// HumanIdentityKey is the stable login key for a GitHub-linked human.
-func HumanIdentityKey(login string) string {
-	return "github:" + strings.ToLower(strings.TrimSpace(login))
-}
-
-// PreferencesKey scopes mute prefs: shared Identity, else one Member.
-func PreferencesKey(m Member) string {
-	if m.GitHubLogin != "" {
-		return HumanIdentityKey(m.GitHubLogin)
-	}
-	if id := strings.TrimSpace(m.Identity); id != "" && id != "human:stub" && id != "dev" {
-		return id
-	}
-	return "member:" + m.ID
-}
-
-// Preferences are per-Identity (or per-Member when no GitHub login).
+// Preferences are per-Member notification settings.
 type Preferences struct {
-	Identity     string    `json:"identity"`
+	MemberID     string    `json:"member_id"`
 	MuteMentions bool      `json:"mute_mentions"`
 	MuteRoutines bool      `json:"mute_routines"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
@@ -343,37 +307,6 @@ type Routine struct {
 	Enabled     bool       `json:"enabled"`
 	LastRunAt   *time.Time `json:"last_run_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
-}
-
-// Invite lets a human join a Project via token link.
-type Invite struct {
-	ID                string     `json:"id"`
-	ProjectID         string     `json:"project_id"`
-	Email             string     `json:"email,omitempty"`
-	GitHubLogin       string     `json:"github_login,omitempty"`
-	Role              string     `json:"role"`
-	Token             string     `json:"token,omitempty"`
-	InvitedByMemberID string     `json:"invited_by_member_id,omitempty"`
-	AcceptedMemberID  string     `json:"accepted_member_id,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	AcceptedAt        *time.Time `json:"accepted_at,omitempty"`
-	RevokedAt         *time.Time `json:"revoked_at,omitempty"`
-}
-
-// Status is pending, accepted, or revoked.
-func (i Invite) Status() string {
-	if i.RevokedAt != nil {
-		return "revoked"
-	}
-	if i.AcceptedAt != nil {
-		return "accepted"
-	}
-	return "pending"
-}
-
-// InvitePath is the hash-route accept link.
-func InvitePath(token string) string {
-	return "#/invite/" + token
 }
 
 // Notification is an unread/read inbox item for a Member.

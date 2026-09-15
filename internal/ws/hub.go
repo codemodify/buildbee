@@ -19,9 +19,9 @@ func NewHub() *Hub {
 	return &Hub{subs: map[string]map[*websocket.Conn]struct{}{}}
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
+// upgrader keeps gorilla's default same-origin check: a page on another
+// site cannot subscribe to Channel or Run streams from a user's browser.
+var upgrader = websocket.Upgrader{}
 
 // ServeChannel upgrades GET /v1/channels/{channelID}/ws and streams JSON messages.
 func (h *Hub) ServeChannel(w http.ResponseWriter, r *http.Request) {

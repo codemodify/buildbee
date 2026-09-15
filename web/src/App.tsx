@@ -1,18 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
-import {
-  api,
-  getServerOrigin,
-  hydrateServerOrigin,
-  isDesktopShell,
-  persistServerOrigin,
-  pingServer,
-  runEventsWsUrl,
-} from "./api";
+import { api, runEventsWsUrl } from "./api";
 import { parseHash, type Route } from "./hash";
 import type {
-  AuthMe,
   Member,
-  Invite,
   Notification,
   Preferences,
   TaskDetail,
@@ -23,40 +13,12 @@ import { Workspace } from "./Workspace";
 
 export default function App() {
   const [route, setRoute] = useState<Route>(parseHash);
-  const [ready, setReady] = useState(false);
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  useEffect(() => {
-    void hydrateServerOrigin().finally(() => setReady(true));
-  }, []);
 
-  if (!ready) {
-    return (
-      <main className="min-h-screen bg-bb-bg px-6 py-16 text-sm text-bb-muted">
-        Connecting to Server…
-      </main>
-    );
-  }
-
-  if (route.page === "settings") {
-    return (
-      <>
-        <Chrome />
-        <SettingsPage />
-      </>
-    );
-  }
-  if (route.page === "invite") {
-    return (
-      <>
-        <Chrome />
-        <InvitePage token={route.token} />
-      </>
-    );
-  }
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-bb-bg">
       <Chrome />
@@ -74,36 +36,9 @@ export default function App() {
 }
 
 function Chrome() {
-  const [me, setMe] = useState<AuthMe | null>(null);
-  useEffect(() => {
-    void api.authMe().then(setMe).catch(() => setMe(null));
-  }, []);
   return (
     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-bb-border bg-bb-surface px-4 py-2 text-sm">
-      <div className="min-w-0 flex-1 text-bb-fg">
-        {!me ? (
-          <span className="text-bb-subtle">Connecting…</span>
-        ) : me.dev ? (
-          <span className="text-bb-accent">
-            Dev auth: acting as Member {me.identity?.display_name ?? "You"}
-          </span>
-        ) : me.signed_in ? (
-          <span>Signed in as {me.identity?.github_login ?? me.identity?.display_name}</span>
-        ) : (
-          <a
-            href={`${getServerOrigin()}/v1/auth/github`}
-            className="rounded bg-zinc-900 px-3 py-1 font-medium text-zinc-50"
-          >
-            Sign in with GitHub
-          </a>
-        )}
-      </div>
-      {isDesktopShell() ? (
-        <span className="hidden text-xs text-bb-accent sm:inline">Desktop</span>
-      ) : null}
-      <a href="#/settings" className="text-xs text-bb-muted hover:text-bb-fg">
-        Settings
-      </a>
+      <div className="min-w-0 flex-1 font-medium text-bb-fg">BuildBee</div>
       <PrefsBar />
       <InboxBell />
     </div>
@@ -284,79 +219,6 @@ function InboxBell() {
         </div>
       ) : null}
     </div>
-  );
-}
-
-function SettingsPage() {
-  const [url, setUrl] = useState(getServerOrigin() || "http://127.0.0.1:8080");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function onSave(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    setStatus("");
-    try {
-      const saved = await persistServerOrigin(url);
-      setUrl(saved);
-      const ok = await pingServer(saved);
-      setStatus(
-        ok
-          ? `Saved. Server at ${saved || window.location.origin} is reachable.`
-          : `Saved ${saved || "(same origin)"}. /healthz did not return ok — is the Server running?`,
-      );
-    } catch (err) {
-      setError(formatError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className="min-h-screen bg-bb-bg px-6 py-16 text-bb-fg">
-      <div className="mx-auto max-w-xl">
-        <a href="#/" className="text-sm text-bb-accent">
-          BuildBee
-        </a>
-        <h1 className="mt-2 text-3xl font-semibold">Settings</h1>
-        <p className="mt-3 text-sm text-bb-muted">
-          The desktop shell loads this web UI and talks to a local or remote{" "}
-          <span className="text-bb-fg">Server</span>. Hash routes such as{" "}
-          <code className="text-bb-fg">#/invite/…</code> keep working.
-          The Server (and Postgres, if you use it) run separately — they are
-          not bundled in this app.
-        </p>
-        <form onSubmit={onSave} className="mt-8 space-y-3">
-          <label className="block text-sm text-bb-fg">
-            Server URL
-            <input
-              className="mt-1 w-full rounded-md border border-bb-border bg-bb-surface px-3 py-2"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://127.0.0.1:8080"
-              autoComplete="off"
-            />
-          </label>
-          <p className="text-xs text-bb-subtle">
-            Default is <code>http://127.0.0.1:8080</code> in the desktop app.
-            In a browser the UI stays same-origin unless you set a URL here.
-            Settings persist in local storage
-            {isDesktopShell() ? " and the desktop config directory" : ""}.
-          </p>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-md bg-amber-400 px-4 py-2 font-medium text-zinc-950 disabled:opacity-50"
-          >
-            {busy ? "Saving…" : "Save and ping Server"}
-          </button>
-        </form>
-        {status ? <p className="mt-3 text-sm text-bb-success">{status}</p> : null}
-        {error ? <p className="mt-3 text-sm text-bb-danger">{error}</p> : null}
-      </div>
-    </main>
   );
 }
 
@@ -671,80 +533,6 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
           ) : null}
         </ul>
       </section>
-    </main>
-  );
-}
-
-function InvitePage({ token }: { token: string }) {
-  const [invite, setInvite] = useState<Invite | null>(null);
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    void api
-      .getInvite(token)
-      .then(setInvite)
-      .catch((e) => setError(formatError(e)));
-  }, [token]);
-
-  async function accept(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const res = await api.acceptInvite(token, {
-        display_name: name.trim() || undefined,
-        github_login: invite?.github_login || undefined,
-      });
-      const pid = res.invite.project_id || invite?.project_id;
-      window.location.hash = pid ? `#/projects/${pid}` : "#/";
-    } catch (err) {
-      setError(formatError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className="min-h-screen bg-bb-bg px-6 py-16 text-bb-fg">
-      <div className="mx-auto max-w-md rounded-lg border border-bb-border bg-bb-surface p-6">
-        <p className="text-sm text-bb-accent">Project Invite</p>
-        <h1 className="mt-2 text-2xl font-semibold">
-          {invite?.project_name ?? "BuildBee"}
-        </h1>
-        {invite ? (
-          <p className="mt-2 text-sm text-bb-muted">
-            Role <span className="text-bb-fg">{invite.role}</span>
-            {invite.email ? ` · ${invite.email}` : ""}
-            {invite.github_login ? ` · @${invite.github_login}` : ""}
-            {invite.status !== "pending" ? (
-              <span className="block text-bb-danger">This Invite is {invite.status}.</span>
-            ) : null}
-          </p>
-        ) : null}
-        {error ? <p className="mt-3 text-sm text-bb-danger">{error}</p> : null}
-        {invite?.status === "pending" ? (
-          <form onSubmit={accept} className="mt-6 space-y-3">
-            <input
-              className="w-full rounded border border-bb-border bg-bb-surface px-3 py-2"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Your display name (optional in dev)"
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-md bg-amber-400 px-4 py-2 font-medium text-zinc-950 disabled:opacity-50"
-            >
-              {busy ? "Joining…" : "Accept Invite"}
-            </button>
-          </form>
-        ) : invite ? (
-          <Empty>Ask the Project owner for a new Invite link.</Empty>
-        ) : (
-          <Empty>Loading Invite…</Empty>
-        )}
-      </div>
     </main>
   );
 }

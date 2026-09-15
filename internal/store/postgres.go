@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/codemodify/buildbee/internal/migrate"
@@ -106,8 +105,8 @@ func (p *Postgres) CreateProject(ctx context.Context, name string, autoRun bool)
 }
 
 func insertMember(ctx context.Context, tx pgx.Tx, m models.Member) error {
-	_, err := tx.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at, instructions)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, m.ID, m.ProjectID, m.Kind, m.DisplayName, m.Role, m.Identity, m.CreatedAt, m.Instructions)
+	_, err := tx.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, instructions, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, m.ID, m.ProjectID, m.Kind, m.DisplayName, m.Role, m.Instructions, m.CreatedAt)
 	return err
 }
 
@@ -135,7 +134,7 @@ func (p *Postgres) addActivity(ctx context.Context, projectID, typ string, paylo
 
 func (p *Postgres) GetProject(ctx context.Context, id string) (*models.ProjectBundle, error) {
 	var proj models.Project
-	err := p.pool.QueryRow(ctx, `SELECT id, name, created_at, COALESCE(auto_run, false) FROM projects WHERE id=$1`, id).
+	err := p.pool.QueryRow(ctx, `SELECT id, name, created_at, auto_run FROM projects WHERE id=$1`, id).
 		Scan(&proj.ID, &proj.Name, &proj.CreatedAt, &proj.AutoRun)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -173,7 +172,7 @@ func (p *Postgres) UpdateProject(ctx context.Context, id string, autoRun *bool) 
 }
 
 func (p *Postgres) ListProjects(ctx context.Context) ([]models.Project, error) {
-	rows, err := p.pool.Query(ctx, `SELECT id, name, created_at, COALESCE(auto_run, false) FROM projects ORDER BY created_at DESC`)
+	rows, err := p.pool.Query(ctx, `SELECT id, name, created_at, auto_run FROM projects ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +192,7 @@ func (p *Postgres) ListMembers(ctx context.Context, projectID string) ([]models.
 	if err := p.mustProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,''), COALESCE(instructions,'')
-		FROM members WHERE project_id=$1 ORDER BY created_at`, projectID)
+	rows, err := p.pool.Query(ctx, `SELECT `+memberCols+` FROM members WHERE project_id=$1 ORDER BY created_at, id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +200,7 @@ func (p *Postgres) ListMembers(ctx context.Context, projectID string) ([]models.
 	out := []models.Member{}
 	for rows.Next() {
 		var m models.Member
-		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID, &m.Instructions); err != nil {
+		if err := scanMember(rows, &m); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -216,25 +214,8 @@ func (p *Postgres) AddMember(ctx context.Context, in models.Member) (*models.Mem
 	}
 	in.ID = uuid.NewString()
 	in.CreatedAt = time.Now().UTC()
-	if in.Kind == "human" && strings.TrimSpace(in.GitHubLogin) != "" {
-		ident, err := p.UpsertHumanIdentity(ctx, in.GitHubLogin, in.GitHubID, in.DisplayName)
-		if err != nil {
-			return nil, err
-		}
-		in.Identity = ident.ID
-		in.GitHubLogin = ident.GitHubLogin
-		in.GitHubID = ident.GitHubID
-		in.DisplayName = ident.DisplayName
-	}
-	if in.Identity == "" {
-		if in.Kind == "bot" {
-			in.Identity = "bot:" + uuid.NewString()
-		} else {
-			in.Identity = "human:stub"
-		}
-	}
-	_, err := p.pool.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, identity, created_at, instructions, github_login, github_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, in.ID, in.ProjectID, in.Kind, in.DisplayName, in.Role, in.Identity, in.CreatedAt, in.Instructions, in.GitHubLogin, in.GitHubID)
+	_, err := p.pool.Exec(ctx, `INSERT INTO members (id, project_id, kind, display_name, role, instructions, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, in.ID, in.ProjectID, in.Kind, in.DisplayName, in.Role, in.Instructions, in.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -244,12 +225,17 @@ func (p *Postgres) AddMember(ctx context.Context, in models.Member) (*models.Mem
 
 func (p *Postgres) GetMember(ctx context.Context, id string) (*models.Member, error) {
 	var m models.Member
-	err := p.pool.QueryRow(ctx, `SELECT id, project_id, kind, display_name, role, identity, created_at, COALESCE(github_login,''), COALESCE(github_id,''), COALESCE(instructions,'') FROM members WHERE id=$1`, id).
-		Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Identity, &m.CreatedAt, &m.GitHubLogin, &m.GitHubID, &m.Instructions)
+	err := scanMember(p.pool.QueryRow(ctx, `SELECT `+memberCols+` FROM members WHERE id=$1`, id), &m)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return &m, err
+}
+
+const memberCols = `id, project_id, kind, display_name, role, instructions, created_at`
+
+func scanMember(row scannable, m *models.Member) error {
+	return row.Scan(&m.ID, &m.ProjectID, &m.Kind, &m.DisplayName, &m.Role, &m.Instructions, &m.CreatedAt)
 }
 
 func (p *Postgres) ListChannels(ctx context.Context, projectID string) ([]models.Channel, error) {
@@ -1157,179 +1143,12 @@ func scanNotification(row scannable) (models.Notification, error) {
 	return n, err
 }
 
-func (p *Postgres) CreateInvite(ctx context.Context, in models.Invite) (*models.Invite, error) {
-	if err := p.mustProject(ctx, in.ProjectID); err != nil {
-		return nil, err
-	}
-	if _, err := p.GetMember(ctx, in.InvitedByMemberID); err != nil {
-		return nil, err
-	}
-	if in.ID == "" {
-		in.ID = uuid.NewString()
-	}
-	if in.Token == "" {
-		in.Token = uuid.NewString()
-	}
-	in.CreatedAt = time.Now().UTC()
-	_, err := p.pool.Exec(ctx, `INSERT INTO invites (id, project_id, email, github_login, role, token, invited_by_member_id, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, in.ID, in.ProjectID, in.Email, in.GitHubLogin, in.Role, in.Token, in.InvitedByMemberID, in.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	_ = p.addActivity(ctx, in.ProjectID, models.TypeInvite, map[string]any{"id": in.ID, "action": "create", "role": in.Role})
-	return &in, nil
-}
-
-func (p *Postgres) GetInvite(ctx context.Context, id string) (*models.Invite, error) {
-	row := p.pool.QueryRow(ctx, `SELECT id, project_id, email, github_login, role, token, invited_by_member_id, accepted_member_id, created_at, accepted_at, revoked_at FROM invites WHERE id=$1`, id)
-	inv, err := scanInvite(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &inv, nil
-}
-
-func (p *Postgres) GetInviteByToken(ctx context.Context, token string) (*models.Invite, error) {
-	row := p.pool.QueryRow(ctx, `SELECT id, project_id, email, github_login, role, token, invited_by_member_id, accepted_member_id, created_at, accepted_at, revoked_at FROM invites WHERE token=$1`, token)
-	inv, err := scanInvite(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &inv, nil
-}
-
-func (p *Postgres) ListInvites(ctx context.Context, projectID string, pendingOnly bool) ([]models.Invite, error) {
-	if err := p.mustProject(ctx, projectID); err != nil {
-		return nil, err
-	}
-	q := `SELECT id, project_id, email, github_login, role, token, invited_by_member_id, accepted_member_id, created_at, accepted_at, revoked_at FROM invites WHERE project_id=$1`
-	if pendingOnly {
-		q += ` AND accepted_at IS NULL AND revoked_at IS NULL`
-	}
-	q += ` ORDER BY created_at DESC`
-	rows, err := p.pool.Query(ctx, q, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []models.Invite{}
-	for rows.Next() {
-		inv, err := scanInvite(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, inv)
-	}
-	return out, rows.Err()
-}
-
-func (p *Postgres) AcceptInvite(ctx context.Context, id, memberID string) (*models.Invite, error) {
-	inv, err := p.GetInvite(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if inv.RevokedAt != nil {
-		return nil, fmt.Errorf("%w: invite revoked", ErrConflict)
-	}
-	if inv.AcceptedAt != nil {
-		return nil, fmt.Errorf("%w: invite already accepted", ErrConflict)
-	}
-	if _, err := p.GetMember(ctx, memberID); err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	if _, err := p.pool.Exec(ctx, `UPDATE invites SET accepted_at=$2, accepted_member_id=$3 WHERE id=$1`, id, now, memberID); err != nil {
-		return nil, err
-	}
-	_ = p.addActivity(ctx, inv.ProjectID, models.TypeInvite, map[string]any{"id": inv.ID, "action": "accept", "member_id": memberID})
-	return p.GetInvite(ctx, id)
-}
-
-func (p *Postgres) RevokeInvite(ctx context.Context, id string) (*models.Invite, error) {
-	inv, err := p.GetInvite(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if inv.AcceptedAt != nil {
-		return nil, fmt.Errorf("%w: invite already accepted", ErrConflict)
-	}
-	if inv.RevokedAt != nil {
-		return inv, nil
-	}
-	if _, err := p.pool.Exec(ctx, `UPDATE invites SET revoked_at=$2 WHERE id=$1`, id, time.Now().UTC()); err != nil {
-		return nil, err
-	}
-	_ = p.addActivity(ctx, inv.ProjectID, models.TypeInvite, map[string]any{"id": inv.ID, "action": "revoke"})
-	return p.GetInvite(ctx, id)
-}
-
-func scanInvite(row scannable) (models.Invite, error) {
-	var inv models.Invite
-	var acceptedID *string
-	err := row.Scan(&inv.ID, &inv.ProjectID, &inv.Email, &inv.GitHubLogin, &inv.Role, &inv.Token,
-		&inv.InvitedByMemberID, &acceptedID, &inv.CreatedAt, &inv.AcceptedAt, &inv.RevokedAt)
-	if acceptedID != nil {
-		inv.AcceptedMemberID = *acceptedID
-	}
-	return inv, err
-}
-
-func (p *Postgres) UpsertHumanIdentity(ctx context.Context, login, githubID, displayName string) (*models.Identity, error) {
-	login = strings.ToLower(strings.TrimSpace(login))
-	if login == "" {
-		return nil, fmt.Errorf("%w: github_login", ErrNotFound)
-	}
-	if existing, err := p.GetHumanIdentityByLogin(ctx, login); err == nil && existing != nil {
-		if existing.GitHubID == "" && githubID != "" {
-			_, _ = p.pool.Exec(ctx, `UPDATE identities SET github_id=$2 WHERE id=$1`, existing.ID, githubID)
-			existing.GitHubID = githubID
-		}
-		return existing, nil
-	}
-	name := strings.TrimSpace(displayName)
-	if name == "" {
-		name = login
-	}
-	ident := models.Identity{
-		ID: uuid.NewString(), Kind: "human", DisplayName: name,
-		GitHubLogin: login, GitHubID: githubID, CreatedAt: time.Now().UTC(),
-	}
-	_, err := p.pool.Exec(ctx, `INSERT INTO identities (id, kind, display_name, github_login, github_id, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6)`, ident.ID, ident.Kind, ident.DisplayName, ident.GitHubLogin, ident.GitHubID, ident.CreatedAt)
-	if err != nil {
-		if existing, e2 := p.GetHumanIdentityByLogin(ctx, login); e2 == nil {
-			return existing, nil
-		}
-		return nil, err
-	}
-	return &ident, nil
-}
-
-func (p *Postgres) GetHumanIdentityByLogin(ctx context.Context, login string) (*models.Identity, error) {
-	var ident models.Identity
-	err := p.pool.QueryRow(ctx, `SELECT id, kind, display_name, github_login, github_id, created_at FROM identities WHERE lower(github_login)=lower($1)`, strings.TrimSpace(login)).
-		Scan(&ident.ID, &ident.Kind, &ident.DisplayName, &ident.GitHubLogin, &ident.GitHubID, &ident.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &ident, nil
-}
-
-func (p *Postgres) GetPreferences(ctx context.Context, identity string) (*models.Preferences, error) {
+func (p *Postgres) GetPreferences(ctx context.Context, memberID string) (*models.Preferences, error) {
 	var pref models.Preferences
-	err := p.pool.QueryRow(ctx, `SELECT identity, mute_mentions, mute_routines, updated_at FROM member_preferences WHERE identity=$1`, identity).
-		Scan(&pref.Identity, &pref.MuteMentions, &pref.MuteRoutines, &pref.UpdatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT member_id, mute_mentions, mute_routines, updated_at FROM member_preferences WHERE member_id=$1`, memberID).
+		Scan(&pref.MemberID, &pref.MuteMentions, &pref.MuteRoutines, &pref.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return &models.Preferences{Identity: identity}, nil
+		return &models.Preferences{MemberID: memberID}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -1339,10 +1158,10 @@ func (p *Postgres) GetPreferences(ctx context.Context, identity string) (*models
 
 func (p *Postgres) SetPreferences(ctx context.Context, in models.Preferences) (*models.Preferences, error) {
 	in.UpdatedAt = time.Now().UTC()
-	_, err := p.pool.Exec(ctx, `INSERT INTO member_preferences (identity, mute_mentions, mute_routines, updated_at)
+	_, err := p.pool.Exec(ctx, `INSERT INTO member_preferences (member_id, mute_mentions, mute_routines, updated_at)
 		VALUES ($1,$2,$3,$4)
-		ON CONFLICT (identity) DO UPDATE SET mute_mentions=$2, mute_routines=$3, updated_at=$4`,
-		in.Identity, in.MuteMentions, in.MuteRoutines, in.UpdatedAt)
+		ON CONFLICT (member_id) DO UPDATE SET mute_mentions=$2, mute_routines=$3, updated_at=$4`,
+		in.MemberID, in.MuteMentions, in.MuteRoutines, in.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

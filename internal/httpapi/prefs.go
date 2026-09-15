@@ -2,37 +2,30 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
-	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/store"
 )
 
-func (s *Server) prefsIdentity(r *http.Request) (string, error) {
-	if id := s.resolveNotifyMember(r); id != "" {
-		mem, err := s.store.GetMember(r.Context(), id)
-		if err != nil {
-			return "", err
-		}
-		return models.PreferencesKey(*mem), nil
+// prefsMember is the Member whose notification preferences a request targets.
+func (s *Server) prefsMember(r *http.Request) (string, error) {
+	id := strings.TrimSpace(s.resolveNotifyMember(r))
+	if id == "" {
+		return "", store.ErrNotFound
 	}
-	ident, _, ok := s.auth.Me(r)
-	if ok && ident.GitHubLogin != "" {
-		rec, err := s.store.UpsertHumanIdentity(r.Context(), ident.GitHubLogin, ident.GitHubID, ident.DisplayName)
-		if err != nil {
-			return "", err
-		}
-		return rec.ID, nil
+	if _, err := s.store.GetMember(r.Context(), id); err != nil {
+		return "", err
 	}
-	return "", store.ErrForbidden
+	return id, nil
 }
 
 func (s *Server) getPreferences(w http.ResponseWriter, r *http.Request) {
-	key, err := s.prefsIdentity(r)
+	memberID, err := s.prefsMember(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	p, err := s.store.GetPreferences(r.Context(), key)
+	p, err := s.store.GetPreferences(r.Context(), memberID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -41,12 +34,12 @@ func (s *Server) getPreferences(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) patchPreferences(w http.ResponseWriter, r *http.Request) {
-	key, err := s.prefsIdentity(r)
+	memberID, err := s.prefsMember(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	cur, err := s.store.GetPreferences(r.Context(), key)
+	cur, err := s.store.GetPreferences(r.Context(), memberID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -65,7 +58,7 @@ func (s *Server) patchPreferences(w http.ResponseWriter, r *http.Request) {
 	if in.MuteRoutines != nil {
 		cur.MuteRoutines = *in.MuteRoutines
 	}
-	cur.Identity = key
+	cur.MemberID = memberID
 	out, err := s.store.SetPreferences(r.Context(), *cur)
 	if err != nil {
 		writeError(w, err)

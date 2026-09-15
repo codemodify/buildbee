@@ -1,5 +1,10 @@
 # BuildBee desktop
 
+> **Parked.** The desktop shell is out of scope and out of CI while BuildBee is
+> rebuilt as a LAN web app. It needed cross-origin access to a Server, which the
+> Server no longer offers; open the Server URL in a browser instead.
+
+
 A **Tauri 2** shell that loads the existing `web/` UI and talks to a **Server**.
 This is a v1 window + settings MVP (not a Gravity-style multi-window agent bench).
 

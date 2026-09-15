@@ -155,7 +155,7 @@ export function Workspace({ route, children }: { route: Route; children?: ReactN
   useEffect(() => {
     if (!loaded || projects.length === 0) return;
     persist(layout);
-    if (route.page === "task" || route.page === "settings" || route.page === "invite") return;
+    if (route.page === "task") return;
     const focusId =
       layout.focus === "right" && layout.rightId ? layout.rightId : layout.leftId;
     if (!focusId) return;

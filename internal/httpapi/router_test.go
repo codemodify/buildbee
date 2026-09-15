@@ -52,6 +52,26 @@ func TestUnknownPath(t *testing.T) {
 	}
 }
 
+func TestCrossOriginWritesRefused(t *testing.T) {
+	h := newTestMux(t)
+	body := strings.NewReader(`{"name":"x"}`)
+	req := httptest.NewRequest(http.MethodPost, "http://buildbee.lan/v1/projects", body)
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin POST: got %d want 403", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "http://buildbee.lan/v1/projects", strings.NewReader(`{"name":"x"}`))
+	req.Header.Set("Origin", "http://buildbee.lan")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("same-origin POST: got %d want 201: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRunEventsStream(t *testing.T) {
 	h := newTestMux(t)
 	proj := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Stream Project"}))
@@ -97,22 +117,6 @@ func TestRunEventsStream(t *testing.T) {
 	}
 }
 
-func TestCORSEchoesDesktopOrigin(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodOptions, "/v1/projects", nil)
-	req.Header.Set("Origin", "http://tauri.localhost")
-	newTestMux(t).ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status: got %d want %d", rec.Code, http.StatusNoContent)
-	}
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://tauri.localhost" {
-		t.Fatalf("Allow-Origin: %q", got)
-	}
-	if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
-		t.Fatalf("expected credentials allowed for desktop Origin")
-	}
-}
-
 func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var rdr io.Reader
@@ -126,28 +130,6 @@ func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httpte
 	req := httptest.NewRequest(method, path, rdr)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	return rec
-}
-
-func doJSONMember(t *testing.T, h http.Handler, method, path, memberID string, body any) *httptest.ResponseRecorder {
-	t.Helper()
-	var rdr io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rdr = bytes.NewReader(raw)
-	}
-	req := httptest.NewRequest(method, path, rdr)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if memberID != "" {
-		req.Header.Set("X-Member-ID", memberID)
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -352,11 +334,6 @@ func TestVerticalSlice(t *testing.T) {
 	fired := doJSON(t, h, http.MethodPost, "/v1/routines/"+rlist.Items[0].ID+"/run", map[string]string{})
 	if fired.Code != http.StatusOK {
 		t.Fatalf("routine run: %d %s", fired.Code, fired.Body.String())
-	}
-
-	me := doJSON(t, h, http.MethodGet, "/v1/auth/me", nil)
-	if me.Code != http.StatusOK {
-		t.Fatalf("auth me: %d", me.Code)
 	}
 }
 
@@ -609,18 +586,6 @@ func TestMuxKeepsAPIWhenWebMissing(t *testing.T) {
 	}
 }
 
-func TestOAuthProtectsMutations(t *testing.T) {
-	h := newTestMuxSecure(t)
-	rec := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Nope"})
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status: got %d want 401 %s", rec.Code, rec.Body.String())
-	}
-	health := doJSON(t, h, http.MethodGet, "/healthz", nil)
-	if health.Code != http.StatusOK {
-		t.Fatalf("healthz: %d", health.Code)
-	}
-}
-
 func TestBotRolesHandoffAndAutorun(t *testing.T) {
 	h := newTestMux(t)
 	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]any{"name": "Roles", "auto_run": true})
@@ -701,172 +666,6 @@ func TestBotRolesHandoffAndAutorun(t *testing.T) {
 	}
 	if body["run"] == nil {
 		t.Fatal("expected autorun Run for Builder Handoff")
-	}
-}
-
-func TestMemberInvites(t *testing.T) {
-	h := newTestMux(t)
-	created := doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Invite Project"})
-	var proj struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Members []struct {
-			ID   string `json:"id"`
-			Kind string `json:"kind"`
-			Role string `json:"role"`
-		} `json:"members"`
-	}
-	proj = decode[struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Members []struct {
-			ID   string `json:"id"`
-			Kind string `json:"kind"`
-			Role string `json:"role"`
-		} `json:"members"`
-	}](t, created)
-	var owner string
-	for _, m := range proj.Members {
-		if m.Role == "owner" {
-			owner = m.ID
-		}
-	}
-
-	bad := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/invites", map[string]string{"role": "member"})
-	if bad.Code != http.StatusBadRequest {
-		t.Fatalf("invite requires email or github: %d %s", bad.Code, bad.Body.String())
-	}
-
-	invRec := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/invites", map[string]string{
-		"email": "ada@example.test", "github_login": "ada", "role": "admin",
-	})
-	if invRec.Code != http.StatusCreated {
-		t.Fatalf("create invite: %d %s", invRec.Code, invRec.Body.String())
-	}
-	inv := decode[map[string]any](t, invRec)
-	token, _ := inv["token"].(string)
-	path, _ := inv["path"].(string)
-	if token == "" || !strings.HasPrefix(path, "#/invite/") {
-		t.Fatalf("token/path: %#v", inv)
-	}
-	if inv["invited_by_member_id"] != owner {
-		t.Fatalf("invited_by: %#v", inv)
-	}
-
-	preview := doJSON(t, h, http.MethodGet, "/v1/invites/"+token, nil)
-	if preview.Code != http.StatusOK {
-		t.Fatalf("preview: %d %s", preview.Code, preview.Body.String())
-	}
-	prev := decode[map[string]any](t, preview)
-	if prev["project_name"] != "Invite Project" || prev["status"] != "pending" {
-		t.Fatalf("preview: %#v", prev)
-	}
-
-	listed := doJSON(t, h, http.MethodGet, "/v1/projects/"+proj.ID+"/invites", nil)
-	items := decode[struct {
-		Items []map[string]any `json:"items"`
-	}](t, listed)
-	if len(items.Items) != 1 {
-		t.Fatalf("pending list: %#v", items.Items)
-	}
-
-	acc := doJSON(t, h, http.MethodPost, "/v1/invites/"+token+"/accept", map[string]string{
-		"display_name": "Ada", "github_login": "ada",
-	})
-	if acc.Code != http.StatusOK {
-		t.Fatalf("accept: %d %s", acc.Code, acc.Body.String())
-	}
-	joined := decode[map[string]any](t, acc)
-	if joined["already_member"] == true {
-		t.Fatalf("expected new Member: %#v", joined)
-	}
-	mem := joined["member"].(map[string]any)
-	if mem["display_name"] != "Ada" || mem["role"] != "admin" {
-		t.Fatalf("joined: %#v", mem)
-	}
-
-	again := doJSON(t, h, http.MethodPost, "/v1/invites/"+token+"/accept", map[string]string{
-		"display_name": "Ada", "github_login": "ada",
-	})
-	if again.Code != http.StatusConflict {
-		t.Fatalf("re-accept: %d %s", again.Code, again.Body.String())
-	}
-
-	memberRec := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/members", map[string]string{
-		"display_name": "Bob", "kind": "human", "role": "member",
-	})
-	bob := decode[map[string]any](t, memberRec)
-	bobID := bob["id"].(string)
-
-	forbidden := doJSONMember(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/invites", bobID, map[string]string{
-		"email": "eve@example.test",
-	})
-	if forbidden.Code != http.StatusForbidden {
-		t.Fatalf("member cannot invite: %d %s", forbidden.Code, forbidden.Body.String())
-	}
-	canRead := doJSONMember(t, h, http.MethodGet, "/v1/projects/"+proj.ID+"/invites", bobID, nil)
-	if canRead.Code != http.StatusOK {
-		t.Fatalf("member can list: %d %s", canRead.Code, canRead.Body.String())
-	}
-
-	second := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/invites", map[string]string{
-		"email": "eve@example.test", "role": "member",
-	})
-	inv2 := decode[map[string]any](t, second)
-	rev := doJSON(t, h, http.MethodDelete, "/v1/invites/"+inv2["id"].(string), nil)
-	if rev.Code != http.StatusOK {
-		t.Fatalf("revoke: %d %s", rev.Code, rev.Body.String())
-	}
-	tok2 := inv2["token"].(string)
-	dead := doJSON(t, h, http.MethodPost, "/v1/invites/"+tok2+"/accept", map[string]string{"display_name": "Eve"})
-	if dead.Code != http.StatusConflict {
-		t.Fatalf("accept revoked: %d %s", dead.Code, dead.Body.String())
-	}
-
-	own := doJSON(t, h, http.MethodPost, "/v1/projects/"+proj.ID+"/invites", map[string]string{"email": "you@example.test"})
-	ownInv := decode[map[string]any](t, own)
-	self := doJSON(t, h, http.MethodPost, "/v1/invites/"+ownInv["token"].(string)+"/accept", map[string]string{})
-	if self.Code != http.StatusOK {
-		t.Fatalf("self accept: %d %s", self.Code, self.Body.String())
-	}
-	selfBody := decode[map[string]any](t, self)
-	if selfBody["already_member"] != true {
-		t.Fatalf("dev session owner should already be a Member: %#v", selfBody)
-	}
-
-	oauth := newTestMuxSecure(t)
-	unauth := doJSON(t, oauth, http.MethodPost, "/v1/projects/"+proj.ID+"/invites", map[string]string{"email": "x@y.z"})
-	if unauth.Code != http.StatusUnauthorized {
-		t.Fatalf("oauth invite: %d %s", unauth.Code, unauth.Body.String())
-	}
-}
-
-func TestCrossProjectIdentity(t *testing.T) {
-	h := newTestMux(t)
-	a := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Alpha"}))
-	b := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects", map[string]string{"name": "Beta"}))
-	invA := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+a["id"].(string)+"/invites", map[string]string{
-		"github_login": "Ada", "role": "member",
-	}))
-	invB := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/projects/"+b["id"].(string)+"/invites", map[string]string{
-		"github_login": "ada", "role": "admin",
-	}))
-	memA := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/invites/"+invA["token"].(string)+"/accept", map[string]string{
-		"display_name": "Ada", "github_login": "ada",
-	}))
-	memB := decode[map[string]any](t, doJSON(t, h, http.MethodPost, "/v1/invites/"+invB["token"].(string)+"/accept", map[string]string{
-		"display_name": "Ada Lovelace", "github_login": "ADA",
-	}))
-	ida := memA["member"].(map[string]any)
-	idb := memB["member"].(map[string]any)
-	if ida["identity"] == "" || ida["identity"] != idb["identity"] {
-		t.Fatalf("expected shared Identity, got %#v vs %#v", ida, idb)
-	}
-	if ida["display_name"] != idb["display_name"] {
-		t.Fatalf("expected reused display name: %#v %#v", ida, idb)
-	}
-	if ida["github_login"] != "ada" || idb["github_login"] != "ada" {
-		t.Fatalf("login normalize: %#v %#v", ida, idb)
 	}
 }
 

@@ -1,9 +1,7 @@
 export type Route =
   | { page: "home" }
   | { page: "project"; projectId: string; channelId?: string; besideId?: string }
-  | { page: "task"; projectId: string; taskId: string }
-  | { page: "invite"; token: string }
-  | { page: "settings" };
+  | { page: "task"; projectId: string; taskId: string };
 
 function splitHash(raw: string): { path: string; query: URLSearchParams } {
   const hash = raw.replace(/^#/, "");
@@ -13,18 +11,8 @@ function splitHash(raw: string): { path: string; query: URLSearchParams } {
 }
 
 export function parseHash(): Route {
-  const pathParts = window.location.pathname.split("/").filter(Boolean);
-  if (pathParts[0] === "invite" && pathParts[1]) {
-    return { page: "invite", token: pathParts[1] };
-  }
   const { path, query } = splitHash(window.location.hash);
   const parts = path.split("/").filter(Boolean);
-  if (parts[0] === "invite" && parts[1]) {
-    return { page: "invite", token: parts[1] };
-  }
-  if (parts[0] === "settings") {
-    return { page: "settings" };
-  }
   if (parts[0] === "projects" && parts[1] && parts[2] === "tasks" && parts[3]) {
     return { page: "task", projectId: parts[1], taskId: parts[3] };
   }

@@ -10,7 +10,7 @@ import (
 func seedHuman(projectID string, t time.Time) models.Member {
 	return models.Member{
 		ID: uuid.NewString(), ProjectID: projectID, Kind: "human",
-		DisplayName: "You", Role: models.RoleOwner, Identity: "human:stub", CreatedAt: t,
+		DisplayName: "You", Role: models.RoleOwner, CreatedAt: t,
 	}
 }
 
@@ -21,7 +21,7 @@ func seedBots(projectID string, t time.Time) []models.Member {
 		out = append(out, models.Member{
 			ID: uuid.NewString(), ProjectID: projectID, Kind: "bot",
 			DisplayName: b.Name, Role: b.Role, Instructions: b.Instructions,
-			Identity: "bot:" + uuid.NewString(), CreatedAt: t.Add(time.Duration(i+1) * time.Millisecond),
+			CreatedAt: t.Add(time.Duration(i+1) * time.Millisecond),
 		})
 	}
 	return out

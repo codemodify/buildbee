@@ -2,9 +2,9 @@ package httpapi
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
-	"github.com/codemodify/buildbee/internal/auth"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/codemodify/buildbee/internal/webui"
 	"github.com/codemodify/buildbee/internal/ws"
@@ -14,21 +14,14 @@ import (
 type Server struct {
 	store store.Store
 	hub   *ws.Hub
-	auth  *auth.Service
 }
 
-func newSrv(st store.Store, hub *ws.Hub, a *auth.Service) *Server {
+// NewServer wires a Server over st; a nil hub gets a fresh one.
+func NewServer(st store.Store, hub *ws.Hub) *Server {
 	if hub == nil {
 		hub = ws.NewHub()
 	}
-	if a == nil {
-		a = auth.New(auth.FromEnv())
-	}
-	return &Server{store: st, hub: hub, auth: a}
-}
-
-func NewServer(st store.Store, hub *ws.Hub) *Server {
-	return newSrv(st, hub, auth.New(auth.FromEnv()))
+	return &Server{store: st, hub: hub}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -36,11 +29,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", Health)
 	mux.HandleFunc("GET /v1/{$}", s.v1Index)
 	mux.HandleFunc("GET /v1", s.v1Index)
-
-	mux.HandleFunc("GET /v1/auth/me", s.authMe)
-	mux.HandleFunc("GET /v1/auth/github", s.authGitHub)
-	mux.HandleFunc("GET /v1/auth/callback", s.authCallback)
-	mux.HandleFunc("POST /v1/auth/logout", s.authLogout)
 
 	mux.HandleFunc("GET /v1/projects", s.listProjects)
 	mux.HandleFunc("POST /v1/projects", s.createProject)
@@ -105,51 +93,46 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/notifications/read-all", s.readAllNotifications)
 	mux.HandleFunc("POST /v1/notifications/{notificationID}/read", s.readNotification)
 
-	mux.HandleFunc("GET /v1/projects/{projectID}/invites", s.listInvites)
-	mux.HandleFunc("POST /v1/projects/{projectID}/invites", s.createInvite)
-	mux.HandleFunc("GET /v1/invites/{token}", s.getInvitePreview)
-	mux.HandleFunc("POST /v1/invites/{token}/accept", s.acceptInvite)
-	mux.HandleFunc("DELETE /v1/invites/{inviteID}", s.revokeInvite)
-
 	web := webui.Handler()
-	return s.auth.RequireMutating(withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return sameOrigin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/v1") {
 			mux.ServeHTTP(w, r)
 			return
 		}
 		web.ServeHTTP(w, r)
-	})))
+	}))
+}
+
+// sameOrigin rejects state-changing browser requests sent from another site.
+// There is no login, so without this any page a LAN user visits could create
+// Tasks or start Runs through their browser. Clients that send no Origin
+// (CLI, worker, webhooks) are unaffected.
+func sameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || !strings.EqualFold(u.Host, r.Host) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin request refused"})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) v1Index(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "buildbee",
 		"api":     "v1",
-		"auth":    map[string]any{"dev": s.auth.Dev()},
 		"resources": []string{
 			"projects", "members", "channels", "messages",
 			"tasks", "handoffs", "decisions", "activity", "runs",
-			"artifacts", "pipelines", "issues", "routines", "roles", "memories", "notifications", "invites", "preferences", "run_events",
+			"artifacts", "pipelines", "issues", "routines", "memories", "notifications", "preferences", "run_events",
 		},
-	})
-}
-
-func withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Vary", "Origin")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Member-ID")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
 	})
 }

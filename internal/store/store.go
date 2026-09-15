@@ -81,16 +81,6 @@ type Store interface {
 	MarkNotificationRead(ctx context.Context, id string) (*models.Notification, error)
 	MarkAllNotificationsRead(ctx context.Context, memberID string) (int, error)
 
-	CreateInvite(ctx context.Context, in models.Invite) (*models.Invite, error)
-	GetInvite(ctx context.Context, id string) (*models.Invite, error)
-	GetInviteByToken(ctx context.Context, token string) (*models.Invite, error)
-	ListInvites(ctx context.Context, projectID string, pendingOnly bool) ([]models.Invite, error)
-	AcceptInvite(ctx context.Context, id, memberID string) (*models.Invite, error)
-	RevokeInvite(ctx context.Context, id string) (*models.Invite, error)
-
-	UpsertHumanIdentity(ctx context.Context, login, githubID, displayName string) (*models.Identity, error)
-	GetHumanIdentityByLogin(ctx context.Context, login string) (*models.Identity, error)
-
-	GetPreferences(ctx context.Context, identity string) (*models.Preferences, error)
+	GetPreferences(ctx context.Context, memberID string) (*models.Preferences, error)
 	SetPreferences(ctx context.Context, in models.Preferences) (*models.Preferences, error)
 }
