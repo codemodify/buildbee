@@ -503,6 +503,20 @@ func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request) {
 	respond(s, w, http.StatusOK, a, err)
 }
 
+func (s *Server) askPermission(w http.ResponseWriter, r *http.Request) {
+	var in core.PermissionAsk
+	if !s.decode(w, r, &in) {
+		return
+	}
+	d, err := s.core.AskPermission(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, d, err)
+}
+
+func (s *Server) getDecision(w http.ResponseWriter, r *http.Request) {
+	d, err := s.core.Decision(r.Context(), r.PathValue("id"))
+	respond(s, w, http.StatusOK, d, err)
+}
+
 // rawArtifact streams an Artifact's whole body as plain text.
 func (s *Server) rawArtifact(w http.ResponseWriter, r *http.Request) {
 	a, err := s.core.Artifact(r.Context(), r.PathValue("id"))

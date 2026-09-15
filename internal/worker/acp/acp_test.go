@@ -331,3 +331,24 @@ func TestScanLinesTruncatesAndKeepsReading(t *testing.T) {
 		t.Fatalf("%d lines", len(lines))
 	}
 }
+
+func TestPeopleAnswerPermissionsWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		answer string
+		err    error
+		ok     bool
+	}{{"yes", nil, true}, {"no", nil, false}, {"", errors.New("run ended"), false}} {
+		var rec recorder
+		var asked Permission
+		ask := func(_ context.Context, p Permission) (string, error) { asked = p; return tc.answer, tc.err }
+		if _, err := Run(context.Background(), Config{Agent: "fake", Ask: ask}, "Task: x", rec.emit); err != nil {
+			t.Fatal(err)
+		}
+		if asked.Title != "Read the Task" || len(asked.Options) != 2 || asked.Options[1] != (PermissionOption{ID: "yes", Name: "Allow", Kind: "allow_once"}) {
+			t.Fatalf("asked: %+v (the session must not switch to bypass when people answer)", asked)
+		}
+		if res := rec.find("tool_result", nil); (res["ok"] == true) != tc.ok {
+			t.Fatalf("answer %q: tool result %v", tc.answer, res)
+		}
+	}
+}

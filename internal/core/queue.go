@@ -193,6 +193,9 @@ func (s *Service) ReapRuns(ctx context.Context) (int, error) {
 				return err
 			}
 			w.load = true
+			if err := w.runEnded(ctx, Actor{}, r); err != nil {
+				return err
+			}
 			if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
 				return err
 			}

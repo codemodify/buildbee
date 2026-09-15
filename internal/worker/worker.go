@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,6 +35,9 @@ type Job struct {
 	Objects string
 	Prompt  string
 	Steer   <-chan acp.Steer // people's messages while the agent works
+	// Ask, when the Project's agents ask before acting, turns each request
+	// into a Decision and waits for its answer.
+	Ask func(ctx context.Context, p acp.Permission) (string, error)
 }
 
 // Exec runs a Job, calling emit for each piece of output, and returns the
@@ -137,7 +141,7 @@ func New(cfg Config) (*Worker, error) {
 					return "", err
 				}
 			}
-			return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: argv, WorkDir: job.Dir, Steer: job.Steer}, job.Prompt, emit)
+			return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: argv, WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask}, job.Prompt, emit)
 		}
 	}
 	if cfg.Log == nil {
@@ -340,6 +344,9 @@ func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit a
 	defer stopListening()
 	go w.listen(listenCtx, run.ID, c.Seq, steer)
 	job := Job{RunID: run.ID, Agent: agent, Image: c.Project.AgentImage, Dir: workDir, Prompt: run.Prompt, Steer: steer}
+	if c.Project.AgentPermissions == models.PermissionsAsk {
+		job.Ask = w.asker(run.ID)
+	}
 	if ws != nil {
 		job.Objects = ws.objects
 	}
@@ -485,5 +492,50 @@ func sleep(ctx context.Context, d time.Duration) {
 	select {
 	case <-ctx.Done():
 	case <-t.C:
+	}
+}
+
+// answerPoll is how often a worker looks for the answer to a permission
+// question.
+var answerPoll = 2 * time.Second
+
+// asker relays an agent's permission requests for a Run as Decisions and
+// waits for each answer, until the Run's context ends. An answer that is
+// none of the agent's options is refused.
+func (w *Worker) asker(runID string) func(ctx context.Context, p acp.Permission) (string, error) {
+	return func(ctx context.Context, p acp.Permission) (string, error) {
+		body := map[string]any{"title": p.Title}
+		opts := make([]map[string]string, 0, len(p.Options))
+		for _, o := range p.Options {
+			opts = append(opts, map[string]string{"id": o.ID, "name": o.Name, "kind": o.Kind})
+		}
+		body["options"] = opts
+		var d models.Decision
+		if _, err := w.api.do(ctx, http.MethodPost, "/v1/runs/"+runID+"/permission", body, &d); err != nil {
+			return "", err
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(answerPoll):
+			}
+			var got models.Decision
+			if _, err := w.api.do(ctx, http.MethodGet, "/v1/decisions/"+d.ID, nil, &got); err != nil {
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+				continue // the Server may be restarting; keep waiting
+			}
+			if got.Answer == "" {
+				continue
+			}
+			for _, o := range p.Options {
+				if got.Answer == o.Name || got.Answer == o.ID {
+					return o.ID, nil
+				}
+			}
+			return "", fmt.Errorf("answered %q, which is none of the options", got.Answer)
+		}
 	}
 }

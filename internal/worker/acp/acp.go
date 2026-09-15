@@ -69,6 +69,25 @@ type Config struct {
 	CancelGrace time.Duration
 	// Steer delivers people's messages while the agent works (optional).
 	Steer <-chan Steer
+	// Ask, when set, decides each permission the agent asks for (a person
+	// answers it) and keeps the session out of modes that skip asking.
+	// Without it every request is approved: the agent works unattended in
+	// its Run's own directory.
+	Ask func(ctx context.Context, p Permission) (optionID string, err error)
+}
+
+// Permission is an agent asking before it acts.
+type Permission struct {
+	ToolCallID string
+	Title      string
+	Options    []PermissionOption
+}
+
+// PermissionOption is one answer the agent offers, such as "Allow once".
+type PermissionOption struct {
+	ID   string
+	Name string
+	Kind string // allow_once, allow_always, reject_once, reject_always
 }
 
 // Steer is a person's message to the working agent. It is sent as the next
@@ -166,6 +185,7 @@ type session struct {
 	cfg  Config
 	sink *sink
 	id   string
+	ctx  context.Context // the conversation's; permission questions wait on it
 
 	mu         sync.Mutex
 	transcript strings.Builder
@@ -181,6 +201,7 @@ func newSession(cfg Config, emit Handler) *session {
 func (s *session) drive(ctx context.Context, r io.Reader, w io.Writer, prompt string, peerGone func()) (string, error) {
 	ctx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
+	s.ctx = ctx
 	s.sink.start(func(err error) { stop(err) })
 	c := newConn(w, s.handle).listen(r)
 	err := s.converse(ctx, c, prompt)
@@ -262,8 +283,11 @@ func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 	s.id = sess.SessionID
 	s.emitLog(fmt.Sprintf("acp session %s with %s\n", s.id, agentName))
 
-	// Unattended: prefer a mode that skips permission prompts.
-	if opt, value, ok := bypassOption(sess.ConfigOptions); ok {
+	// Unattended: prefer a mode that skips permission prompts, unless
+	// people answer them.
+	if s.cfg.Ask != nil {
+		s.emitLog("permissions are asked in #decisions\n")
+	} else if opt, value, ok := bypassOption(sess.ConfigOptions); ok {
 		if err := c.call(ctx, "session/set_config_option", map[string]any{"sessionId": s.id, "configId": opt, "value": value}, nil); err != nil {
 			s.emitLog("could not switch to " + value + ": " + err.Error() + "\n")
 		}
@@ -438,8 +462,8 @@ func (s *session) handle(method string, params json.RawMessage) (any, *RPCError)
 	}
 }
 
-// permit approves a tool call: BuildBee runs agents unattended in a Run's
-// own directory. It prefers approving once over approving forever.
+// permit answers a permission request: through cfg.Ask when people decide,
+// else by approving, preferring once over forever.
 func (s *session) permit(params json.RawMessage) any {
 	var req struct {
 		ToolCall struct {
@@ -448,6 +472,7 @@ func (s *session) permit(params json.RawMessage) any {
 		} `json:"toolCall"`
 		Options []struct {
 			OptionID string `json:"optionId"`
+			Name     string `json:"name"`
 			Kind     string `json:"kind"`
 		} `json:"options"`
 	}
@@ -455,6 +480,25 @@ func (s *session) permit(params json.RawMessage) any {
 	title := req.ToolCall.ToolCallID
 	if req.ToolCall.Title != nil {
 		title = *req.ToolCall.Title
+	}
+	cancelled := map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}
+	if s.cfg.Ask != nil {
+		p := Permission{ToolCallID: req.ToolCall.ToolCallID, Title: title}
+		for _, o := range req.Options {
+			p.Options = append(p.Options, PermissionOption{ID: o.OptionID, Name: o.Name, Kind: o.Kind})
+		}
+		s.sink.add(Event{Kind: "log", Payload: map[string]any{"text": "asking: " + title + "\n", "tool_call_id": p.ToolCallID}})
+		ctx := s.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		id, err := s.cfg.Ask(ctx, p)
+		if err != nil || id == "" {
+			s.sink.add(Event{Kind: "log", Payload: map[string]any{"text": "not answered: " + title + "\n"}})
+			return cancelled
+		}
+		s.sink.add(Event{Kind: "log", Payload: map[string]any{"text": "answered " + id + ": " + title + "\n", "tool_call_id": p.ToolCallID}})
+		return map[string]any{"outcome": map[string]string{"outcome": "selected", "optionId": id}}
 	}
 	for _, kind := range []string{"allow_once", "allow_always"} {
 		for _, o := range req.Options {

@@ -96,6 +96,10 @@ The worker never runs git in the agent's repo once the agent has started. It rec
 
 With `BUILDBEE_WORKER_ISOLATION=host`, agents run directly on the machine as the worker's user, with that user's files, tools and logins, like Buzz. Use it on machines and accounts you are comfortable handing to an agent.
 
+## Permissions
+
+Agents ask before some actions (editing files, running commands). By default a worker approves each request, preferring "once" over "always", and switches agents to a mode that skips asking: a Run's agent works in its own checkout and container. A Project set to `agent_permissions: ask` (Settings → Autopilot) keeps agents in their asking mode instead: each request becomes a Decision on the Task ("Builder asks to: Edit src/app.ts", with the agent's own options), shown in the Task's thread and `# decisions`, and the agent waits until someone answers. A Run that ends, or is canceled, closes the questions it left open.
+
 ## Repos, branches and pull requests
 
 When a Project has a `repo_url` (`PATCH /v1/projects/{id}`), every Run works in a fresh checkout of it:

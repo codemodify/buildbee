@@ -103,7 +103,8 @@ func TestS3(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	st := &S3{Endpoint: endpoint, Bucket: "buildbee", AccessKey: "bbtest", SecretKey: "bbtest-secret"}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	if err := st.EnsureBucket(ctx); err != nil {
 		t.Fatal(err)
 	}

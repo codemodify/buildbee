@@ -104,15 +104,16 @@ func (s *Service) Project(ctx context.Context, id string) (*models.ProjectBundle
 
 // ProjectPatch changes only the fields that are set.
 type ProjectPatch struct {
-	Name          *string `json:"name"`
-	AutoRun       *bool   `json:"auto_run"`
-	MergePolicy   *string `json:"merge_policy"`
-	MaxRuns       *int    `json:"max_runs"`
-	Instructions  *string `json:"instructions"`
-	RepoURL       *string `json:"repo_url"`
-	DefaultBranch *string `json:"default_branch"`
-	AgentImage    *string `json:"agent_image"`
-	Archived      *bool   `json:"archived"`
+	Name             *string `json:"name"`
+	AutoRun          *bool   `json:"auto_run"`
+	MergePolicy      *string `json:"merge_policy"`
+	MaxRuns          *int    `json:"max_runs"`
+	Instructions     *string `json:"instructions"`
+	RepoURL          *string `json:"repo_url"`
+	DefaultBranch    *string `json:"default_branch"`
+	AgentImage       *string `json:"agent_image"`
+	AgentPermissions *string `json:"agent_permissions"`
+	Archived         *bool   `json:"archived"`
 }
 
 // UpdateProject renames, toggles auto_run, or archives/unarchives a Project.
@@ -188,6 +189,13 @@ func (s *Service) UpdateProject(ctx context.Context, a Actor, id string, patch P
 				return invalid("agent_image must be an image reference such as ghcr.io/acme/agents:1.2")
 			}
 			changes["agent_image"], p.AgentImage = img, img
+		}
+		if patch.AgentPermissions != nil {
+			v := strings.ToLower(strings.TrimSpace(*patch.AgentPermissions))
+			if v != models.PermissionsAuto && v != models.PermissionsAsk {
+				return invalid("agent_permissions must be auto or ask")
+			}
+			changes["agent_permissions"], p.AgentPermissions = v, v
 		}
 		action := "updated"
 		if patch.Archived != nil {
@@ -369,8 +377,12 @@ func (s *Service) RemoveMember(ctx context.Context, a Actor, id string) error {
 			if err != nil {
 				return err
 			}
-			for _, r := range runs {
+			for i := range runs {
+				r := &runs[i]
 				if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
+					return err
+				}
+				if err := w.runEnded(ctx, a, r); err != nil {
 					return err
 				}
 				w.load = true

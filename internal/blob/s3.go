@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,8 +28,27 @@ type S3 struct {
 
 func (s *S3) Name() string { return "s3 " + strings.TrimRight(s.Endpoint, "/") + "/" + s.Bucket }
 
-// EnsureBucket creates the bucket unless it exists.
+// EnsureBucket creates the bucket unless it exists, retrying while the
+// service is still starting (503) until ctx ends.
 func (s *S3) EnsureBucket(ctx context.Context) error {
+	for wait := 200 * time.Millisecond; ; wait = min(wait*2, 3*time.Second) {
+		err := s.ensureBucket(ctx)
+		var busy errUnavailable
+		if !errors.As(err, &busy) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(wait):
+		}
+	}
+}
+
+// errUnavailable is a 503: the service is up but not ready.
+type errUnavailable struct{ error }
+
+func (s *S3) ensureBucket(ctx context.Context) error {
 	res, err := s.send(ctx, http.MethodPut, "", nil, 0, nil)
 	if err != nil {
 		return err
@@ -36,6 +56,9 @@ func (s *S3) EnsureBucket(ctx context.Context) error {
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusConflict { // BucketAlreadyOwnedByYou / BucketAlreadyExists
 		return nil
+	}
+	if res.StatusCode == http.StatusServiceUnavailable {
+		return errUnavailable{s.check(res, s.Bucket)}
 	}
 	return s.check(res, s.Bucket)
 }

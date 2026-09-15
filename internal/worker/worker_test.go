@@ -379,3 +379,63 @@ func TestALongFailureIsStillReported(t *testing.T) {
 		t.Fatalf("the failure is reported, truncated, not lost to the reaper: %+v", got)
 	}
 }
+
+func TestAgentsAskPeopleWhenTheProjectSaysSo(t *testing.T) {
+	s := newStack(t)
+	ask := models.PermissionsAsk
+	if _, err := s.svc.UpdateProject(s.ctx, s.ada, s.project, core.ProjectPatch{AgentPermissions: &ask}); err != nil {
+		t.Fatal(err)
+	}
+	answerPoll = 10 * time.Millisecond
+	t.Cleanup(func() { answerPoll = 2 * time.Second })
+	s.start(Config{Dir: t.TempDir()})
+	open := func() []models.Decision {
+		ds, err := s.svc.Decisions(s.ctx, s.ada, s.project, core.DecisionFilter{Open: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ds
+	}
+	waitOpen := func() models.Decision {
+		deadline := time.Now().Add(10 * time.Second)
+		for len(open()) == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("no permission question")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return open()[0]
+	}
+
+	// Answered: the agent goes ahead.
+	r := s.queue("asks first")
+	d := waitOpen()
+	if d.Action != "permission" || d.RunID != r.ID || d.Prompt != "The agent asks to: Read the Task" ||
+		!slices.Equal(d.Options, []string{"Reject", "Allow"}) || d.Recommendation != "Allow" {
+		t.Fatalf("decision: %+v", d)
+	}
+	if got := s.wait(r.ID, func(*models.Run) bool { return true }); got.Status != models.RunRunning {
+		t.Fatalf("the run waits for the answer: %s", got.Status)
+	}
+	if _, err := s.svc.AnswerDecision(s.ctx, s.ada, d.ID, "Allow"); err != nil {
+		t.Fatal(err)
+	}
+	s.wait(r.ID, func(r *models.Run) bool { return r.Status == models.RunSucceeded })
+
+	// Unanswered, then canceled: the question closes with the Run.
+	r2 := s.queue("never answered")
+	waitOpen()
+	if _, err := s.svc.UpdateRun(s.ctx, s.ada, r2.ID, string(models.RunCanceled), "stop"); err != nil {
+		t.Fatal(err)
+	}
+	s.wait(r2.ID, func(r *models.Run) bool { return r.Status == models.RunCanceled })
+	if left := open(); len(left) != 0 {
+		t.Fatalf("questions outlive their run: %+v", left)
+	}
+	if _, err := s.svc.AskPermission(s.ctx, core.WorkerActor("w1"), r2.ID, core.PermissionAsk{Title: "x", Options: []core.PermissionChoice{{ID: "y", Name: "Allow"}}}); err == nil {
+		t.Fatal("a finished run asks nothing")
+	}
+	if _, err := s.svc.AskPermission(s.ctx, core.WorkerActor("other"), r.ID, core.PermissionAsk{Title: "x", Options: []core.PermissionChoice{{ID: "y"}}}); err == nil {
+		t.Fatal("only the run's worker asks")
+	}
+}

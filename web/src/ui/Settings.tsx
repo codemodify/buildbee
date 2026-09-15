@@ -95,6 +95,12 @@ export function Settings({ header }: { header: ReactNode }) {
             <option value="approval">Approval</option>
           </select>
         </Row>
+        <Row label="Agent permissions" hint="Auto: agents act freely in their Run. Ask: each request waits in # decisions.">
+          <select className={cx(inputBase, "w-40")} value={p.agent_permissions ?? "auto"} onChange={(e) => void save({ agent_permissions: e.target.value })}>
+            <option value="auto">Auto</option>
+            <option value="ask">Ask</option>
+          </select>
+        </Row>
         <Row label="Runs at once" hint="0 = no limit.">
           <NumberInput value={p.max_runs ?? 0} onSave={(v) => void save({ max_runs: v })} />
         </Row>

@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/store"
@@ -117,6 +119,7 @@ type newDecision struct {
 	options                                  []string
 	action                                   string // e.g. "merge"; never answered from memory
 	commit                                   string // for merge: the commit asked about
+	runID                                    string // for permission: the Run waiting on it
 }
 
 // openDecision records a Decision, reusing a remembered answer when there is
@@ -124,7 +127,7 @@ type newDecision struct {
 func (w *work) openDecision(ctx context.Context, projectID string, by who, asker *models.Member, in newDecision) (*models.Decision, error) {
 	d := models.Decision{ID: uuid.NewString(), ProjectID: projectID, TaskID: in.taskID, Prompt: in.prompt,
 		Options: in.options, Recommendation: in.recommendation, Fingerprint: models.DecisionFingerprint(in.prompt),
-		AssigneeMemberID: in.assignee, Action: in.action, Commit: in.commit, CreatedAt: w.now}
+		AssigneeMemberID: in.assignee, Action: in.action, Commit: in.commit, RunID: in.runID, CreatedAt: w.now}
 	if d.Options == nil {
 		d.Options = []string{}
 	}
@@ -163,6 +166,94 @@ func (w *work) openDecision(ctx context.Context, projectID string, by who, asker
 		return &d, w.notifyMember(ctx, assignee, n)
 	}
 	return &d, w.notifyPeople(ctx, projectID, asker, n)
+}
+
+// PermissionAsk is an agent asking before it acts, as its worker relays it.
+type PermissionAsk struct {
+	Title   string             `json:"title"`
+	Options []PermissionChoice `json:"options"`
+}
+
+// PermissionChoice is one answer the agent offers.
+type PermissionChoice struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+// AskPermission turns an agent's permission request into a Decision on its
+// Task, for a Project whose agents ask (agent_permissions "ask"). The
+// worker running the Run polls the Decision and relays the answer.
+func (s *Service) AskPermission(ctx context.Context, a Actor, runID string, in PermissionAsk) (*models.Decision, error) {
+	if a.Worker == "" {
+		return nil, invalid("only the worker running the Run asks for permission")
+	}
+	title, err := text("title", in.Title, true, 500)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	recommend := ""
+	for _, o := range in.Options {
+		n := strings.TrimSpace(o.Name)
+		if n == "" {
+			n = o.ID
+		}
+		if n == "" || slices.Contains(names, n) {
+			continue
+		}
+		names = append(names, truncate(n, 100))
+		if recommend == "" && o.Kind == "allow_once" {
+			recommend = n
+		}
+	}
+	if len(names) == 0 {
+		return nil, invalid("a permission request needs options")
+	}
+	var out *models.Decision
+	err = s.tx(ctx, func(w *work) error {
+		r, err := w.st.GetRun(ctx, runID, true)
+		if err != nil {
+			return err
+		}
+		if r.Worker != a.Worker || r.Status != models.RunRunning {
+			return fmt.Errorf("%w: run is not running on worker %s", store.ErrConflict, a.Worker)
+		}
+		var bot *models.Member // the Run's own Bot; not the Project's voice
+		who := "The agent"
+		if r.BotMemberID != "" {
+			if bot, err = w.st.GetMember(ctx, r.BotMemberID); err != nil {
+				return err
+			}
+			who = bot.DisplayName
+		}
+		out, err = w.openDecision(ctx, r.ProjectID, w.runActor(ctx, a, r), bot, newDecision{
+			prompt: who + " asks to: " + title, options: names, recommendation: recommend,
+			taskID: r.TaskID, action: "permission", runID: r.ID})
+		return err
+	})
+	return out, err
+}
+
+// Decision returns one Decision.
+func (s *Service) Decision(ctx context.Context, id string) (*models.Decision, error) {
+	return s.st.GetDecision(ctx, id)
+}
+
+// runEnded closes the permission questions a finished Run left open:
+// nobody waits for their answers any more.
+func (w *work) runEnded(ctx context.Context, a Actor, r *models.Run) error {
+	closed, err := w.st.CloseRunDecisions(ctx, r.ID, "not needed: the run ended", w.now)
+	if err != nil {
+		return err
+	}
+	for _, d := range closed {
+		if err := w.activity(ctx, d.ProjectID, w.runActor(ctx, a, r), models.TypeDecision, "answered", d.ID,
+			map[string]any{"answer": d.Answer}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AnswerDecision records the answer (once) and remembers it for the same

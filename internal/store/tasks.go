@@ -142,12 +142,13 @@ func (s *Store) CompleteHandoff(ctx context.Context, id string, at time.Time) (*
 // --- decisions ---
 
 const decisionCols = `id, project_id, COALESCE(task_id::text, ''), prompt, options, recommendation, COALESCE(answer, ''),
-	COALESCE(answered_by_member_id::text, ''), reused, fingerprint, COALESCE(assignee_member_id::text, ''), action, commit, created_at, answered_at`
+	COALESCE(answered_by_member_id::text, ''), reused, fingerprint, COALESCE(assignee_member_id::text, ''), action, commit,
+	COALESCE(run_id::text, ''), created_at, answered_at`
 
 func scanDecision(row interface{ Scan(...any) error }, d *models.Decision) error {
 	var raw []byte
 	if err := row.Scan(&d.ID, &d.ProjectID, &d.TaskID, &d.Prompt, &raw, &d.Recommendation, &d.Answer,
-		&d.AnsweredByMemberID, &d.Reused, &d.Fingerprint, &d.AssigneeMemberID, &d.Action, &d.Commit, &d.CreatedAt, &d.AnsweredAt); err != nil {
+		&d.AnsweredByMemberID, &d.Reused, &d.Fingerprint, &d.AssigneeMemberID, &d.Action, &d.Commit, &d.RunID, &d.CreatedAt, &d.AnsweredAt); err != nil {
 		return err
 	}
 	_ = json.Unmarshal(raw, &d.Options)
@@ -170,11 +171,32 @@ func (s *Store) InsertDecision(ctx context.Context, d models.Decision) error {
 		answer = d.Answer
 	}
 	_, err = s.q.Exec(ctx, `INSERT INTO decisions (id, project_id, task_id, prompt, options, recommendation, answer,
-		answered_by_member_id, reused, fingerprint, assignee_member_id, action, commit, created_at, answered_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		answered_by_member_id, reused, fingerprint, assignee_member_id, action, commit, run_id, created_at, answered_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		d.ID, d.ProjectID, nullID(d.TaskID), d.Prompt, raw, d.Recommendation, answer,
-		nullID(d.AnsweredByMemberID), d.Reused, d.Fingerprint, nullID(d.AssigneeMemberID), d.Action, d.Commit, d.CreatedAt, d.AnsweredAt)
+		nullID(d.AnsweredByMemberID), d.Reused, d.Fingerprint, nullID(d.AssigneeMemberID), d.Action, d.Commit, nullID(d.RunID),
+		d.CreatedAt, d.AnsweredAt)
 	return mapErr(err)
+}
+
+// CloseRunDecisions answers a Run's open permission Decisions with answer
+// (the Run ended, so nobody is waiting), returning them.
+func (s *Store) CloseRunDecisions(ctx context.Context, runID, answer string, at time.Time) ([]models.Decision, error) {
+	rows, err := s.q.Query(ctx, `UPDATE decisions SET answer=$2, answered_at=$3 WHERE run_id=$1 AND answer IS NULL
+		RETURNING `+decisionCols, runID, answer, at)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []models.Decision
+	for rows.Next() {
+		var d models.Decision
+		if err := scanDecision(rows, &d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetDecision(ctx context.Context, id string) (*models.Decision, error) {

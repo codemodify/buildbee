@@ -175,18 +175,21 @@ type Person struct {
 }
 
 type Project struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	AutoRun       bool       `json:"auto_run"` // autopilot
-	MergePolicy   string     `json:"merge_policy"`
-	MaxRuns       int        `json:"max_runs"` // Runs at once; 0 = no limit
-	Instructions  string     `json:"instructions,omitempty"`
-	RepoURL       string     `json:"repo_url,omitempty"`
-	DefaultBranch string     `json:"default_branch,omitempty"`
-	AgentImage    string     `json:"agent_image,omitempty"` // container image for its agents; "" = the worker's
-	Kind          string     `json:"kind"`                  // ProjectKind or DirectSpace
-	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	AutoRun       bool   `json:"auto_run"` // autopilot
+	MergePolicy   string `json:"merge_policy"`
+	MaxRuns       int    `json:"max_runs"` // Runs at once; 0 = no limit
+	Instructions  string `json:"instructions,omitempty"`
+	RepoURL       string `json:"repo_url,omitempty"`
+	DefaultBranch string `json:"default_branch,omitempty"`
+	AgentImage    string `json:"agent_image,omitempty"` // container image for its agents; "" = the worker's
+	// AgentPermissions is "auto" (agents act freely in their Run) or "ask"
+	// (each permission request is a Decision someone answers).
+	AgentPermissions string     `json:"agent_permissions"`
+	Kind             string     `json:"kind"` // ProjectKind or DirectSpace
+	ArchivedAt       *time.Time `json:"archived_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
 
 // Project kinds. The direct space is one hidden Project that holds DMs
@@ -488,9 +491,16 @@ type Decision struct {
 	AssigneeMemberID   string     `json:"assignee_id,omitempty"`
 	Action             string     `json:"action,omitempty"` // "merge": answering "merge" merges the Task's PR
 	Commit             string     `json:"commit,omitempty"` // the commit a merge Decision is about
+	RunID              string     `json:"run_id,omitempty"` // for permission: the Run whose agent asks
 	CreatedAt          time.Time  `json:"created_at"`
 	AnsweredAt         *time.Time `json:"answered_at,omitempty"`
 }
+
+// Agent permission modes.
+const (
+	PermissionsAuto = "auto"
+	PermissionsAsk  = "ask"
+)
 
 // DecisionMemory is a remembered answer so the same question is not asked twice.
 type DecisionMemory struct {

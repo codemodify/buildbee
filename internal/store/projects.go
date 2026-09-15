@@ -9,11 +9,12 @@ import (
 	"github.com/codemodify/buildbee/internal/models"
 )
 
-const projectCols = `id, name, auto_run, merge_policy, max_runs, instructions, repo_url, default_branch, agent_image, kind, archived_at, created_at`
+const projectCols = `id, name, auto_run, merge_policy, max_runs, instructions, repo_url, default_branch, agent_image, agent_permissions,
+	kind, archived_at, created_at`
 
 func scanProject(row interface{ Scan(...any) error }, p *models.Project) error {
 	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.MergePolicy, &p.MaxRuns, &p.Instructions, &p.RepoURL, &p.DefaultBranch, &p.AgentImage,
-		&p.Kind, &p.ArchivedAt, &p.CreatedAt)
+		&p.AgentPermissions, &p.Kind, &p.ArchivedAt, &p.CreatedAt)
 }
 
 // DirectSpace returns the hidden Project for DMs between people, creating
@@ -66,8 +67,16 @@ func (s *Store) ListProjects(ctx context.Context, includeArchived bool) ([]model
 // UpdateProject writes the Project's settings and archived_at.
 func (s *Store) UpdateProject(ctx context.Context, p models.Project) error {
 	return one(s.q.Exec(ctx, `UPDATE projects SET name=$2, auto_run=$3, merge_policy=$4, instructions=$5, repo_url=$6,
-		default_branch=$7, archived_at=$8, max_runs=$9, agent_image=$10 WHERE id=$1`,
-		p.ID, p.Name, p.AutoRun, p.MergePolicy, p.Instructions, p.RepoURL, p.DefaultBranch, p.ArchivedAt, p.MaxRuns, p.AgentImage))
+		default_branch=$7, archived_at=$8, max_runs=$9, agent_image=$10, agent_permissions=$11 WHERE id=$1`,
+		p.ID, p.Name, p.AutoRun, p.MergePolicy, p.Instructions, p.RepoURL, p.DefaultBranch, p.ArchivedAt, p.MaxRuns, p.AgentImage,
+		orDefault(p.AgentPermissions, models.PermissionsAuto)))
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
 
 // --- members ---
