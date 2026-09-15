@@ -25,12 +25,14 @@ import (
 
 // Job is one agent session for a Run.
 type Job struct {
-	RunID  string
-	Agent  string
-	Dir    string // where the agent works; "" for the fake agent without a repo
-	GitDir string // the repo mirror Dir's checkout belongs to, if any
-	Prompt string
-	Steer  <-chan acp.Steer // people's messages while the agent works
+	RunID string
+	Agent string
+	Dir   string // where the agent works; "" for the fake agent without a repo
+	// Objects is the mirror object store Dir's repo borrows from, if any;
+	// a container mounts it read-only.
+	Objects string
+	Prompt  string
+	Steer   <-chan acp.Steer // people's messages while the agent works
 }
 
 // Exec runs a Job, calling emit for each piece of output, and returns the
@@ -210,7 +212,7 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	defer cancelTimeout()
 	go w.keepAlive(runCtx, run.ID, stop, log)
 
-	emit := func(ev acp.Event) error { return w.api.event(runCtx, run.ID, ev.Kind, ev.Payload) }
+	emit := w.emitter(runCtx, run.ID, log)
 	say := func(format string, args ...any) {
 		_ = emit(acp.Event{Kind: models.RunEventLog, Payload: map[string]any{"text": fmt.Sprintf(format, args...) + "\n"}})
 	}
@@ -248,16 +250,53 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	case err != nil:
 		status, rep.detail = models.RunFailed, err.Error()
 	}
-	if uerr := w.api.report(rctx, run.ID, status, rep); uerr != nil {
+	if uerr := w.reportOutcome(rctx, run.ID, status, rep); uerr != nil {
 		log.Error("reporting the outcome failed", "err", uerr, "status", status)
 		return
 	}
 	log.Info("run finished", "status", status)
 }
 
+// reportOutcome reports a finished Run, retrying while the Server is
+// unreachable. The Run's heartbeats keep its claim meanwhile.
+func (w *Worker) reportOutcome(ctx context.Context, runID string, status models.RunStatus, rep outcome) error {
+	var err error
+	for attempt := range 6 {
+		if err = w.api.report(ctx, runID, status, rep); err == nil || errors.Is(err, errConflict) || errors.Is(err, errRejected) {
+			return err
+		}
+		if attempt < 5 {
+			sleep(ctx, time.Duration(1<<attempt)*time.Second)
+		}
+	}
+	return err
+}
+
+// emitter posts agent output as RunEvents. A Server that is briefly
+// unreachable costs a few events, not the Run; only a Run the Server says
+// is finished or not ours (409) stops the agent.
+func (w *Worker) emitter(ctx context.Context, runID string, log *slog.Logger) acp.Handler {
+	dropped := 0
+	return func(ev acp.Event) error {
+		var err error
+		for attempt := range 3 {
+			if err = w.api.event(ctx, runID, ev.Kind, ev.Payload); err == nil || errors.Is(err, errConflict) || ctx.Err() != nil {
+				return err
+			}
+			if attempt < 2 {
+				sleep(ctx, time.Duration(attempt+1)*500*time.Millisecond)
+			}
+		}
+		if dropped++; dropped == 1 || dropped%100 == 0 {
+			log.Warn("dropping run events the server did not accept", "err", err, "dropped", dropped)
+		}
+		return nil
+	}
+}
+
 // outcome is what a Run produced, for the Server.
 type outcome struct {
-	detail, summary, branch, prURL string
+	detail, summary, branch, commit, prURL string
 }
 
 // work runs the agent on the Run's checkout (the Project's repo, when it
@@ -274,12 +313,17 @@ func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit a
 		if run.Kind == models.RunReview && from == "" {
 			return "", rep, errors.New("the Task has no branch to review")
 		}
+		name := from
+		if name == "" && run.Kind == models.RunBuild {
+			name = branchName(c.Task.Title, run.ID)
+		}
 		say("checking out %s", c.Project.RepoURL)
 		var err error
-		if ws, err = w.repos.prepare(ctx, c.Project, from, run.ID); err != nil {
+		if ws, err = w.repos.prepare(ctx, c.Project, from, name, run.ID, true); err != nil {
 			return "", rep, err
 		}
 		say("on %s at %.12s", ws.start, ws.base)
+		rep.commit = ws.base // what a plan or review looked at
 		workDir = ws.dir
 	case agent != "fake" && w.cfg.Isolation == IsolationHost:
 		// The Project has no repo: the agent gets an empty directory.
@@ -296,7 +340,7 @@ func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit a
 	go w.listen(listenCtx, run.ID, c.Seq, steer)
 	job := Job{RunID: run.ID, Agent: agent, Dir: workDir, Prompt: run.Prompt, Steer: steer}
 	if ws != nil {
-		job.GitDir = ws.mirror
+		job.Objects = ws.objects
 	}
 	out, err := w.cfg.Exec(ctx, job, emit)
 	rep.summary = finalReply(out)
@@ -336,11 +380,15 @@ func (w *Worker) deliver(ctx context.Context, c *models.Claim, ws *workspace, ag
 	if target == "" {
 		target = branchName(c.Task.Title, c.Run.ID)
 	}
+	head, err := ws.head(ctx)
+	if err != nil {
+		return rep, false, err
+	}
 	if err := ws.push(ctx, target); err != nil {
 		return rep, true, fmt.Errorf("pushing %s failed (the work stays on worker %s): %w", target, w.cfg.Name, err)
 	}
-	say("pushed %s", target)
-	rep.branch, rep.detail = target, "pushed "+target
+	say("pushed %s at %.12s", target, head)
+	rep.branch, rep.commit, rep.detail = target, head, "pushed "+target
 	repo := githubRepo(ws.repo)
 	if repo == "" || !w.cfg.OpenPRs || c.Task.PRURL != "" {
 		return rep, false, nil // pushing updated any existing PR
@@ -367,19 +415,19 @@ func (w *Worker) merge(ctx context.Context, c *models.Claim, say func(string, ..
 		return outcome{}, errors.New("nothing to merge: the Task has no branch")
 	}
 	if repo := githubRepo(p.RepoURL); repo != "" && t.PRURL != "" && w.cfg.OpenPRs {
-		say("merging %s", t.PRURL)
-		if err := mergePR(ctx, t.PRURL); err != nil {
+		say("merging %s at %.12s", t.PRURL, c.Run.Commit)
+		if err := mergePR(ctx, t.PRURL, c.Run.Commit); err != nil {
 			return outcome{}, err
 		}
 		return outcome{detail: "merged " + t.PRURL}, nil
 	}
-	ws, err := w.repos.prepare(ctx, p, "", c.Run.ID)
+	ws, err := w.repos.prepare(ctx, p, "", "", c.Run.ID, false)
 	if err != nil {
 		return outcome{}, err
 	}
 	defer ws.close(context.WithoutCancel(ctx), false)
-	say("merging %s into %s", t.Branch, ws.start)
-	if err := ws.merge(ctx, t.Branch, fmt.Sprintf("Merge %s: %s\n\nBuildBee Task %s", t.Branch, t.Title, t.ID)); err != nil {
+	say("merging %s at %.12s into %s", t.Branch, c.Run.Commit, ws.start)
+	if err := ws.merge(ctx, t.Branch, c.Run.Commit, fmt.Sprintf("Merge %s: %s\n\nBuildBee Task %s", t.Branch, t.Title, t.ID)); err != nil {
 		return outcome{}, err
 	}
 	return outcome{detail: "merged " + t.Branch + " into " + ws.start}, nil

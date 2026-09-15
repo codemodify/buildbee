@@ -366,3 +366,16 @@ func (s *stack) transcript(r *models.Run) string {
 	s.t.Fatalf("run %s has no transcript", r.ID)
 	return ""
 }
+
+func TestALongFailureIsStillReported(t *testing.T) {
+	s := newStack(t)
+	r := s.queue("Noisy crash")
+	long := strings.Repeat("stderr line that goes on and on\n", 200) // ~6 KB
+	s.start(Config{Exec: func(context.Context, Job, acp.Handler) (string, error) {
+		return "", errors.New("agent crashed: " + long)
+	}})
+	got := s.wait(r.ID, finished)
+	if got.Status != models.RunFailed || !strings.HasPrefix(got.Detail, "agent crashed: stderr line") {
+		t.Fatalf("the failure is reported, truncated, not lost to the reaper: %+v", got)
+	}
+}

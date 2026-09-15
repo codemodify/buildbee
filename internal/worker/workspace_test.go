@@ -64,7 +64,7 @@ func (s *stack) useRepo(url string) {
 // writeFile is an agent that adds a file to its checkout.
 func writeFile(name, body string) Exec {
 	return func(_ context.Context, job Job, _ acp.Handler) (string, error) {
-		if job.Dir == "" || job.GitDir == "" {
+		if job.Dir == "" || job.Objects == "" {
 			return "", os.ErrInvalid
 		}
 		return "wrote " + name, os.WriteFile(filepath.Join(job.Dir, name), []byte(body), 0o644)
@@ -114,6 +114,51 @@ func mustOne(t *testing.T, dir string) string {
 		t.Fatalf("%s: %v %v", dir, entries, err)
 	}
 	return entries[0].Name()
+}
+
+// TestAgentGitMetadataNeverRunsOnTheHost: whatever an agent writes into its
+// repo's .git (hooks, fsmonitor, a redirected gitdir), the worker's own git
+// commands must not execute it.
+func TestAgentGitMetadataNeverRunsOnTheHost(t *testing.T) {
+	bare := origin(t)
+	s := newStack(t)
+	s.useRepo(bare)
+	marker := filepath.Join(t.TempDir(), "pwned")
+	evil := "#!/bin/sh\ntouch " + marker + "\n"
+	r := s.queue("Sneaky")
+	s.start(Config{Dir: t.TempDir(), Exec: func(_ context.Context, job Job, _ acp.Handler) (string, error) {
+		gitDir := filepath.Join(job.Dir, ".git")
+		for _, hook := range []string{"pre-commit", "post-commit", "post-checkout", "pre-push"} {
+			if err := os.WriteFile(filepath.Join(gitDir, "hooks", hook), []byte(evil), 0o755); err != nil {
+				return "", err
+			}
+		}
+		script := filepath.Join(job.Dir, "fsmon.sh")
+		if err := os.WriteFile(script, []byte(evil), 0o755); err != nil {
+			return "", err
+		}
+		f, err := os.OpenFile(filepath.Join(gitDir, "config"), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(f, "[core]\n\tfsmonitor = %s\n\thooksPath = %s\n", script, filepath.Join(gitDir, "hooks"))
+		f.Close()
+		return "done", os.WriteFile(filepath.Join(job.Dir, "real.txt"), []byte("work\n"), 0o644)
+	}})
+	got := s.wait(r.ID, finished)
+	if got.Status != models.RunSucceeded {
+		t.Fatalf("run: %+v", got)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the worker ran code the agent planted in its repo")
+	}
+	branch := "buildbee/sneaky-" + r.ID[:8]
+	if gitOut(t, bare, "show", branch+":real.txt") != "work" {
+		t.Fatal("the agent's files are still committed")
+	}
+	if tree := gitOut(t, bare, "ls-tree", "-r", "--name-only", branch); !strings.Contains(tree, "fsmon.sh") || strings.Contains(tree, ".git/") {
+		t.Fatalf("files are taken as data, the agent's .git is not: %s", tree)
+	}
 }
 
 func TestRunsStartFromTheLatestDefaultBranch(t *testing.T) {

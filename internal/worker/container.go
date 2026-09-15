@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,14 +12,16 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codemodify/buildbee/internal/worker/acp"
 )
 
-// Container runs each Run's agent in a container of its own: the Run's
-// checkout and that agent's login are all it sees of the worker host. The
-// agent speaks ACP over the container's stdin and stdout.
+// Container runs each Run's agent in a container of its own. It sees the
+// Run's work repo, the mirror's objects (read-only), and a scratch home
+// holding copies of its agent's login files; nothing else of the worker
+// host. The agent speaks ACP over the container's stdin and stdout.
 type Container struct {
 	Image   string   // image with the agents' ACP commands (see Dockerfile.agents)
 	Docker  string   // docker-compatible CLI (default "docker")
@@ -30,14 +33,25 @@ type Container struct {
 	Home    string   // the worker user's home, where agent logins live
 }
 
-// loginPaths are the files under the worker user's home that hold each
-// agent's login. A Run's container gets only its own agent's.
-var loginPaths = map[string][]string{
-	"claude":   {".claude", ".claude.json"},
-	"codex":    {".codex"},
-	"grok":     {".grok"},
-	"opencode": {".local/share/opencode", ".config/opencode"},
-	"goose":    {".config/goose", ".local/share/goose"},
+// loginFile is a file under the worker user's home an agent needs.
+type loginFile struct {
+	path string
+	// token files hold credentials the agent may refresh; a refreshed
+	// token is written back to the host. Other files are copies the
+	// container may change without effect.
+	token bool
+}
+
+// loginFiles are the files each agent needs from the worker user's home.
+// They are copied into the Run's scratch home, never mounted: a container
+// must not be able to leave hooks or settings behind in the host's agent
+// configuration.
+var loginFiles = map[string][]loginFile{
+	"claude":   {{".claude/.credentials.json", true}, {".claude.json", false}},
+	"codex":    {{".codex/auth.json", true}, {".codex/config.toml", false}},
+	"grok":     {{".grok/auth.json", true}, {".grok/config.toml", false}},
+	"opencode": {{".local/share/opencode/auth.json", true}, {".config/opencode/opencode.json", false}},
+	"goose":    {{".config/goose/config.yaml", false}},
 }
 
 // containerHome is HOME inside a Run's container.
@@ -89,13 +103,9 @@ func (c *Container) args(worker string, job Job, home string, argv []string) []s
 		// The checkout keeps its host path: its .git file points into the mirror.
 		"--volume", job.Dir + ":" + job.Dir, "--workdir", job.Dir,
 	}
-	if job.GitDir != "" {
-		args = append(args, "--volume", job.GitDir+":"+job.GitDir)
-	}
-	for _, p := range loginPaths[job.Agent] {
-		if _, err := os.Stat(filepath.Join(c.Home, p)); err == nil {
-			args = append(args, "--volume", filepath.Join(c.Home, p)+":"+containerHome+"/"+p)
-		}
+	if job.Objects != "" {
+		// The work repo borrows these objects (git alternates, same path).
+		args = append(args, "--volume", job.Objects+":"+job.Objects+":ro")
 	}
 	for _, m := range c.Mounts {
 		args = append(args, "--volume", m)
@@ -131,6 +141,11 @@ func (c *Container) exec(worker string, commands map[string][]string) Exec {
 		if err := os.Mkdir(filepath.Join(home, "tmp"), 0o700); err != nil {
 			return "", err
 		}
+		logins, err := c.copyLogins(job.Agent, home)
+		if err != nil {
+			return "", err
+		}
+		defer logins.writeBack()
 		if job.Dir == "" { // no repo: an empty directory to work in
 			if job.Dir, err = os.MkdirTemp("", "buildbee-run-*"); err != nil {
 				return "", err
@@ -199,4 +214,67 @@ func (c *Container) Probe(ctx context.Context, agents []string, commands map[str
 		return nil, fmt.Errorf("probing image %s: %v: %s", c.Image, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.Fields(stdout.String()), nil
+}
+
+// copiedLogins are an agent's login files copied into a Run's home.
+type copiedLogins struct {
+	files []copiedLogin
+}
+
+type copiedLogin struct {
+	host, copy string
+	token      bool
+	orig       []byte
+}
+
+// tokenMu serializes write-backs of one host token file across Runs.
+var tokenMu sync.Map // host path -> *sync.Mutex
+
+func (c *Container) copyLogins(agent, home string) (*copiedLogins, error) {
+	out := &copiedLogins{}
+	for _, f := range loginFiles[agent] {
+		host := filepath.Join(c.Home, f.path)
+		data, err := os.ReadFile(host)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading %s's login: %w", agent, err)
+		}
+		dst := filepath.Join(home, f.path)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(dst, data, 0o600); err != nil {
+			return nil, err
+		}
+		out.files = append(out.files, copiedLogin{host: host, copy: dst, token: f.token, orig: data})
+	}
+	return out, nil
+}
+
+// writeBack returns refreshed tokens to the host, if the agent refreshed
+// one, it is well-formed, and nobody changed the host file meanwhile.
+func (l *copiedLogins) writeBack() {
+	for _, f := range l.files {
+		if !f.token {
+			continue
+		}
+		now, err := os.ReadFile(f.copy)
+		if err != nil || len(now) == 0 || bytes.Equal(now, f.orig) {
+			continue
+		}
+		if strings.HasSuffix(f.host, ".json") && !json.Valid(now) {
+			continue
+		}
+		mu, _ := tokenMu.LoadOrStore(f.host, &sync.Mutex{})
+		mu.(*sync.Mutex).Lock()
+		if cur, err := os.ReadFile(f.host); err == nil && bytes.Equal(cur, f.orig) {
+			tmp := f.host + ".buildbee-tmp"
+			if os.WriteFile(tmp, now, 0o600) == nil {
+				_ = os.Rename(tmp, f.host)
+			}
+		}
+		mu.(*sync.Mutex).Unlock()
+	}
 }

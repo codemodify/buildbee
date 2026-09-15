@@ -25,7 +25,7 @@ func TestContainerArgs(t *testing.T) {
 	if err := c.defaults(); err != nil {
 		t.Fatal(err)
 	}
-	job := Job{RunID: "r1", Agent: "claude", Dir: "/w/runs/r1", GitDir: "/w/mirrors/m.git"}
+	job := Job{RunID: "r1", Agent: "claude", Dir: "/w/runs/r1/work", Objects: "/w/mirrors/m.git/objects"}
 	args := strings.Join(c.args("box", job, "/tmp/h", []string{"claude-agent-acp"}), " ")
 	for _, want := range []string{
 		"run --rm -i --init --name buildbee-run-r1",
@@ -34,9 +34,8 @@ func TestContainerArgs(t *testing.T) {
 		"--memory 8g --cpus 4 --pids-limit 1024",
 		"--volume /tmp/h:/home/agent",
 		"--env TMPDIR=/home/agent/tmp --env CLAUDE_CODE_TMPDIR=/home/agent/tmp",
-		"--volume /w/runs/r1:/w/runs/r1 --workdir /w/runs/r1",
-		"--volume /w/mirrors/m.git:/w/mirrors/m.git",
-		"--volume " + home + "/.claude:/home/agent/.claude",
+		"--volume /w/runs/r1/work:/w/runs/r1/work --workdir /w/runs/r1/work",
+		"--volume /w/mirrors/m.git/objects:/w/mirrors/m.git/objects:ro",
 		"--volume /cache:/cache:ro",
 		"--network agents agents:1 claude-agent-acp",
 	} {
@@ -44,10 +43,56 @@ func TestContainerArgs(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, args)
 		}
 	}
-	for _, not := range []string{".codex", "docker.sock", "--privileged"} {
+	for _, not := range []string{".claude", ".codex", "docker.sock", "--privileged", "/w/mirrors/m.git:"} {
 		if strings.Contains(args, not) {
 			t.Errorf("a claude Run must not get %q:\n%s", not, args)
 		}
+	}
+}
+
+func TestLoginsAreCopiedAndOnlyRefreshedTokensGoBack(t *testing.T) {
+	home, scratch := t.TempDir(), t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(home, ".claude/.credentials.json"), `{"token":"old"}`)
+	write(filepath.Join(home, ".claude.json"), `{"mcpServers":{}}`)
+	write(filepath.Join(home, ".claude/settings.json"), `{}`)
+	c := Container{Image: "x", Home: home}
+	logins, err := c.copyLogins("claude", scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(scratch, ".claude/settings.json")); err == nil {
+		t.Fatal("only login files are copied, not the agent's settings")
+	}
+	// The agent refreshes its token and tampers with its config.
+	write(filepath.Join(scratch, ".claude/.credentials.json"), `{"token":"new"}`)
+	write(filepath.Join(scratch, ".claude.json"), `{"mcpServers":{"evil":{"command":"sh"}}}`)
+	logins.writeBack()
+	if got, _ := os.ReadFile(filepath.Join(home, ".claude/.credentials.json")); string(got) != `{"token":"new"}` {
+		t.Fatalf("refreshed token not kept: %s", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(home, ".claude.json")); string(got) != `{"mcpServers":{}}` {
+		t.Fatalf("config changes must not reach the host: %s", got)
+	}
+
+	// A token written as garbage, or a host file someone else changed, is left alone.
+	logins, _ = c.copyLogins("claude", t.TempDir())
+	write(logins.files[0].copy, `not json`)
+	logins.writeBack()
+	logins2, _ := c.copyLogins("claude", t.TempDir())
+	write(filepath.Join(home, ".claude/.credentials.json"), `{"token":"other run"}`)
+	write(logins2.files[0].copy, `{"token":"stale"}`)
+	logins2.writeBack()
+	if got, _ := os.ReadFile(filepath.Join(home, ".claude/.credentials.json")); string(got) != `{"token":"other run"}` {
+		t.Fatalf("got %s", got)
 	}
 }
 

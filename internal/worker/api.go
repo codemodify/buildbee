@@ -26,6 +26,10 @@ type api struct {
 // canceled or claimed by another worker.
 var errConflict = errors.New("conflict")
 
+// errRejected is the Server refusing a request as invalid (4xx other than
+// 409): retrying the same request will not help.
+var errRejected = errors.New("rejected")
+
 func newAPI(base, name string) *api {
 	// No client timeout: claims long-poll. Each call bounds itself by ctx.
 	return &api{base: strings.TrimRight(base, "/"), name: name, http: &http.Client{}}
@@ -50,8 +54,9 @@ func (a *api) heartbeat(ctx context.Context, runID string) (*models.Run, error) 
 }
 
 func (a *api) report(ctx context.Context, runID string, status models.RunStatus, o outcome) error {
-	_, err := a.do(ctx, http.MethodPatch, "/v1/runs/"+runID, map[string]string{"status": string(status), "detail": truncate(o.detail, 2000),
-		"summary": o.summary, "branch": o.branch, "pr_url": o.prURL}, nil)
+	// The Server counts characters; keep well inside its limits.
+	_, err := a.do(ctx, http.MethodPatch, "/v1/runs/"+runID, map[string]string{"status": string(status),
+		"detail": truncate(o.detail, 1900), "summary": truncate(o.summary, 15000), "branch": o.branch, "commit": o.commit, "pr_url": o.prURL}, nil)
 	return err
 }
 
@@ -115,6 +120,8 @@ func (a *api) do(ctx context.Context, method, path string, body, dest any) (ok b
 		return false, nil
 	case res.StatusCode == http.StatusConflict:
 		return false, fmt.Errorf("%s %s: %w: %s", method, path, errConflict, strings.TrimSpace(string(raw)))
+	case res.StatusCode >= 400 && res.StatusCode < 500:
+		return false, fmt.Errorf("%s %s: %w: %s: %s", method, path, errRejected, res.Status, strings.TrimSpace(string(raw)))
 	case res.StatusCode >= 300:
 		return false, fmt.Errorf("%s %s: %s: %s", method, path, res.Status, strings.TrimSpace(string(raw)))
 	}

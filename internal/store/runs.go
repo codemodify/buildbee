@@ -10,11 +10,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const runCols = `id, task_id, project_id, COALESCE(bot_member_id::text, ''), status, kind, detail, summary, branch, pr_url,
+const runCols = `id, task_id, project_id, COALESCE(bot_member_id::text, ''), status, kind, detail, summary, branch, commit, pr_url,
 	verdict, agent, prompt, worker, lease_until, attempts, created_at, updated_at, started_at, finished_at`
 
 func scanRun(row interface{ Scan(...any) error }, r *models.Run) error {
-	return row.Scan(&r.ID, &r.TaskID, &r.ProjectID, &r.BotMemberID, &r.Status, &r.Kind, &r.Detail, &r.Summary, &r.Branch, &r.PRURL,
+	return row.Scan(&r.ID, &r.TaskID, &r.ProjectID, &r.BotMemberID, &r.Status, &r.Kind, &r.Detail, &r.Summary, &r.Branch, &r.Commit, &r.PRURL,
 		&r.Verdict, &r.Agent, &r.Prompt, &r.Worker, &r.LeaseUntil, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt)
 }
 
@@ -22,9 +22,9 @@ func (s *Store) InsertRun(ctx context.Context, r models.Run) error {
 	if r.Kind == "" {
 		r.Kind = models.RunBuild
 	}
-	_, err := s.q.Exec(ctx, `INSERT INTO runs (id, task_id, project_id, bot_member_id, status, kind, detail, agent, prompt, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
-		r.ID, r.TaskID, r.ProjectID, nullID(r.BotMemberID), r.Status, r.Kind, r.Detail, r.Agent, r.Prompt, r.CreatedAt)
+	_, err := s.q.Exec(ctx, `INSERT INTO runs (id, task_id, project_id, bot_member_id, status, kind, detail, agent, prompt, commit, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
+		r.ID, r.TaskID, r.ProjectID, nullID(r.BotMemberID), r.Status, r.Kind, r.Detail, r.Agent, r.Prompt, r.Commit, r.CreatedAt)
 	return mapErr(err)
 }
 
@@ -51,6 +51,17 @@ func (s *Store) ClaimRun(ctx context.Context, worker string, agents []string, no
 			LIMIT 1)
 		RETURNING `+runCols, worker, agents, now, until), &r)
 	return &r, mapErr(err)
+}
+
+// ProjectLoad locks a Project's row until the transaction ends and returns
+// its max_runs and how many of its Runs are running, so claims can keep
+// to the limit even when they race.
+func (s *Store) ProjectLoad(ctx context.Context, projectID string) (maxRuns, running int, err error) {
+	if err := s.q.QueryRow(ctx, `SELECT max_runs FROM projects WHERE id=$1 FOR UPDATE`, projectID).Scan(&maxRuns); err != nil {
+		return 0, 0, mapErr(err)
+	}
+	err = s.q.QueryRow(ctx, `SELECT count(*) FROM runs WHERE project_id=$1 AND status='running'`, projectID).Scan(&running)
+	return maxRuns, running, mapErr(err)
 }
 
 // UpdateRunPrompt rewrites a queued Run's prompt.
@@ -129,8 +140,8 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]models.Run, erro
 // UpdateRun writes status, detail, the outcome fields, lease and the lifecycle timestamps.
 func (s *Store) UpdateRun(ctx context.Context, r models.Run) error {
 	return one(s.q.Exec(ctx, `UPDATE runs SET status=$2, detail=$3, updated_at=$4, started_at=$5, finished_at=$6, lease_until=$7,
-		summary=$8, branch=$9, pr_url=$10, verdict=$11 WHERE id=$1`,
-		r.ID, r.Status, r.Detail, r.UpdatedAt, r.StartedAt, r.FinishedAt, r.LeaseUntil, r.Summary, r.Branch, r.PRURL, r.Verdict))
+		summary=$8, branch=$9, pr_url=$10, verdict=$11, commit=$12 WHERE id=$1`,
+		r.ID, r.Status, r.Detail, r.UpdatedAt, r.StartedAt, r.FinishedAt, r.LeaseUntil, r.Summary, r.Branch, r.PRURL, r.Verdict, r.Commit))
 }
 
 // AppendRunEvent stores the next event of a Run. The per-Run counter makes
@@ -220,16 +231,16 @@ func (s *Store) ListArtifacts(ctx context.Context, taskID string) ([]models.Arti
 
 // --- pipelines ---
 
-const pipelineCols = `id, project_id, task_id, COALESCE(artifact_id::text, ''), name, status, external_url, created_at, updated_at`
+const pipelineCols = `id, project_id, task_id, COALESCE(artifact_id::text, ''), name, status, commit, external_url, created_at, updated_at`
 
 func scanPipeline(row interface{ Scan(...any) error }, p *models.Pipeline) error {
-	return row.Scan(&p.ID, &p.ProjectID, &p.TaskID, &p.ArtifactID, &p.Name, &p.Status, &p.ExternalURL, &p.CreatedAt, &p.UpdatedAt)
+	return row.Scan(&p.ID, &p.ProjectID, &p.TaskID, &p.ArtifactID, &p.Name, &p.Status, &p.Commit, &p.ExternalURL, &p.CreatedAt, &p.UpdatedAt)
 }
 
 func (s *Store) InsertPipeline(ctx context.Context, p models.Pipeline) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO pipelines (id, project_id, task_id, artifact_id, name, status, external_url, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
-		p.ID, p.ProjectID, p.TaskID, nullID(p.ArtifactID), p.Name, p.Status, p.ExternalURL, p.CreatedAt)
+	_, err := s.q.Exec(ctx, `INSERT INTO pipelines (id, project_id, task_id, artifact_id, name, status, commit, external_url, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
+		p.ID, p.ProjectID, p.TaskID, nullID(p.ArtifactID), p.Name, p.Status, p.Commit, p.ExternalURL, p.CreatedAt)
 	return mapErr(err)
 }
 

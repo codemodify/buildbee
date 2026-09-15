@@ -71,10 +71,13 @@ The compose file's `worker` profile starts a worker that offers only `fake`, for
 With `BUILDBEE_WORKER_ISOLATION=container` (the default), each Run's agent runs in a fresh container started from `BUILDBEE_WORKER_IMAGE`, and talks ACP over the container's stdin and stdout. The container:
 
 - runs as the worker's user, with every capability dropped, `no-new-privileges`, and memory, CPU and process limits;
-- sees the Run's checkout and its repo mirror (at their host paths), a scratch home directory, and the login files of that Run's agent only (for example `~/.claude` and `~/.claude.json` for Claude Code, `~/.codex` for Codex);
+- sees the Run's own repo (at its host path), the mirror's object store read-only (the repo borrows its objects), and a scratch home directory;
+- gets copies of its agent's login files in that home (for example `~/.claude/.credentials.json` and `~/.claude.json` for Claude Code, `~/.codex/auth.json` and `config.toml` for Codex), never the host's agent directories;
 - has no Docker socket, and is removed when the Run ends, is canceled, or the worker restarts.
 
-Logins are mounted read-write because agents refresh their tokens. An agent can use and change its own login, but nothing else of the worker user's.
+When the Run ends, a token the agent refreshed is written back to the host, if it is well-formed and nobody changed the host file meanwhile. Nothing else the container writes reaches the host's agent configuration, so an agent cannot leave hooks or settings behind.
+
+The worker never runs git in the agent's repo once the agent has started. It records the agent's files into a worktree of its own (`git --work-tree`) and commits, diffs and pushes from there, so hooks, config or a redirected `.git` the agent wrote are never used. The agent's own commits are not kept; its files are, as one commit per build. Host git also runs with hooks and file-system monitors disabled.
 
 `Dockerfile.agents` builds an image with `claude-agent-acp`, `codex-acp`, OpenCode and Grok on Node 24 with git, Python and a C toolchain. Projects that need more (Go, Rust, database clients) extend it and set `BUILDBEE_WORKER_IMAGE`.
 

@@ -56,8 +56,11 @@ func (w *work) advance(ctx context.Context, r *models.Run) error {
 		return w.notifyPeople(ctx, proj.ID, nil, notice{projectID: proj.ID, kind: "merged",
 			title: "Merged: " + task.Title, body: firstNonEmpty(task.PRURL, task.Branch), href: href(proj.ID, "tasks", task.ID)})
 	}
-	if r.Kind == models.RunBuild && r.Branch != "" {
+	if r.Kind == models.RunBuild && r.Branch != "" && r.Branch != proj.DefaultBranch {
 		task.Branch, task.UpdatedAt = r.Branch, w.now
+		if r.Commit != "" {
+			task.HeadCommit = r.Commit
+		}
 		if r.PRURL != "" {
 			task.PRURL = r.PRURL
 		}
@@ -129,11 +132,27 @@ func (w *work) sendBack(ctx context.Context, proj *models.Project, task *models.
 	if builds < maxRounds {
 		return w.passOn(ctx, proj, task, fromRole, models.RoleBuilder, why)
 	}
-	_, err = w.openDecision(ctx, proj.ID, who{name: "autopilot"}, nil, newDecision{
+	return w.askToMerge(ctx, proj, task, newDecision{
 		prompt: fmt.Sprintf("The Builder has tried %d times on \"%s\" (%s) and it is still not ready: %s. Merge it anyway?",
 			builds, task.Title, firstNonEmpty(task.PRURL, task.Branch), truncate(firstLine(why), 200)),
-		options: []string{"merge", "stop"}, recommendation: "stop", taskID: task.ID, action: "merge",
+		options: []string{"merge", "stop"}, recommendation: "stop",
 	})
+}
+
+// askToMerge opens a merge Decision about the Task's head commit, unless
+// one is already waiting for an answer.
+func (w *work) askToMerge(ctx context.Context, proj *models.Project, task *models.Task, d newDecision) error {
+	ds, err := w.st.ListDecisions(ctx, proj.ID)
+	if err != nil {
+		return err
+	}
+	for _, x := range ds {
+		if x.TaskID == task.ID && x.Action == "merge" && x.Answer == "" {
+			return nil
+		}
+	}
+	d.taskID, d.action, d.commit = task.ID, "merge", task.HeadCommit
+	_, err = w.openDecision(ctx, proj.ID, who{name: "autopilot"}, nil, d)
 	return err
 }
 
@@ -163,7 +182,7 @@ func (w *work) tryMerge(ctx context.Context, proj *models.Project, task *models.
 			lastReview = r
 		}
 	}
-	if lastReview == nil || lastReview.Verdict != "approve" || (lastBuild != nil && lastReview.CreatedAt.Before(lastBuild.CreatedAt)) {
+	if lastReview == nil || lastReview.Verdict != "approve" || !reviewed(lastReview, lastBuild, task) {
 		return nil // the latest work is not approved
 	}
 	ci, detail, err := w.ciState(ctx, task, lastBuild)
@@ -177,22 +196,23 @@ func (w *work) tryMerge(ctx context.Context, proj *models.Project, task *models.
 		return w.activity(ctx, proj.ID, who{name: "autopilot"}, models.TypeTask, "waiting_for_ci", task.ID, map[string]any{"checks": detail})
 	}
 	if proj.MergePolicy == models.MergeApproval {
-		ds, err := w.st.ListDecisions(ctx, proj.ID)
-		if err != nil {
-			return err
-		}
-		for _, d := range ds {
-			if d.TaskID == task.ID && d.Action == "merge" && d.Answer == "" {
-				return nil // already asked
-			}
-		}
-		_, err = w.openDecision(ctx, proj.ID, who{name: "autopilot"}, nil, newDecision{
-			prompt:  fmt.Sprintf("Sentry approved \"%s\" (%s) and CI passed. Merge it?", task.Title, firstNonEmpty(task.PRURL, task.Branch)),
-			options: []string{"merge", "not yet"}, recommendation: "merge", taskID: task.ID, action: "merge",
+		return w.askToMerge(ctx, proj, task, newDecision{
+			prompt: fmt.Sprintf("Sentry approved \"%s\" (%s, commit %.12s) and CI passed. Merge it?",
+				task.Title, firstNonEmpty(task.PRURL, task.Branch), task.HeadCommit),
+			options: []string{"merge", "not yet"}, recommendation: "merge",
 		})
-		return err
 	}
 	return w.queueMerge(ctx, task, who{name: "autopilot"})
+}
+
+// reviewed reports whether review covers the Task's latest work: the very
+// commit when the worker reported it, else a review that started after the
+// last build.
+func reviewed(review, build *models.Run, task *models.Task) bool {
+	if review.Commit != "" && task.HeadCommit != "" {
+		return review.Commit == task.HeadCommit
+	}
+	return build == nil || !review.CreatedAt.Before(build.CreatedAt)
 }
 
 // ciState sums up the Task's CI checks reported since build finished:
@@ -208,8 +228,13 @@ func (w *work) ciState(ctx context.Context, task *models.Task, build *models.Run
 	}
 	latest := map[string]models.Pipeline{}
 	for _, p := range ps {
-		if build != nil && build.FinishedAt != nil && p.UpdatedAt.Before(*build.FinishedAt) {
-			continue // about an earlier push
+		switch {
+		case p.Commit != "" && task.HeadCommit != "":
+			if !strings.EqualFold(p.Commit, task.HeadCommit) {
+				continue // about another push
+			}
+		case build != nil && build.StartedAt != nil && p.UpdatedAt.Before(*build.StartedAt):
+			continue // reported without a commit, before the latest build began
 		}
 		if cur, ok := latest[p.Name]; !ok || p.UpdatedAt.After(cur.UpdatedAt) {
 			latest[p.Name] = p
@@ -231,10 +256,11 @@ func (w *work) ciState(ctx context.Context, task *models.Task, build *models.Run
 	return state, strings.Join(names, ", "), nil
 }
 
-// queueMerge queues a merge Run, which any worker executes.
+// queueMerge queues a merge Run of the Task's head commit, which any
+// worker executes; the merge fails if the branch has moved since.
 func (w *work) queueMerge(ctx context.Context, task *models.Task, by who) error {
 	r := models.Run{ID: uuid.NewString(), TaskID: task.ID, ProjectID: task.ProjectID, Kind: models.RunMerge,
-		Status: models.RunPending, Detail: "queued", CreatedAt: w.now, UpdatedAt: w.now}
+		Status: models.RunPending, Detail: "queued", Commit: task.HeadCommit, CreatedAt: w.now, UpdatedAt: w.now}
 	if err := w.st.InsertRun(ctx, r); err != nil {
 		return err
 	}
@@ -243,7 +269,7 @@ func (w *work) queueMerge(ctx context.Context, task *models.Task, by who) error 
 		return err
 	}
 	return w.activity(ctx, task.ProjectID, by, models.TypeRun, "created", r.ID,
-		map[string]any{"task_id": task.ID, "kind": r.Kind, "branch": task.Branch})
+		map[string]any{"task_id": task.ID, "kind": r.Kind, "branch": task.Branch, "commit": r.Commit})
 }
 
 // closeHandoffsTo completes the Task's open Handoffs to the Bot that just
@@ -294,8 +320,15 @@ func (w *work) onDecision(ctx context.Context, d *models.Decision, by who) error
 	if err != nil {
 		return err
 	}
-	if task.MergedAt != nil || task.Branch == "" {
+	if task.MergedAt != nil || task.Branch == "" || task.Status == models.TaskCanceled || task.Status == models.TaskDone {
 		return nil
+	}
+	if d.Commit != "" && d.Commit != task.HeadCommit {
+		// New work was pushed after the question was asked: that work was
+		// not what people agreed to merge.
+		return w.notifyPeople(ctx, task.ProjectID, nil, notice{projectID: task.ProjectID, kind: "run",
+			title: "Not merged: " + task.Title + " changed after the merge was approved",
+			body:  "Approved " + shortSHA(d.Commit) + ", now " + shortSHA(task.HeadCommit), href: href(task.ProjectID, "tasks", task.ID)})
 	}
 	runs, err := w.st.ListRuns(ctx, task.ID)
 	if err != nil {
@@ -360,6 +393,8 @@ func runPrompt(p *models.Project, bot *models.Member, task *models.Task, notes [
 	}
 	return b.String()
 }
+
+func shortSHA(c string) string { return c[:min(12, len(c))] }
 
 func firstNonEmpty(xs ...string) string {
 	for _, x := range xs {

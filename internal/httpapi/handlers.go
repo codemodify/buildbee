@@ -432,7 +432,9 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		Status      string `json:"status"`
 		ExternalURL string `json:"external_url"`
 		Branch      string `json:"branch"`
+		Commit      string `json:"commit"`
 		CheckRun    *struct {
+			HeadSHA    string `json:"head_sha"`
 			Name       string `json:"name"`
 			Status     string `json:"status"`
 			Conclusion string `json:"conclusion"`
@@ -471,6 +473,9 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		if in.Branch == "" {
 			in.Branch = cr.CheckSuite.HeadBranch
 		}
+		if in.Commit == "" {
+			in.Commit = cr.HeadSHA
+		}
 	}
 	if in.TaskID == "" && in.Branch != "" { // CI on a branch a Builder pushed
 		t, err := s.core.TaskByBranch(r.Context(), in.Branch)
@@ -488,7 +493,7 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := s.core.RecordPipeline(r.Context(), core.System("github"), in.TaskID, core.NewPipeline{
-		Name: in.Name, Status: in.Status, ExternalURL: in.ExternalURL, ArtifactID: in.ArtifactID,
+		Name: in.Name, Status: in.Status, ExternalURL: in.ExternalURL, ArtifactID: in.ArtifactID, Commit: in.Commit,
 	})
 	respond(s, w, http.StatusCreated, p, err)
 }

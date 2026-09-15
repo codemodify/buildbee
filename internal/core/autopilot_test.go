@@ -2,7 +2,9 @@ package core
 
 import (
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/codemodify/buildbee/internal/models"
 )
@@ -227,4 +229,173 @@ func TestParseVerdict(t *testing.T) {
 			t.Errorf("ParseVerdict(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// Commits as a worker reports them.
+const (
+	commitA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	commitB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
+func TestOnlyTheApprovedCommitMerges(t *testing.T) {
+	a := newAutopilot(t, models.MergeAuto)
+	a.start("Exact")
+	a.next(models.RunPlan, RunReport{Summary: "plan"})
+	a.next(models.RunBuild, RunReport{Branch: "buildbee/exact-1", Commit: commitA})
+	// A person queues another build while Sentry reviews commit A.
+	review, err := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
+	a.must(err)
+	_, err = a.s.CreateRun(a.ctx, a.ada, a.task.ID, NewRun{BotMemberID: bot(a.p, models.RoleBuilder).ID})
+	a.must(err)
+	a.next(models.RunBuild, RunReport{Branch: "buildbee/exact-1", Commit: commitB})
+	_, err = a.s.ReportRun(a.ctx, a.w, review.Run.ID, RunReport{Status: "succeeded", Summary: "VERDICT: APPROVE", Commit: commitA})
+	a.must(err)
+	for {
+		c, _ := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
+		if c == nil {
+			break
+		}
+		if c.Run.Kind == models.RunMerge {
+			t.Fatal("approving commit A must not merge commit B")
+		}
+		a.must(func() error { _, err := a.s.ReportRun(a.ctx, a.w, c.Run.ID, RunReport{Status: "canceled"}); return err }())
+	}
+}
+
+func TestAMergeDecisionIsAboutOneCommit(t *testing.T) {
+	a := newAutopilot(t, models.MergeApproval)
+	a.start("Asked")
+	a.next(models.RunPlan, RunReport{Summary: "plan"})
+	a.next(models.RunBuild, RunReport{Branch: "buildbee/asked-1", Commit: commitA})
+	a.next(models.RunReview, RunReport{Summary: "VERDICT: APPROVE", Commit: commitA})
+	ds, _ := a.s.Decisions(a.ctx, a.ada, a.p.ID, DecisionFilter{Open: true})
+	if len(ds) != 1 || ds[0].Commit != commitA {
+		t.Fatalf("decision: %+v", ds)
+	}
+	// New work lands before anyone answers.
+	_, err := a.s.CreateRun(a.ctx, a.ada, a.task.ID, NewRun{BotMemberID: bot(a.p, models.RoleBuilder).ID})
+	a.must(err)
+	a.next(models.RunBuild, RunReport{Branch: "buildbee/asked-1", Commit: commitB})
+	a.next(models.RunReview, RunReport{Summary: "VERDICT: REQUEST_CHANGES", Commit: commitB})
+	a.next(models.RunBuild, RunReport{Branch: "buildbee/asked-1", Commit: commitB}) // no new commit this round
+	a.next(models.RunReview, RunReport{Summary: "hmm", Commit: commitB})            // no verdict: stops
+	_, err = a.s.AnswerDecision(a.ctx, a.ada, ds[0].ID, "merge")
+	a.must(err)
+	a.idle()
+	var told bool
+	for _, n := range a.inbox(a.ada) {
+		told = told || strings.HasPrefix(n.Title, "Not merged: Asked changed")
+	}
+	if !told {
+		t.Fatal("people learn why their answer did not merge")
+	}
+}
+
+func TestCIIsMatchedByCommit(t *testing.T) {
+	a := newAutopilot(t, models.MergeAuto)
+	a.start("Fast CI")
+	a.next(models.RunPlan, RunReport{Summary: "plan"})
+	// A fast check reports before the build does.
+	build, err := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
+	a.must(err)
+	_, err = a.s.RecordPipeline(a.ctx, System("github"), a.task.ID, NewPipeline{Name: "lint", Status: "failure", Commit: commitA})
+	a.must(err)
+	_, err = a.s.RecordPipeline(a.ctx, System("github"), a.task.ID, NewPipeline{Name: "old", Status: "failure", Commit: commitB})
+	a.must(err)
+	_, err = a.s.ReportRun(a.ctx, a.w, build.Run.ID, RunReport{Status: "succeeded", Branch: "buildbee/fast-1", Commit: commitA})
+	a.must(err)
+	a.next(models.RunReview, RunReport{Summary: "VERDICT: APPROVE", Commit: commitA})
+	fix := a.next(models.RunBuild, RunReport{Branch: "buildbee/fast-1", Commit: commitB})
+	if !strings.Contains(fix.Prompt, "CI failed: lint") || strings.Contains(fix.Prompt, "CI failed: old") {
+		t.Fatalf("the early failure on commit A counts; a result for another commit does not:\n%s", fix.Prompt)
+	}
+	if _, err := a.s.RecordPipeline(a.ctx, System("github"), a.task.ID, NewPipeline{Name: "lint", Status: "success", Commit: "not-a-sha"}); err == nil {
+		t.Fatal("commit must be hex")
+	}
+}
+
+func TestMergeAnywayIsAskedOnce(t *testing.T) {
+	a := newAutopilot(t, models.MergeAuto)
+	a.start("Stubborn")
+	a.next(models.RunPlan, RunReport{Summary: "plan"})
+	for range maxRounds {
+		a.next(models.RunBuild, RunReport{Branch: "buildbee/stubborn-1", Commit: commitA})
+		a.next(models.RunReview, RunReport{Summary: "VERDICT: REQUEST_CHANGES", Commit: commitA})
+	}
+	for range 3 { // CI keeps failing and re-running
+		_, err := a.s.RecordPipeline(a.ctx, System("github"), a.task.ID, NewPipeline{Name: "test", Status: "failure", Commit: commitA})
+		a.must(err)
+	}
+	if ds, _ := a.s.Decisions(a.ctx, a.ada, a.p.ID, DecisionFilter{Open: true}); len(ds) != 1 {
+		t.Fatalf("one open question, not %d", len(ds))
+	}
+}
+
+func TestReapedRunsTellPeople(t *testing.T) {
+	a := newAutopilot(t, models.MergeAuto)
+	clock := time.Now().UTC()
+	var mu sync.Mutex
+	a.s.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	a.start("Lost")
+	_, err := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
+	a.must(err)
+	mu.Lock()
+	clock = clock.Add(2 * LeaseTTL)
+	mu.Unlock()
+	n, err := a.s.ReapRuns(a.ctx)
+	a.must(err)
+	var told bool
+	for _, x := range a.inbox(a.ada) {
+		told = told || strings.HasPrefix(x.Title, "Plan Run failed on Lost")
+	}
+	if n != 1 || !told {
+		t.Fatalf("reaped %d, told %v", n, told)
+	}
+}
+
+func TestMaxRunsHoldsUnderConcurrentClaims(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Capped")
+	one := 1
+	_, err := f.s.UpdateProject(f.ctx, ada, p.ID, ProjectPatch{MaxRuns: &one})
+	f.must(err)
+	for i := range 6 {
+		f.queue(ada, p.ID, "t"+string(rune('a'+i)), NewRun{Agent: "fake"})
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	claimed := 0
+	for i := range 6 {
+		wg.Go(func() {
+			c, err := f.s.ClaimRun(f.ctx, WorkerActor("w"+string(rune('0'+i))), []string{"fake"}, 0)
+			if err != nil {
+				t.Error(err)
+			}
+			if c != nil {
+				mu.Lock()
+				claimed++
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	if claimed != 1 {
+		t.Fatalf("max_runs=1 but %d Runs started", claimed)
+	}
+}
+
+func TestACanceledTaskIsNotMerged(t *testing.T) {
+	a := newAutopilot(t, models.MergeApproval)
+	a.start("Dropped")
+	a.next(models.RunPlan, RunReport{Summary: "plan"})
+	a.next(models.RunBuild, RunReport{Branch: "buildbee/dropped-1", Commit: commitA})
+	a.next(models.RunReview, RunReport{Summary: "VERDICT: APPROVE", Commit: commitA})
+	canceled := "canceled"
+	_, err := a.s.UpdateTask(a.ctx, a.ada, a.task.ID, TaskPatch{Status: &canceled})
+	a.must(err)
+	ds, _ := a.s.Decisions(a.ctx, a.ada, a.p.ID, DecisionFilter{Open: true})
+	_, err = a.s.AnswerDecision(a.ctx, a.ada, ds[0].ID, "merge")
+	a.must(err)
+	a.idle()
 }

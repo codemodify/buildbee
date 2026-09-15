@@ -84,6 +84,7 @@ CREATE TABLE tasks (
     issue_number INT CHECK (issue_number > 0),
     issue_url TEXT NOT NULL DEFAULT '',
     branch TEXT NOT NULL DEFAULT '',  -- the branch the Builder pushed
+    head_commit TEXT NOT NULL DEFAULT '',  -- the commit the Builder pushed last
     pr_url TEXT NOT NULL DEFAULT '',
     merged_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -119,6 +120,7 @@ CREATE TABLE decisions (
     fingerprint TEXT NOT NULL DEFAULT '',
     assignee_member_id UUID REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     action TEXT NOT NULL DEFAULT '' CHECK (action IN ('', 'merge')),  -- what answering it does
+    commit TEXT NOT NULL DEFAULT '',  -- for merge: the commit it is about
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     answered_at TIMESTAMPTZ
 );
@@ -160,6 +162,7 @@ CREATE TABLE runs (
     detail TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '', -- the agent's closing message
     branch TEXT NOT NULL DEFAULT '',  -- the branch a build pushed
+    commit TEXT NOT NULL DEFAULT '',  -- build: the commit pushed; review: the one reviewed; merge: the one to merge
     pr_url TEXT NOT NULL DEFAULT '',
     verdict TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes')),
     agent TEXT NOT NULL DEFAULT '',   -- '' = any agent the claiming worker offers
@@ -207,6 +210,7 @@ CREATE TABLE pipelines (
     artifact_id UUID REFERENCES artifacts (id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'success', 'failure')),
+    commit TEXT NOT NULL DEFAULT '',  -- the commit CI checked, when it says
     external_url TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

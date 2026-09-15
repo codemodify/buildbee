@@ -11,11 +11,11 @@ import (
 )
 
 const taskCols = `id, project_id, title, body, status, COALESCE(assignee_member_id::text, ''),
-	COALESCE(created_by_member_id::text, ''), COALESCE(issue_number, 0), issue_url, branch, pr_url, merged_at, created_at, updated_at`
+	COALESCE(created_by_member_id::text, ''), COALESCE(issue_number, 0), issue_url, branch, head_commit, pr_url, merged_at, created_at, updated_at`
 
 func scanTask(row interface{ Scan(...any) error }, t *models.Task) error {
 	return row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Body, &t.Status, &t.AssigneeMemberID,
-		&t.CreatedByMemberID, &t.IssueNumber, &t.IssueURL, &t.Branch, &t.PRURL, &t.MergedAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.CreatedByMemberID, &t.IssueNumber, &t.IssueURL, &t.Branch, &t.HeadCommit, &t.PRURL, &t.MergedAt, &t.CreatedAt, &t.UpdatedAt)
 }
 
 // TaskByBranch finds the open Task whose Builder pushed branch.
@@ -65,8 +65,8 @@ func (s *Store) ListTasks(ctx context.Context, projectID string) ([]models.Task,
 // UpdateTask writes title, body, status, assignee, branch, PR, merged_at and updated_at.
 func (s *Store) UpdateTask(ctx context.Context, t models.Task) error {
 	return one(s.q.Exec(ctx, `UPDATE tasks SET title=$2, body=$3, status=$4, assignee_member_id=$5, updated_at=$6,
-		branch=$7, pr_url=$8, merged_at=$9 WHERE id=$1`,
-		t.ID, t.Title, t.Body, t.Status, nullID(t.AssigneeMemberID), t.UpdatedAt, t.Branch, t.PRURL, t.MergedAt))
+		branch=$7, pr_url=$8, merged_at=$9, head_commit=$10 WHERE id=$1`,
+		t.ID, t.Title, t.Body, t.Status, nullID(t.AssigneeMemberID), t.UpdatedAt, t.Branch, t.PRURL, t.MergedAt, t.HeadCommit))
 }
 
 // UpsertIssueTask creates or refreshes the Task for a Repo Issue in one
@@ -141,12 +141,12 @@ func (s *Store) CompleteHandoff(ctx context.Context, id string, at time.Time) (*
 // --- decisions ---
 
 const decisionCols = `id, project_id, COALESCE(task_id::text, ''), prompt, options, recommendation, COALESCE(answer, ''),
-	COALESCE(answered_by_member_id::text, ''), reused, fingerprint, COALESCE(assignee_member_id::text, ''), action, created_at, answered_at`
+	COALESCE(answered_by_member_id::text, ''), reused, fingerprint, COALESCE(assignee_member_id::text, ''), action, commit, created_at, answered_at`
 
 func scanDecision(row interface{ Scan(...any) error }, d *models.Decision) error {
 	var raw []byte
 	if err := row.Scan(&d.ID, &d.ProjectID, &d.TaskID, &d.Prompt, &raw, &d.Recommendation, &d.Answer,
-		&d.AnsweredByMemberID, &d.Reused, &d.Fingerprint, &d.AssigneeMemberID, &d.Action, &d.CreatedAt, &d.AnsweredAt); err != nil {
+		&d.AnsweredByMemberID, &d.Reused, &d.Fingerprint, &d.AssigneeMemberID, &d.Action, &d.Commit, &d.CreatedAt, &d.AnsweredAt); err != nil {
 		return err
 	}
 	_ = json.Unmarshal(raw, &d.Options)
@@ -169,10 +169,10 @@ func (s *Store) InsertDecision(ctx context.Context, d models.Decision) error {
 		answer = d.Answer
 	}
 	_, err = s.q.Exec(ctx, `INSERT INTO decisions (id, project_id, task_id, prompt, options, recommendation, answer,
-		answered_by_member_id, reused, fingerprint, assignee_member_id, action, created_at, answered_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		answered_by_member_id, reused, fingerprint, assignee_member_id, action, commit, created_at, answered_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		d.ID, d.ProjectID, nullID(d.TaskID), d.Prompt, raw, d.Recommendation, answer,
-		nullID(d.AnsweredByMemberID), d.Reused, d.Fingerprint, nullID(d.AssigneeMemberID), d.Action, d.CreatedAt, d.AnsweredAt)
+		nullID(d.AnsweredByMemberID), d.Reused, d.Fingerprint, nullID(d.AssigneeMemberID), d.Action, d.Commit, d.CreatedAt, d.AnsweredAt)
 	return mapErr(err)
 }
 

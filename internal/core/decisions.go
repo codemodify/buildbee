@@ -116,6 +116,7 @@ type newDecision struct {
 	prompt, recommendation, assignee, taskID string
 	options                                  []string
 	action                                   string // e.g. "merge"; never answered from memory
+	commit                                   string // for merge: the commit asked about
 }
 
 // openDecision records a Decision, reusing a remembered answer when there is
@@ -123,7 +124,7 @@ type newDecision struct {
 func (w *work) openDecision(ctx context.Context, projectID string, by who, asker *models.Member, in newDecision) (*models.Decision, error) {
 	d := models.Decision{ID: uuid.NewString(), ProjectID: projectID, TaskID: in.taskID, Prompt: in.prompt,
 		Options: in.options, Recommendation: in.recommendation, Fingerprint: models.DecisionFingerprint(in.prompt),
-		AssigneeMemberID: in.assignee, Action: in.action, CreatedAt: w.now}
+		AssigneeMemberID: in.assignee, Action: in.action, Commit: in.commit, CreatedAt: w.now}
 	if d.Options == nil {
 		d.Options = []string{}
 	}

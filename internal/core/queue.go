@@ -91,6 +91,9 @@ func (s *Service) ClaimRun(ctx context.Context, a Actor, agents []string, wait t
 	}
 }
 
+// errOverLimit rolls back a claim that would exceed its Project's max_runs.
+var errOverLimit = errors.New("project at max_runs")
+
 func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*models.Claim, error) {
 	var out *models.Claim
 	err := s.tx(ctx, func(w *work) error {
@@ -100,6 +103,15 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 		}
 		if err != nil {
 			return err
+		}
+		// Recount under the Project's lock: concurrent claims may both have
+		// seen room for one more Run.
+		maxRuns, running, err := w.st.ProjectLoad(ctx, r.ProjectID)
+		if err != nil {
+			return err
+		}
+		if maxRuns > 0 && running > maxRuns {
+			return errOverLimit
 		}
 		task, err := w.st.GetTask(ctx, r.TaskID, false)
 		if err != nil {
@@ -134,6 +146,9 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 		out = c
 		return nil
 	})
+	if errors.Is(err, errOverLimit) {
+		return nil, nil
+	}
 	return out, err
 }
 
@@ -179,6 +194,9 @@ func (s *Service) ReapRuns(ctx context.Context) (int, error) {
 			}
 			if err := w.activity(ctx, r.ProjectID, who{name: "buildbee"}, models.TypeRun, string(models.RunFailed), r.ID,
 				map[string]any{"task_id": r.TaskID, "detail": r.Detail}); err != nil {
+				return err
+			}
+			if err := w.advance(ctx, r); err != nil { // tells people the Run failed
 				return err
 			}
 			n++

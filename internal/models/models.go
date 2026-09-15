@@ -345,6 +345,7 @@ type Task struct {
 	IssueNumber       int        `json:"issue_number,omitempty"`
 	IssueURL          string     `json:"issue_url,omitempty"`
 	Branch            string     `json:"branch,omitempty"`
+	HeadCommit        string     `json:"head_commit,omitempty"`
 	PRURL             string     `json:"pr_url,omitempty"`
 	MergedAt          *time.Time `json:"merged_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
@@ -376,6 +377,7 @@ type Decision struct {
 	Fingerprint        string     `json:"fingerprint,omitempty"`
 	AssigneeMemberID   string     `json:"assignee_id,omitempty"`
 	Action             string     `json:"action,omitempty"` // "merge": answering "merge" merges the Task's PR
+	Commit             string     `json:"commit,omitempty"` // the commit a merge Decision is about
 	CreatedAt          time.Time  `json:"created_at"`
 	AnsweredAt         *time.Time `json:"answered_at,omitempty"`
 }
@@ -416,6 +418,7 @@ type Run struct {
 	Detail      string     `json:"detail"`
 	Summary     string     `json:"summary,omitempty"`
 	Branch      string     `json:"branch,omitempty"`
+	Commit      string     `json:"commit,omitempty"`
 	PRURL       string     `json:"pr_url,omitempty"`
 	Verdict     string     `json:"verdict,omitempty"`
 	Agent       string     `json:"agent,omitempty"`
@@ -510,6 +513,7 @@ type Pipeline struct {
 	ArtifactID  string         `json:"artifact_id,omitempty"`
 	Name        string         `json:"name"`
 	Status      PipelineStatus `json:"status"`
+	Commit      string         `json:"commit,omitempty"`
 	ExternalURL string         `json:"external_url,omitempty"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`

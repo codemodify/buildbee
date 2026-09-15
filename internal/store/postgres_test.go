@@ -11,6 +11,7 @@ import (
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/testdb"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }
@@ -270,5 +271,64 @@ func TestTxRollsBackEverything(t *testing.T) {
 	msgs, _, _ := s.ListMessages(ctx, sd.channel.ID, Page{})
 	if len(msgs) != 0 {
 		t.Fatalf("rolled-back message persisted: %+v", msgs)
+	}
+}
+
+// TestProjectLoadSerializesClaims: a second claim on a Project waits for
+// the first to commit, then counts both, so max_runs cannot be exceeded by
+// claims racing each other.
+func TestProjectLoadSerializesClaims(t *testing.T) {
+	pool := testdb.New(t)
+	s := New(pool)
+	ctx := context.Background()
+	d := seed(t, s)
+	now := time.Now().UTC()
+	task := models.Task{ID: uuid.NewString(), ProjectID: d.project.ID, Title: "t", Status: models.TaskOpen, CreatedAt: now}
+	must(t, s.InsertTask(ctx, task))
+	for range 2 {
+		must(t, s.InsertRun(ctx, models.Run{ID: uuid.NewString(), TaskID: task.ID, ProjectID: d.project.ID,
+			Status: models.RunPending, Agent: "fake", CreatedAt: now}))
+	}
+	claim := func(tx pgx.Tx) (int, error) {
+		st := &Store{q: tx}
+		r, err := st.ClaimRun(ctx, "w", []string{"fake"}, now, now.Add(time.Minute))
+		if err != nil {
+			return 0, err
+		}
+		_, running, err := st.ProjectLoad(ctx, r.ProjectID)
+		return running, err
+	}
+	tx1, err := pool.Begin(ctx)
+	must(t, err)
+	defer tx1.Rollback(ctx) // after Commit, a no-op
+	n1, err := claim(tx1)
+	must(t, err)
+	second := make(chan int, 1)
+	go func() {
+		tx2, err := pool.Begin(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer tx2.Rollback(ctx)
+		n, err := claim(tx2)
+		if err != nil {
+			t.Error(err)
+		}
+		second <- n
+	}()
+	select {
+	case <-second:
+		t.Error("the second claim must wait for the first")
+	case <-time.After(200 * time.Millisecond):
+	}
+	must(t, tx1.Commit(ctx))
+	select {
+	case n2 := <-second:
+		if n1 != 1 || n2 != 2 {
+			t.Fatalf("first counted %d, second %d; the second must count both", n1, n2)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second claim never finished")
 	}
 }

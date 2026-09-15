@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 4c (Routines)
+## Unreleased — fixes from the adversarial review
+
+### Security
+- An agent could get code run on the worker host through git metadata (hooks, `core.fsmonitor`, a redirected `.git`) in the mirror mounted into its container. Agents now work in a repo of their own that borrows the mirror's objects read-only; the worker commits their files from a worktree only it uses, and runs git with hooks and fsmonitor off
+- Agent logins are copied into the Run's home instead of mounting the host's agent directories; only refreshed tokens are written back
+
+### Fixed
+- Autopilot merges exact commits: Sentry's approval and CI must be for the Task's head commit; merge Runs merge that commit (`--match-head-commit`, or fail if the branch moved); merge Decisions name their commit
+- CI results arriving together are judged one after another (Task row lock), so merges no longer stall or queue twice
+- CI results are matched to pushes by commit (`head_sha`), including results that arrive before the build reports
+- A long failure message no longer makes the worker's final report fail; reports are retried
+- A briefly unreachable Server drops a few events instead of killing the Run
+- "Merge anyway?" is asked once; Runs failed by the reaper notify people; `max_runs` holds when claims race; canceled Tasks never merge; merges never delete a branch someone pushed to after the merge started
+
+## LAN rebuild, Phase 4c (Routines)
 
 ### Changed
 - Routines take a `prompt`: each firing opens a Task with it, handed to Scout (or `bot_member_id`), which starts a Run; a Routine skips while its last Task is open

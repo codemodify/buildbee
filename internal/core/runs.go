@@ -127,6 +127,7 @@ type RunReport struct {
 	Detail  string `json:"detail"`
 	Summary string `json:"summary"`
 	Branch  string `json:"branch"`
+	Commit  string `json:"commit"`
 	PRURL   string `json:"pr_url"`
 }
 
@@ -145,7 +146,7 @@ func (s *Service) ReportRun(ctx context.Context, a Actor, id string, rep RunRepo
 	if !ok {
 		return nil, invalid("status must be pending, running, succeeded, failed or canceled")
 	}
-	if a.Worker == "" && (next != models.RunCanceled || rep.Summary != "" || rep.Branch != "" || rep.PRURL != "") {
+	if a.Worker == "" && (next != models.RunCanceled || rep.Summary != "" || rep.Branch != "" || rep.PRURL != "" || rep.Commit != "") {
 		return nil, invalid("a Run's progress is reported by the worker running it; people can only cancel it")
 	}
 	d, err := text("detail", rep.Detail, false, 2000)
@@ -163,6 +164,10 @@ func (s *Service) ReportRun(ctx context.Context, a Actor, id string, rep RunRepo
 	prURL, err := text("pr_url", rep.PRURL, false, 500)
 	if err != nil {
 		return nil, err
+	}
+	commit := strings.TrimSpace(rep.Commit)
+	if !validCommit(commit) {
+		return nil, invalid("commit must be a hex commit id")
 	}
 	var out *models.Run
 	err = s.tx(ctx, func(w *work) error {
@@ -189,6 +194,9 @@ func (s *Service) ReportRun(ctx context.Context, a Actor, id string, rep RunRepo
 		}
 		if prURL != "" {
 			r.PRURL = prURL
+		}
+		if commit != "" && r.Kind != models.RunMerge {
+			r.Commit = commit
 		}
 		if r.Kind == models.RunReview && next == models.RunSucceeded {
 			r.Verdict = models.ParseVerdict(r.Summary)
@@ -472,6 +480,7 @@ type NewPipeline struct {
 	Status      string `json:"status"`
 	ExternalURL string `json:"external_url"`
 	ArtifactID  string `json:"artifact_id"`
+	Commit      string `json:"commit"` // the commit CI checked; lets autopilot match results to pushes exactly
 }
 
 // RecordPipeline records a CI check on a Task. A failure notifies the
@@ -485,14 +494,19 @@ func (s *Service) RecordPipeline(ctx context.Context, a Actor, taskID string, in
 	if !ok {
 		return nil, invalid("status %q is not a CI status", in.Status)
 	}
+	commit := strings.ToLower(strings.TrimSpace(in.Commit))
+	if !validCommit(commit) {
+		return nil, invalid("commit must be a hex commit id")
+	}
 	var out *models.Pipeline
 	err = s.tx(ctx, func(w *work) error {
-		task, err := w.st.GetTask(ctx, taskID, false)
+		// Locked: results arriving together are judged one after another.
+		task, err := w.st.GetTask(ctx, taskID, true)
 		if err != nil {
 			return err
 		}
 		p := models.Pipeline{ID: uuid.NewString(), ProjectID: task.ProjectID, TaskID: taskID, ArtifactID: in.ArtifactID,
-			Name: n, Status: st, ExternalURL: strings.TrimSpace(in.ExternalURL), CreatedAt: w.now, UpdatedAt: w.now}
+			Name: n, Status: st, Commit: commit, ExternalURL: strings.TrimSpace(in.ExternalURL), CreatedAt: w.now, UpdatedAt: w.now}
 		if p.ArtifactID != "" {
 			art, err := w.st.GetArtifact(ctx, p.ArtifactID)
 			if err != nil || art.TaskID != taskID {
@@ -520,7 +534,7 @@ func (s *Service) UpdatePipeline(ctx context.Context, a Actor, id, status, exter
 		if err != nil {
 			return err
 		}
-		task, err := w.st.GetTask(ctx, p.TaskID, false)
+		task, err := w.st.GetTask(ctx, p.TaskID, true)
 		if err != nil {
 			return err
 		}
@@ -553,4 +567,17 @@ func (w *work) pipelineRecorded(ctx context.Context, a Actor, task *models.Task,
 		}
 	}
 	return w.onPipeline(ctx, task, p)
+}
+
+// validCommit accepts "" or a hex commit id.
+func validCommit(c string) bool {
+	if len(c) > 64 {
+		return false
+	}
+	for _, r := range c {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
 }

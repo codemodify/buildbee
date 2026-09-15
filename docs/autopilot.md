@@ -27,7 +27,9 @@ Every prompt starts with the Project's `instructions` (standing guidance for all
 - `merge_policy: "auto"` (the default) merges as soon as Sentry approves the latest build and CI passes.
 - `merge_policy: "approval"` asks the Project's people instead, with a Decision whose `action` is `merge`: answering `merge` merges; anything else leaves the Task as it is.
 
-CI counts only when it reports on the Task's latest push, through `POST /v1/pipelines/webhook`. GitHub `check_run` events are matched to the Task by their branch. A Task with no CI reports merges on Sentry's approval alone. A failed check goes back to the Builder with the check's name and link; a pending one holds the merge until it finishes.
+Merges are about exact commits. The worker reports the commit each build pushed and each review looked at; autopilot merges only when Sentry approved the Task's latest commit and CI passed on that commit, and the merge Run merges that commit and no other (`gh pr merge --match-head-commit`, or a git merge that fails if the branch moved). A merge Decision is about the commit it names: if new work is pushed before someone answers, answering `merge` does not merge it, and people are told why.
+
+CI reports through `POST /v1/pipelines/webhook`. GitHub `check_run` events are matched to the Task by their branch and to the push by `head_sha`; other CI should send `commit` too (without it, a result counts if it arrived after the latest build started). A Task with no CI reports merges on Sentry's approval alone. A failed check goes back to the Builder with the check's name and link; a pending one holds the merge until it finishes.
 
 ## Routines
 
