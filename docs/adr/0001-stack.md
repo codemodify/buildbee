@@ -1,6 +1,6 @@
 # ADR 0001: v0 stack
 
-- Status: Accepted
+- Status: Accepted; Auth, Integrations and Desktop superseded by [ADR 0002](0002-lan-agent-harness.md)
 - Date: 2026-09-13
 
 ## Decision

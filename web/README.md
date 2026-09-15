@@ -1,38 +1,26 @@
 # Web
 
-Vite + React + TypeScript + Tailwind UI for a BuildBee **Project**.
+Vite + React + TypeScript + Tailwind UI for BuildBee. The Server serves the built UI from the same origin, so every API call is a relative `/v1/…` path.
 
-## Run
+## Develop
 
-Start the Server first (`go run` or Compose), then:
+Start the Server (see the root README), then:
 
 ```bash
 npm install
-npm run dev
+npm run dev      # http://127.0.0.1:5173, proxies /v1 and /healthz to :8080
+npm run build    # type-check and build into dist/
 ```
 
-Open [http://localhost:5173](http://localhost:5173). The UI is **light by default** (`html[data-theme=light]` and `--bb-*` CSS variables in `src/index.css`). Desktop uses the same `web/` bundle.
+`make run` from the repo root serves `web/dist` from disk; `make build` embeds it into the Server binary.
 
-- Create a **Project** (empty home is name + create only). Once any Project exists, a left **Projects** rail lists them as a Slack-style tree on home and inside Project views
-- **Chevron** expands/collapses Channels under a Project (persisted). Click the name to focus. **Alt-click or ⊕** opens a second Project beside it (two panes max; × closes a pane)
-- Click a nested `#channel` to focus that Project and select the Channel. Create a Channel with **+** under the Project in the rail
-- Deep links: `#/projects/:id` focuses that Project; `#/projects/:id?beside=:id2` restores a split. Layout also persists in `localStorage`
-- Chat in a **Channel** (polls every 2s; Server also has `/v1/channels/{id}/ws`)
-- See seeded **Bots + Roles** (Scout, Builder, Sentry, Pulse)
-- Add **Tasks** (auto-Handoff to Scout or Builder); Task page Handoff picker lists Bots by Role
-- Open a Task for **Runs** (live transcript over WebSocket / poll), **Artifacts**, and **Pipelines**
-- **Sync Issues** (fake sample Issues→Tasks without `GITHUB_TOKEN`)
-- **Routines** list + force Run
-- Dev-auth banner, or **Sign in with GitHub** when OAuth is configured
-- **Decisions** inbox: create and answer
-- **Notifications** bell (unread count, mark read / mark all)
-- **Invites**: Project form + pending list + copy link; `#/invite/:token` (or `/invite/:token`) accept page
+## What is there today
 
-Vite proxies `/healthz` and `/v1` (including WebSocket) to `:8080`. In the browser, API paths stay relative `/v1` so the same UI works when the Server serves `dist` on the same origin (`base: "/"`). The Tauri desktop shell (see [`desktop/`](../desktop/)) prefixes `/v1` with a configurable Server URL (default `http://127.0.0.1:8080`) so the webview can reach a local or remote Server. Hash routes (`#/invite/:token`) are unchanged.
+- Projects rail: a collapsible tree of Projects and their Channels; open two Projects side by side
+- Channel chat with `@Bot` mentions that create a Task and hand it to that Bot
+- Tasks on a Kanban board, each opening a Task page with Runs (live transcript), Artifacts and Pipelines
+- Decisions: create, answer, and reuse remembered answers
+- Bots with their Roles, Routines, Activity feed, Notifications and mute preferences
+- Light theme using `--bb-*` tokens in `src/index.css`
 
-```bash
-npm run build
-# then from repo root:
-#   make run          # BUILDBEE_WEB_DIR=web/dist
-#   make build        # embed into the Server binary
-```
+The chat-first redesign (threads, direct messages, presence, one WebSocket feeding a client store) is Phase 2 of the [roadmap](../docs/roadmap.md).

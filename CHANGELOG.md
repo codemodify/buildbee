@@ -1,8 +1,38 @@
 # Changelog
 
-BuildBee v0 on `dev` (PR #1). Apache-2.0.
+## Unreleased — LAN rebuild, Phase 0
+
+BuildBee now targets one Server on a trusted LAN where people and agents work on many Projects. See [ADR 0002](docs/adr/0002-lan-agent-harness.md) and the [roadmap](docs/roadmap.md).
+
+### Breaking
+- No login: GitHub OAuth, sessions, Invites and GitHub-linked identities are gone. Members have no `identity`, `github_login` or `github_id`; preferences are per Member
+- No cross-origin access; the desktop shell is parked and the Server URL setting is gone
+- Postgres is required (`DATABASE_URL`); there is no in-memory store
+- One baseline schema: databases created by earlier builds must be recreated
+- `BUILDBEE_RUNTIME_*` is now `BUILDBEE_WORKER_*`; Railway configs and the `PORT` fallback are removed
+- `/pr` and `/issues/sync` return 503 without `GITHUB_TOKEN` / `GITHUB_REPO` instead of fake results; fakes require `{"fake":true}`
+
+### Changed
+- One Go module: `cmd/buildbee-server`, `cmd/buildbee-worker`, `cmd/buildbee`
+- Validated configuration; timeouts, body limit and graceful shutdown; request log; 5xx causes logged and hidden from clients; `/healthz` checks Postgres
+- Migrations apply under an advisory lock, one transaction per file, with checksums
+- Compose: Postgres unpublished, worker bound to loopback, health checks and restart policies
+- The CLI marks a Run failed when the worker errors instead of recording a fake success; the worker fails on a missing agent or Docker instead of faking
+- CI runs Go tests on Postgres, a gofmt check, the web build, and a compose smoke test
+
+### Fixed
+- Agent output still in the pipe when the agent exited (often its final summary) was lost
+- A single output line over 1 MiB stalled the agent until the 3-minute kill
+- NUL bytes in agent output broke RunEvents and log Artifacts on Postgres
+- @mention Task titles split UTF-8 characters and were silently dropped on Postgres
+- Decisions answered from memory never showed as reused in listings
+- Concurrent Issue syncs could create duplicate Tasks
+- Deleting a used Project failed on member foreign keys
+- Stale asset requests after an upgrade got index.html instead of a 404
 
 ## v0 — feature complete
+
+BuildBee v0 on `dev` (PR #1). Apache-2.0.
 
 A **Project** workspace where humans and **Bots** cooperate. One Server process can host `/v1`, `/healthz`, and the Vite SPA.
 

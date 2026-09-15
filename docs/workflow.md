@@ -6,7 +6,7 @@ How humans and Bots cooperate in a BuildBee **Project**. Nouns match [glossary v
 
 A **Project** is the workspace. Members join it with a **Role** and an **Identity**.
 
-- Humans authenticate later via GitHub OAuth (dev auth acts as Member **You**, Role **owner**). Owner/admin send an **Invite** (email and/or GitHub login); the token link `#/invite/{token}` lets a human join as member or admin.
+- There is no login: BuildBee runs on a trusted LAN. The Project creator is Member **You**, Role **owner**; more people are added as Members.
 - New Projects seed four **Bots**: **Scout** (triage), **Builder** (implement), **Sentry** (review/CI), **Pulse** (Routines). Each Bot Member has a Role and a short instructions blurb.
 - **Bots** receive server-issued Identities from the **Server**.
 
@@ -24,7 +24,7 @@ A **Handoff** targets a Member or a Role (`to_role=builder`). Completing a Scout
 
 ## 5. Execute a Run
 
-The Bot starts a **Run**. The **runtime** supervisor prefers an ACP CLI (`claude` / `codex` / `opencode` / `goose`) when `--acp` is set; otherwise it opens a Docker **Sandbox** (or FakeEngine). Tokens, tool calls, and logs stream to the Server as RunEvents (`GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`). The rolled-up transcript is stored as Artifact `acp.log` or `sandbox.log`. Without an ACP binary, **FakeACP** streams fake chunks over ~1–2s so e2e/CI stay green.
+The Bot starts a **Run** on a **Worker**. With `--acp` the Worker runs an ACP agent CLI (`claude` / `codex` / `opencode` / `goose`); otherwise it runs a command in a Docker **Sandbox**. Tokens, tool calls and logs stream to the Server as RunEvents (`GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`). The rolled-up transcript is stored as Artifact `acp.log` or `sandbox.log`. An agent that is not installed fails the Run; **FakeACP** runs only when agent `fake` is requested, for tests and demos.
 
 A Run may produce Artifacts (patches, logs, reports). Those Artifacts stay attached to the Task.
 
@@ -36,9 +36,6 @@ When the team commits to a choice, a **Member** writes a **Decision**. The **Dec
 
 A **Routine** can reopen this loop on a schedule or a trigger (for example, a new Issue or a failed Pipeline). The same nouns apply: Task, Handoff, Run, Artifact, Decision.
 
-## Out of scope for this scaffold
+## Not built yet
 
-- GitHub as Repo / Issues / Pipelines
-- Signed Activity (Nostr-inspired; not NIP-01)
-- Bidirectional ACP control (send follow-ups mid-Run; this slice is live outbound events)
-- Production auth
+See the [roadmap](roadmap.md). Notably: Runs queued and pulled by Workers, per-Run containers for ACP agents, bidirectional ACP (steering, permission requests as Decisions), agent-written diffs becoming PRs, and signed Activity.

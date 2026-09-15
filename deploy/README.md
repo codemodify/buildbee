@@ -1,43 +1,63 @@
-# Deploy
+# Deploy on a LAN
 
-**Self-host source of truth:** [compose/](compose/) (Postgres 16 + Server, optional runtime / MinIO).
+BuildBee runs as one Server on a trusted network, plus workers on the machines that execute Runs. There is no login: anyone who can reach the Server can use every Project.
 
-## Compose (self-host)
+## Server
+
+On the host that will serve BuildBee:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up --build
+docker compose -f deploy/compose/docker-compose.yml up -d --build
 ```
 
-See [compose/README.md](compose/README.md).
+This starts Postgres and the Server. The Server applies migrations at startup and serves the API and web UI on port 8080 (`BUILDBEE_PORT` changes the published port). Postgres is not published outside the compose network.
 
-## Railway
+Compose reads these from the environment or an `.env` file next to the compose file:
 
-Provision a **Postgres** plugin and a service that builds this repo with the root [`Dockerfile`](../Dockerfile) (or [`server/Dockerfile`](../server/Dockerfile) if the service root is `server/`).
-
-[`railway.toml`](railway.toml) / repo-root [`railway.toml`](../railway.toml):
-
-- Health check: `GET /healthz`
-- Server listens on `PORT` (Railway) or `BUILDBEE_ADDR` (Compose default `:8080`)
-- On boot, if `DATABASE_URL` is set, the Server applies SQL migrations
-
-| Variable | Required | Notes |
+| Variable | Default | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | yes on Railway | Railway Postgres. Unset = in-memory (dev only) |
-| `PORT` | set by Railway | |
-| `SESSION_SECRET` | with OAuth | cookie signing |
-| `GITHUB_CLIENT_ID` | no | omit = dev auth |
-| `GITHUB_CLIENT_SECRET` | with OAuth | |
-| `GITHUB_OAUTH_REDIRECT` | with OAuth | `https://<domain>/v1/auth/callback` |
-| `GITHUB_TOKEN` | no | draft PRs / Issues sync |
-| `GITHUB_REPO` | no | `owner/name` |
-| `GITHUB_WEBHOOK_SECRET` | no | `X-Hub-Signature-256` |
-| `BUILDBEE_FRONTEND_URL` | no | web origin if split from the Server |
+| `BUILDBEE_PORT` | `8080` | port the Server is published on |
+| `BUILDBEE_DB_PASSWORD` | `buildbee` | Postgres password; set it before the first start |
+| `GITHUB_TOKEN`, `GITHUB_REPO` | unset | draft PRs and Issue sync |
+| `GITHUB_WEBHOOK_SECRET` | unset | require signed GitHub webhooks |
 
-One **Server** service hosts API + UI. The root `Dockerfile` builds `web` (`npm ci && npm run build`), copies `web/dist` into the Go image (`go:embed` plus `BUILDBEE_WEB_DIR=/var/buildbee/web`), and serves the SPA for non-API routes. `/v1` and `/healthz` stay on the API. Locally: `make build` / `scripts/build.sh` (embed) or `make run` (`BUILDBEE_WEB_DIR=web/dist`). Vite `base` is `/` and the UI calls relative `/v1`.
+`/healthz` returns 200 only when Postgres answers; compose uses it as the Server's health check.
+
+## Workers
+
+A worker executes Runs next to a Docker daemon. On a machine dedicated to Runs:
 
 ```bash
-# from repo root, after `railway login` / linking a project
-railway up
+docker compose -f deploy/compose/docker-compose.yml --profile worker up -d --build
 ```
 
-Runtime (ACP / Docker Sandbox) is a separate process (`runtime/`). Do not expect DinD on Railway; use FakeACP / `--fake` or run the supervisor on a host with Docker.
+The worker mounts the Docker socket, which is root-equivalent on that host. Its Run endpoint is bound to `127.0.0.1` (`BUILDBEE_WORKER_PORT`, default 8090). `BUILDBEE_FAKE_SANDBOX=1` runs the fake engine instead of Docker, for demos and tests only.
+
+The worker currently receives Runs from the CLI (`buildbee run start`). Pulling Runs from a queue on the Server, so any number of workers can serve many Projects, is part of the [roadmap](../docs/roadmap.md).
+
+## Backups
+
+Everything lives in the `postgres_data` volume. Back it up with `pg_dump` before every upgrade:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
+  pg_dump -U buildbee -Fc buildbee > buildbee-$(date +%F).dump
+```
+
+Restore into an empty database:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
+  pg_restore -U buildbee -d buildbee --clean --if-exists < buildbee-2026-09-15.dump
+```
+
+## Upgrades
+
+Until the first release, the schema is one baseline migration that is edited in place. When it changes, the Server refuses to start against an older database and says so. Recreate the database:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml down -v
+docker compose -f deploy/compose/docker-compose.yml up -d --build
+```
+
+After the first release every schema change is a new migration, applied automatically at startup under a lock.

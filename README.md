@@ -1,173 +1,83 @@
 # BuildBee
 
-BuildBee is a **Project** workspace where humans and **Bots** cooperate on engineering work.
+BuildBee is a chat workspace where people and coding agents work on **Projects** together. People and **Bots** share Channels, hand Tasks to each other, record Decisions, and Bots execute **Runs** that stream their work back into the Project.
 
-Product nouns are locked in the [glossary](docs/glossary.md). See [team workflow](docs/workflow.md) and [ADR 0001](docs/adr/0001-stack.md).
+It runs as one Server on a trusted LAN. There is no login: open the Server in a browser and start working. Many Projects share one Server, and Runs execute on worker machines next to Docker.
+
+The rebuild toward massively parallel, autonomous agent work is in progress. See the [roadmap](docs/roadmap.md) for what exists today and what comes next, and [ADR 0002](docs/adr/0002-lan-agent-harness.md) for the decisions behind it. Product nouns are fixed in the [glossary](docs/glossary.md).
 
 License: [Apache-2.0](LICENSE).
 
-## Monorepo map
-
-| Path | What it is |
-| --- | --- |
-| [`server/`](server/) | Go **Server**: Postgres (or memory), REST `/v1`, Channel WebSocket, optional embedded web UI |
-| [`web/`](web/) | Vite + React UI: Project, Channel, Tasks, Decisions, Runs, Artifacts, Pipelines, Notifications inbox |
-| [`desktop/`](desktop/) | Tauri 2 shell around `web/`; talks to a local or remote Server (v1 window + settings) |
-| [`cli/`](cli/) | `buildbee` CLI (project / task / handoff / run start) |
-| [`runtime/`](runtime/) | Docker **Sandbox** supervisor for **Runs** (`fake-run` fallback) |
-| [`deploy/compose/`](deploy/compose/) | Postgres 16 + Server; optional runtime profile (self-host source of truth) |
-| [`deploy/`](deploy/) | Railway notes + `railway.toml`; root [`Dockerfile`](Dockerfile) builds the Server |
-| [`docs/`](docs/) | Glossary, workflow, ADRs |
-
-Go modules: `github.com/codemodify/buildbee/{server,cli,runtime}` with a root [`go.work`](go.work).
-
-## End-to-end
-
-Preferred: Docker Compose brings up Postgres and a Server that applies migrations.
+## Run it
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up --build
-# Server: http://localhost:8080/healthz
+# http://<this-host>:8080
 ```
 
-Runtime (Docker Sandbox). Default `BUILDBEE_FAKE_SANDBOX=1` so it works without a socket:
+That starts Postgres and the Server with the web UI. Add a worker on a machine that should execute Runs:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml --profile runtime up --build
-# set BUILDBEE_FAKE_SANDBOX=0 and mount docker.sock for real containers
+docker compose -f deploy/compose/docker-compose.yml --profile worker up --build
 ```
 
-Without Docker, the Server uses an in-memory Store (lost on restart):
+[deploy/README.md](deploy/README.md) covers configuration, worker machines, backups and upgrades.
+
+## Develop
+
+Requirements: Go 1.27, Node 24, Docker (for Postgres in tests and for the Sandbox).
 
 ```bash
-make run                    # builds web, then Server with BUILDBEE_WEB_DIR=web/dist
-# or API only:
-cd server && go run ./cmd/server
+make test        # gofmt check, go vet, Go tests on Postgres, web build
+make run         # Server with the web UI served from web/dist (needs DATABASE_URL)
+make build       # bin/buildbee-server (UI embedded), bin/buildbee-worker, bin/buildbee
+make smoke       # build both images and exercise the compose stack
 ```
 
-`make build` / `scripts/build.sh` compile a Server binary with the UI embedded (`go:embed` of `web/dist`). The same origin serves `/` (SPA), `/v1`, and `/healthz`.
+Go tests run against a real Postgres. With `BUILDBEE_TEST_DATABASE_URL` set they use that server; otherwise each test package starts a throwaway `postgres:17-alpine` container. Every test gets its own database cloned from a migrated template.
 
-Then:
+For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1` and `/healthz` (WebSocket included) to `127.0.0.1:8080`.
 
-```bash
-cd web && npm install && npm run dev   # http://localhost:5173 (proxies /v1)
-cd desktop && npm install && npm run dev   # Tauri window; Server must already be running
+## Layout
 
-./scripts/e2e.sh            # Project → message → Task → Handoff → Decision → Run
-./scripts/e2e-run.sh        # Run → log Artifact → fake Repo PR → Pipelines webhook
-./scripts/e2e-identity.sh   # dev auth + fake Issues→Task + Routine fire
-./scripts/e2e-roles-acp.sh  # Scout/Builder/Sentry/Pulse + FakeACP Run (acp.log)
-./scripts/e2e-acp-stream.sh     # FakeACP live RunEvents before the Run completes
-./scripts/e2e-notifications.sh  # Decision / Handoff / mention / Pipeline → inbox read
-./scripts/e2e-invites.sh        # Invite create → accept → revoke + permissions
-./scripts/e2e-polish.sh         # shared Identity, Decision assignee, mute prefs
+| Path | What it is |
+| --- | --- |
+| [`cmd/buildbee-server`](cmd/buildbee-server) | Server: REST `/v1`, WebSockets, Routines worker, embedded web UI |
+| [`cmd/buildbee-worker`](cmd/buildbee-worker) | Worker: executes Runs in a Docker Sandbox or through an ACP agent |
+| [`cmd/buildbee`](cmd/buildbee) | CLI for Projects, Tasks, Handoffs, Runs and Routines |
+| [`internal/httpapi`](internal/httpapi) | HTTP handlers and middleware |
+| [`internal/store`](internal/store) | Postgres store; [`internal/migrate`](internal/migrate) holds the schema |
+| [`internal/worker`](internal/worker) | Run supervisor, [`acp`](internal/worker/acp) agent driver, [`sandbox`](internal/worker/sandbox) engines |
+| [`internal/config`](internal/config) | Validated configuration for each binary |
+| [`internal/testdb`](internal/testdb) | Per-test Postgres databases |
+| [`web/`](web/) | Vite + React + TypeScript + Tailwind UI |
+| [`deploy/compose`](deploy/compose) | Postgres + Server (+ worker) for one LAN host |
+| [`desktop/`](desktop/) | Tauri shell, parked |
+| [`docs/`](docs/) | Glossary, workflow, roadmap, ADRs |
 
-cd cli
-go run ./cmd/buildbee run start --task "$TASK_ID" --fake
-go run ./cmd/buildbee run start --task "$TASK_ID" --acp --agent fake
-# real ACP CLI if `claude` / `codex` / `opencode` / `goose` is on PATH:
-# go run ./cmd/buildbee run start --task "$TASK_ID" --acp --agent claude
-# real Sandbox (needs runtime on :8090 and Docker):
-# go run ./cmd/buildbee run start --task "$TASK_ID" --repo-url https://github.com/org/repo.git --cmd "echo hi"
-```
+## Configuration
 
-Open a Task in the web UI to see **Runs**, **Artifacts** (including PR URLs), and **Pipelines**.
+| Variable | Binary | Default | Notes |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | server | required | `postgres://…`; migrations run at startup |
+| `BUILDBEE_ADDR` | server | `:8080` | listen address |
+| `BUILDBEE_WEB_DIR` | server | embedded UI | serve the UI from a directory instead |
+| `BUILDBEE_MAX_BODY_BYTES` | server | 32 MiB | request body limit |
+| `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | draft PRs and Issue sync; without them those endpoints answer 503 |
+| `GITHUB_WEBHOOK_SECRET` | server | unset | require `X-Hub-Signature-256` on webhooks |
+| `BUILDBEE_URL` | worker, CLI | `http://127.0.0.1:8080` | Server to report to |
+| `BUILDBEE_WORKER_ADDR` | worker | `127.0.0.1:8090` | Run endpoint |
+| `BUILDBEE_FAKE_SANDBOX` | worker | `0` | `1` runs the fake engine instead of Docker |
+| `BUILDBEE_WORKER_URL` | CLI | `http://127.0.0.1:8090` | worker used by `run start` |
+| `BUILDBEE_TEST_DATABASE_URL` | tests | throwaway container | Postgres for `go test` |
 
-### Repo (GitHub)
+Each binary validates its configuration at startup and refuses to start on bad input.
 
-`GITHUB_TOKEN` + `GITHUB_REPO=owner/name` let `POST /v1/tasks/{id}/pr` open a draft PR (branch + file commit). Without a token, pass `{"fake":true}` (or omit the token) to store a fake PR URL Artifact.
+## Security model
 
-### Pipelines
+BuildBee trusts the network it runs on. Anyone who can reach the Server can read and change every Project. Two protections remain:
 
-`POST /v1/pipelines/webhook` records check status on a Task. Simple JSON `{task_id,name,status,external_url}` or a GitHub Actions-shaped `check_run` object.
+- State-changing requests from another site's page are refused, and WebSockets only accept same-origin pages, so a website a LAN user visits cannot drive the Server through their browser.
+- Only the Server port is published by compose. Postgres stays on the compose network, and the worker's Run endpoint binds to loopback.
 
-## Identity / Auth
-
-- **Dev auth** (default): `GITHUB_CLIENT_ID` unset. Mutating `/v1` is open. Session Identity is Member **You**. The web shows a banner.
-- **GitHub OAuth**: set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_OAUTH_REDIRECT` (default `http://127.0.0.1:8080/v1/auth/callback`), optional `SESSION_SECRET` and `BUILDBEE_FRONTEND_URL`. Then `GET /v1/auth/github` and the web “Sign in with GitHub” button. Mutating `/v1` requires the session cookie. `/healthz`, reads, `/v1/auth/*`, and webhooks stay open.
-- **Cross-Project Identity**: the first time a GitHub login accepts an Invite (or is added as a human Member with `github_login`), the Server upserts one human **Identity**. Later Invites with the same login (any case) reuse that Identity ID and display name so the person is not fragmented across Projects. Members remain per-Project (Role can differ). Prefs (`GET/PATCH /v1/me/preferences`) are keyed by that Identity when a login exists, otherwise by Member ID.
-
-Bots still get server-issued Identities. New Projects seed **Scout**, **Builder**, **Sentry**, and **Pulse** (Role + instructions on each Bot Member). Task create auto-Handoffs to Scout unless `?handoff=none`. Handoff to Builder with `?autorun=1` (or Project `auto_run`) enqueues a Run. Completing a Scout Handoff on an ambiguous Task opens a Decision stub.
-
-Decisions accept optional `assignee_id`. Notifications go only to that Member; if unset, all humans are notified (backward compatible). `GET /v1/projects/{id}/decisions?inbox=1&mine=1&member_id=` is the personal unanswered inbox. Mute Channel mention noise or Routine digests with `mute_mentions` / `mute_routines`.
-
-## Issues
-
-`POST /v1/projects/{id}/issues/sync` lists open GitHub Issues (`GITHUB_TOKEN`, `GITHUB_REPO` or `{"repo":"owner/name"}`) and upserts **Tasks** with issue number/URL. Without a token, `{"fake":true}` (or missing token) creates two sample Issues→Tasks.
-
-`POST /v1/issues/webhook?project_id=` accepts GitHub `issues` opened/edited JSON. Set `GITHUB_WEBHOOK_SECRET` to require `X-Hub-Signature-256` on Issues and Pipelines webhooks (GitHub App style). Channel `@Scout` / `@Builder` mentions create a Task + Handoff to that Bot.
-
-Web: **Sync Issues** on the Project; Task rows and detail show the linked Issues URL.
-
-## Routines
-
-Each new Project gets a disabled `morning-digest` Routine (daily). `GET/POST /v1/projects/{id}/routines` and `POST /v1/routines/{id}/run` force-fire: Channel digest message + a Task + Activity type `routine`. A Server worker ticks enabled Routines.
-
-```bash
-go run ./cmd/buildbee routine list --project "$PROJECT_ID"
-go run ./cmd/buildbee routine run --id "$ROUTINE_ID"
-```
-
-## Decision memory
-
-Answered Decisions are fingerprinted (`project_id` + normalized prompt). Asking the same question again auto-applies the prior answer, records Activity `memory`/`reuse`, and does not open a new inbox item (`GET /v1/projects/{id}/decisions?inbox=1`). List memories: `GET /v1/projects/{id}/decisions/memories`.
-
-## Tests / CI
-
-GitHub Actions (`.github/workflows/ci.yml`) on PR/push to `dev`: Go tests, web build, desktop `cargo check` (Ubuntu, no signed `.dmg`), e2e against an in-memory Server (FakeACP stream, no Docker-in-Docker).
-
-```bash
-./scripts/ci-local.sh          # same steps as CI (desktop check if webkit2gtk is present)
-cd server && go test ./...
-cd runtime && go test ./...
-cd cli && go test ./...
-cd web && npm run build
-make desktop-check             # needs Rust + WebKit/GTK on Linux; see desktop/README.md
-```
-
-## Deploy
-
-Self-host: `deploy/compose`. Railway: root `Dockerfile` + `railway.toml` (see [deploy/README.md](deploy/README.md)). The Server reads `PORT` or `BUILDBEE_ADDR` and applies migrations when `DATABASE_URL` is set. One Server service hosts API + UI.
-
-## Stack status (v0)
-
-Implemented:
-
-- [x] Project workspace REST + Channel chat / WS
-- [x] Task, Handoff, Decision (+ memory / don’t-ask-twice), Activity
-- [x] Bot Roles: Scout / Builder / Sentry / Pulse
-- [x] Run + Artifact + Pipelines webhook; FakeACP / Docker Sandbox
-- [x] GitHub OAuth / dev Identity, Issues→Task, Routines
-- [x] Channel `@bot` mentions; webhook HMAC when secret set
-- [x] Web: Channel, Kanban Task columns, Decisions, Bots, auto_run, Project switcher, Activity feed, Notifications inbox
-- [x] Notifications API (`GET /v1/notifications`, mark read / read-all)
-- [x] CLI `buildbee`; compose + Railway Dockerfile (API + embedded UI)
-- [x] GitHub Actions CI (memory store, no DinD)
-- [x] Multi-user Member Invite (owner/admin; token accept page)
-- [x] Cross-Project GitHub Identity; Decision assignee; notification mute prefs
-- [x] **v0 feature-complete** (see [docs/v0-status.md](docs/v0-status.md))
-- [x] Desktop MVP (Tauri 2 shell + Server URL settings; Server runs separately)
-- [x] Live ACP streaming (RunEvent + WS + FakeACP chunks + web transcript)
-
-See [CHANGELOG.md](CHANGELOG.md) for the full stack summary.
-
-### Permissions (Invites)
-
-- **Owner** and **admin** can `POST` / `DELETE` Invites.
-- Any Project **Member** (human) can `GET` pending Invites.
-- Preview `GET /v1/invites/{token}` is public (the token is the secret).
-- Accept `POST /v1/invites/{token}/accept`: dev-auth binds the current session Member (or a new human from `display_name`); OAuth requires sign-in and binds the GitHub Identity. If the Invite specifies `github_login`, it must match.
-
-```bash
-./scripts/e2e-invites.sh
-```
-
-Pinned later (do not build):
-
-- [ ] IDE extension
-- [ ] Full Nostr / signed Activity (NIP-01 not adopted; see ADR 0001)
-- [ ] Production GitHub App install UI (beyond webhook HMAC + PAT)
-
-Deferred:
-
-- [ ] Desktop tray / multi-window agent bench
+A worker with the Docker socket mounted is root-equivalent on its host. Run workers only on machines dedicated to BuildBee.
