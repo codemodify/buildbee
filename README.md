@@ -4,7 +4,7 @@ BuildBee is a chat workspace where people and coding agents work on **Projects**
 
 It runs as one Server on a trusted LAN. There is no login: open the Server in a browser and start working. Many Projects share one Server, and Runs execute on worker machines next to Docker.
 
-The rebuild toward massively parallel, autonomous agent work is in progress. See the [roadmap](docs/roadmap.md) for what exists today and what comes next, and [ADR 0002](docs/adr/0002-lan-agent-harness.md) for the decisions behind it. Product nouns are fixed in the [glossary](docs/glossary.md).
+The rebuild toward massively parallel, autonomous agent work is in progress. See the [roadmap](docs/roadmap.md) for what exists today and what comes next, and [ADR 0002](docs/adr/0002-lan-agent-harness.md) for the decisions behind it. Product nouns are fixed in the [glossary](docs/glossary.md); the [API reference](docs/api.md) covers identity, endpoints, paging and live events.
 
 License: [Apache-2.0](LICENSE).
 
@@ -45,8 +45,10 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | [`cmd/buildbee-server`](cmd/buildbee-server) | Server: REST `/v1`, WebSockets, Routines worker, embedded web UI |
 | [`cmd/buildbee-worker`](cmd/buildbee-worker) | Worker: executes Runs in a Docker Sandbox or through an ACP agent |
 | [`cmd/buildbee`](cmd/buildbee) | CLI for Projects, Tasks, Handoffs, Runs and Routines |
-| [`internal/httpapi`](internal/httpapi) | HTTP handlers and middleware |
-| [`internal/store`](internal/store) | Postgres store; [`internal/migrate`](internal/migrate) holds the schema |
+| [`internal/core`](internal/core) | Business rules: one transaction per operation with its Activity and notifications |
+| [`internal/httpapi`](internal/httpapi) | Thin HTTP handlers, identity resolution, middleware |
+| [`internal/ws`](internal/ws) | WebSocket hub with cursor replay |
+| [`internal/store`](internal/store) | Postgres persistence; [`internal/migrate`](internal/migrate) holds the schema |
 | [`internal/worker`](internal/worker) | Run supervisor, [`acp`](internal/worker/acp) agent driver, [`sandbox`](internal/worker/sandbox) engines |
 | [`internal/config`](internal/config) | Validated configuration for each binary |
 | [`internal/testdb`](internal/testdb) | Per-test Postgres databases |
@@ -66,6 +68,8 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | draft PRs and Issue sync; without them those endpoints answer 503 |
 | `GITHUB_WEBHOOK_SECRET` | server | unset | require `X-Hub-Signature-256` on webhooks |
 | `BUILDBEE_URL` | worker, CLI | `http://127.0.0.1:8080` | Server to report to |
+| `BUILDBEE_AS` | CLI | your login name | the Person the CLI acts as |
+| `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` | worker | `0` | `1` lets real agent CLIs run on the worker host (see below) |
 | `BUILDBEE_WORKER_ADDR` | worker | `127.0.0.1:8090` | Run endpoint |
 | `BUILDBEE_FAKE_SANDBOX` | worker | `0` | `1` runs the fake engine instead of Docker |
 | `BUILDBEE_WORKER_URL` | CLI | `http://127.0.0.1:8090` | worker used by `run start` |
@@ -75,9 +79,10 @@ Each binary validates its configuration at startup and refuses to start on bad i
 
 ## Security model
 
-BuildBee trusts the network it runs on. Anyone who can reach the Server can read and change every Project. Two protections remain:
+BuildBee trusts the network it runs on. Anyone who can reach the Server can read and change every Project, and a Person is whoever claims their name: names attribute work, they do not prove identity. Protections that remain:
 
 - State-changing requests from another site's page are refused, and WebSockets only accept same-origin pages, so a website a LAN user visits cannot drive the Server through their browser.
 - Only the Server port is published by compose. Postgres stays on the compose network, and the worker's Run endpoint binds to loopback.
+- Workers refuse to start real agent CLIs (`claude`, `codex`, …) on their host unless `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`. Until Runs execute in per-Run containers (roadmap Phase 3), an allowed agent runs with that host's credentials in an empty temporary directory.
 
 A worker with the Docker socket mounted is root-equivalent on its host. Run workers only on machines dedicated to BuildBee.

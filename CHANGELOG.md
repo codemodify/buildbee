@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — LAN rebuild, Phase 1
+
+### Breaking
+- New baseline schema: recreate the database
+- Identity: the acting Person comes from the `buildbee_person` cookie (`POST /v1/me`), `X-BuildBee-As` or `X-BuildBee-Worker`. `X-Member-ID`, `member_id` and `from_member_id` are gone
+- Inbox and preferences are per Person: `/v1/me/notifications`, `/v1/me/preferences`
+- Messages, Activity and notifications return `{items, has_more}` and page by `seq`; Artifact listings omit `body` (fetch `/v1/artifacts/{id}`)
+- Unknown Task, Run and Pipeline statuses are rejected; illegal Run transitions, second Handoff completions and second Decision answers are `409`
+- The CLI acts as `BUILDBEE_AS` (default: your login name); `handoff create` has no `--from`
+- Workers refuse real agent CLIs unless `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`
+
+### Added
+- `internal/core`: every rule in one transaction with its Activity and notifications, events published after commit
+- `GET /v1/ws` multi-topic WebSocket with cursor replay; slow clients are disconnected instead of blocking the Server
+- People and `@Person` mentions; Project and Channel archive; Task descriptions; Handoff listing; Decision `task_id`; Run `bot_member_id`, `started_at`, `finished_at`
+- Routine enable/reschedule (`PATCH /v1/routines/{id}`); Routines fire once even with concurrent schedulers
+- [API reference](docs/api.md)
+
 ## Unreleased — LAN rebuild, Phase 0
 
 BuildBee now targets one Server on a trusted LAN where people and agents work on many Projects. See [ADR 0002](docs/adr/0002-lan-agent-harness.md) and the [roadmap](docs/roadmap.md).

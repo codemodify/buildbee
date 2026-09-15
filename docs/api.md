@@ -1,0 +1,76 @@
+# HTTP API
+
+Everything is JSON under `/v1`. The Server also serves the web UI and `/healthz`.
+
+## Who is acting
+
+There is no login. Each request resolves an actor once:
+
+| Source | Used by | Actor |
+| --- | --- | --- |
+| `buildbee_person` cookie (set by `POST /v1/me`) | the web UI | that Person |
+| `X-BuildBee-As: <name>` | CLI, scripts | the Person with that name (created on first use) |
+| `X-BuildBee-Worker: <host>` | workers | the Run's Bot, or the worker by name |
+| none | anyone | anonymous: may read; actions that need a Person answer 401 |
+
+A Person who writes to a Project they are not in joins it as `member`. Activity entries name the actor (`actor`, `actor_member_id`).
+
+```http
+POST /v1/me            {"name": "Ada"}   → sets the cookie, returns {"person": {...}}
+GET  /v1/me                              → {"person": {...} | null}
+DELETE /v1/me                            → forget this browser's Person
+```
+
+## Resources
+
+| Method and path | What it does |
+| --- | --- |
+| `GET/POST /v1/projects` | list (`?archived=1` includes archived) / create `{name, auto_run}` |
+| `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, archived}` |
+| `POST /v1/projects/{id}/join` | join as `member` |
+| `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions}` |
+| `GET/POST /v1/projects/{id}/channels`, `PATCH /v1/channels/{id}` | Channels; `{name, archived}` |
+| `GET/POST /v1/channels/{id}/messages` | page / post `{body}`; `@Bot` creates a Task handed to it, `@Person` notifies them |
+| `GET /v1/projects/{id}/activity` | page of the Project log, newest first (`?type=`) |
+| `GET/POST /v1/projects/{id}/tasks` | list / create `{title, body, assignee_member_id, handoff_role, handoff_note}`; `handoff_role` defaults to `scout`, `none` skips |
+| `GET/PATCH /v1/tasks/{id}` | Task / `{title, body, status}` with status `open\|in_progress\|done\|canceled` |
+| `GET /v1/tasks/{id}/detail` | Task with Handoffs, Runs, Artifacts (no bodies) and Pipelines |
+| `GET/POST /v1/tasks/{id}/handoffs` | list / hand off `{to_member_id \| to_role, note, autorun}` |
+| `POST /v1/handoffs/{id}/complete` | complete once (`409` after); `?decision=1` forces the Scout Decision |
+| `GET/POST /v1/projects/{id}/decisions` | list (`?open=1`, `?mine=1`) / ask `{prompt, options, recommendation, assignee_id, task_id}` |
+| `POST /v1/decisions/{id}/answer` | answer once `{answer}`; remembered for the same question |
+| `GET /v1/projects/{id}/decisions/memories` | remembered answers |
+| `GET/POST /v1/tasks/{id}/runs` | list / queue `{bot_member_id}` |
+| `GET/PATCH /v1/runs/{id}` | Run / `{status, detail}`: `pending → running → succeeded\|failed\|canceled` |
+| `GET/POST /v1/runs/{id}/events` | `?after=<seq>&limit=` / append `{kind, payload}` (`409` once finished) |
+| `GET/POST /v1/tasks/{id}/artifacts`, `GET /v1/artifacts/{id}` | listings carry `size`; fetch one for its `body` |
+| `POST /v1/tasks/{id}/pr` | draft PR on the configured Repo (`503` without `GITHUB_TOKEN`/`GITHUB_REPO`) |
+| `GET/POST /v1/tasks/{id}/pipelines`, `PATCH /v1/pipelines/{id}` | CI checks; a failure notifies every Person |
+| `POST /v1/projects/{id}/issues/sync` | import open Issues as Tasks (`503` without GitHub) |
+| `GET/POST /v1/projects/{id}/routines`, `PATCH /v1/routines/{id}`, `POST /v1/routines/{id}/run` | Routines; enable, reschedule, fire now |
+| `GET /v1/me/notifications`, `POST /v1/me/notifications/read-all`, `POST /v1/notifications/{id}/read` | the acting Person's inbox across Projects |
+| `GET/PATCH /v1/me/preferences` | `{mute_mentions, mute_routines}` |
+| `POST /v1/pipelines/webhook`, `POST /v1/issues/webhook?project_id=` | GitHub webhooks; signed when `GITHUB_WEBHOOK_SECRET` is set |
+
+## Paging
+
+Messages, Activity and notifications page by `seq`: `?limit=` (default 100, max 1000), `?before=<seq>` for older, `?after=<seq>` for newer. Responses are `{"items": [...], "has_more": bool}`. Messages read oldest-to-newest; Activity and notifications newest first. Run events page with `?after=<seq>`.
+
+## Errors
+
+`{"error": "..."}` with `400` invalid input, `401` needs a Person, `404` not found, `409` conflicts with the current state (archived Project, finished Run, second answer), `413` body too large, `503` integration not configured. Unexpected errors are `500 {"error": "internal error"}`; the cause is in the Server log.
+
+## Live events
+
+`GET /v1/ws` is one socket for many topics. Send:
+
+```json
+{"op": "subscribe", "topic": "run:<id>", "after": 12}
+{"op": "unsubscribe", "topic": "run:<id>"}
+```
+
+Topics: `project:<id>` (Activity), `channel:<id>` (messages), `run:<id>` (RunEvents), `person:<id>` (notifications). With `after`, missed events are replayed from the database before live ones, with no gap and no duplicates; without it only live events flow. Frames are `{"topic", "cursor", "type", "data"}`.
+
+`GET /v1/runs/{id}/ws` and `GET /v1/channels/{id}/ws` stream one topic with bare `data` frames. A Run stream replays its whole transcript unless `?after=` is given.
+
+A client that falls too far behind is disconnected; reconnect with the last cursor you saw. WebSockets only accept pages from the Server's own origin.

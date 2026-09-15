@@ -13,13 +13,17 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Postgres-only bugs fixed: NUL bytes in agent output, mid-character title truncation, Decision memory fields, duplicate issue Tasks, Project deletion
 - Bash e2e scripts replaced by Go tests and a compose smoke test
 
-## Phase 1 — Core platform
+## Phase 1 — Core platform (done)
 
-- Domain service layer: every rule (mentions, handoffs, decisions, runs) in one place, used by HTTP, workers and Routines alike
-- One Actor per request: a chosen name resolved server-side; no more `X-Member-ID` / `member_id` trust or "first human" fallbacks
-- Activity as an event log: typed, with an actor, written in the same transaction as the change
-- WebSocket hub: one connection per client, topic subscriptions, replay by cursor, per-connection queues with write deadlines
-- Cursor pagination, enforced state machines, Project and Channel archive
+- `internal/core` holds every rule; each operation is one transaction that writes the change, its Activity and its notifications, and publishes events only after commit. HTTP, webhooks and the Routines scheduler all go through it
+- People: you pick a name once; the Server resolves the acting Person from a cookie, `X-BuildBee-As` or `X-BuildBee-Worker`. No client-asserted Member IDs, no "first human" fallback; writing to a Project joins it
+- Activity is an event log with the actor on every entry
+- WebSocket hub: one socket for many topics, replay by cursor with no gap or duplicate, per-connection queues and write deadlines, slow clients dropped instead of freezing the Server
+- Cursor paging for messages, Activity and notifications; Artifact listings without bodies
+- Status vocabularies and transitions enforced in code and in the schema; Handoffs complete once, Decisions answer once, finished Runs take no events
+- Project and Channel archive; Handoffs readable; Task descriptions; `@Person` mentions notify
+- Routines claim each firing, so concurrent schedulers fire once
+- Interim guard: workers refuse real agent CLIs on the host unless `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`, and then give each Run an empty temporary directory
 
 ## Phase 2 — Chat UX
 
