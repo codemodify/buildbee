@@ -194,13 +194,13 @@ func (e errTimeout) Error() string { return "the run exceeded its time limit of 
 func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	run := c.Run
 	agent := run.Agent
-	if agent == "" { // any agent: prefer a real one
+	if agent == "" && run.Kind != models.RunMerge { // any agent: prefer a real one
 		agent = w.cfg.Agents[0]
 		if i := slices.IndexFunc(w.cfg.Agents, func(a string) bool { return a != "fake" }); i >= 0 {
 			agent = w.cfg.Agents[i]
 		}
 	}
-	log := w.log.With("run", run.ID, "task", run.TaskID, "agent", agent)
+	log := w.log.With("run", run.ID, "task", run.TaskID, "kind", run.Kind, "agent", agent)
 	log.Info("run claimed")
 
 	runCtx, stop := context.WithCancelCause(ctx)
@@ -213,14 +213,15 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	say := func(format string, args ...any) {
 		_ = emit(acp.Event{Kind: models.RunEventLog, Payload: map[string]any{"text": fmt.Sprintf(format, args...) + "\n"}})
 	}
-	out, ws, err := w.runAgent(runCtx, c, agent, emit, say)
-	detail := "agent " + agent + " finished"
-	keep := false
-	if ws != nil {
-		if err == nil && runCtx.Err() == nil {
-			detail, keep, err = w.deliver(runCtx, c, ws, agent, say)
-		}
-		defer ws.close(context.WithoutCancel(ctx), keep)
+	var (
+		out string
+		rep outcome
+		err error
+	)
+	if run.Kind == models.RunMerge {
+		rep, err = w.merge(runCtx, c, say)
+	} else {
+		out, rep, err = w.work(runCtx, c, agent, emit, say)
 	}
 
 	// Report with a fresh context so a stopping worker still records the outcome.
@@ -240,89 +241,161 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 	var timeout errTimeout
 	switch {
 	case ctx.Err() != nil:
-		status, detail = models.RunFailed, "worker "+w.cfg.Name+" stopped during the run"
+		status, rep.detail = models.RunFailed, "worker "+w.cfg.Name+" stopped during the run"
 	case errors.As(context.Cause(runCtx), &timeout):
-		status, detail = models.RunFailed, timeout.Error()
+		status, rep.detail = models.RunFailed, timeout.Error()
 	case err != nil:
-		status, detail = models.RunFailed, err.Error()
+		status, rep.detail = models.RunFailed, err.Error()
 	}
-	if uerr := w.api.updateRun(rctx, run.ID, status, detail); uerr != nil {
+	if uerr := w.api.report(rctx, run.ID, status, rep); uerr != nil {
 		log.Error("reporting the outcome failed", "err", uerr, "status", status)
 		return
 	}
 	log.Info("run finished", "status", status)
 }
 
-// runAgent prepares the Run's directory (a checkout of the Project's repo
-// when it has one) and runs the agent in it.
-func (w *Worker) runAgent(ctx context.Context, c *models.Claim, agent string, emit acp.Handler, say func(string, ...any)) (string, *workspace, error) {
-	say("worker %s starting agent %s", w.cfg.Name, agent)
+// outcome is what a Run produced, for the Server.
+type outcome struct {
+	detail, summary, branch, prURL string
+}
+
+// work runs the agent on the Run's checkout (the Project's repo, when it
+// has one) and delivers what a build produced.
+func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit acp.Handler, say func(string, ...any)) (string, outcome, error) {
+	run := c.Run
+	rep := outcome{detail: "agent " + agent + " finished"}
+	say("worker %s starting agent %s for a %s Run", w.cfg.Name, agent, run.Kind)
 	var ws *workspace
 	workDir := ""
 	switch {
 	case c.Project.RepoURL != "":
+		from := c.Task.Branch // continue the Task's branch
+		if run.Kind == models.RunReview && from == "" {
+			return "", rep, errors.New("the Task has no branch to review")
+		}
 		say("checking out %s", c.Project.RepoURL)
 		var err error
-		if ws, err = w.repos.prepare(ctx, c.Project, branchName(c.Task.Title, c.Run.ID), c.Run.ID); err != nil {
-			return "", nil, err
+		if ws, err = w.repos.prepare(ctx, c.Project, from, run.ID); err != nil {
+			return "", rep, err
 		}
-		say("working on branch %s, from %s at %.12s", ws.branch, ws.start, ws.base)
+		say("on %s at %.12s", ws.start, ws.base)
 		workDir = ws.dir
 	case agent != "fake" && w.cfg.Isolation == IsolationHost:
 		// The Project has no repo: the agent gets an empty directory.
 		dir, err := os.MkdirTemp("", "buildbee-run-*")
 		if err != nil {
-			return "", nil, err
+			return "", rep, err
 		}
 		defer os.RemoveAll(dir)
 		workDir = dir
 	}
-	job := Job{RunID: c.Run.ID, Agent: agent, Dir: workDir, Prompt: c.Run.Prompt}
+	job := Job{RunID: run.ID, Agent: agent, Dir: workDir, Prompt: run.Prompt}
 	if ws != nil {
 		job.GitDir = ws.mirror
 	}
 	out, err := w.cfg.Exec(ctx, job, emit)
-	return out, ws, err
+	rep.summary = finalReply(out)
+	keep := false
+	if ws != nil {
+		defer func() { ws.close(context.WithoutCancel(ctx), keep) }()
+	}
+	if err != nil || ctx.Err() != nil || ws == nil || run.Kind != models.RunBuild {
+		return out, rep, err
+	}
+	rep, keep, err = w.deliver(ctx, c, ws, agent, rep, say)
+	return out, rep, err
 }
 
-// deliver turns the agent's work into a pushed branch and, for GitHub
-// repos, a pull request. keep reports that the branch must stay on this
-// worker because it could not be pushed.
-func (w *Worker) deliver(ctx context.Context, c *models.Claim, ws *workspace, agent string, say func(string, ...any)) (detail string, keep bool, err error) {
+// deliver turns a build's work into a pushed branch and, for GitHub repos,
+// a pull request. keep reports that the work must stay on this worker
+// because it could not be pushed.
+func (w *Worker) deliver(ctx context.Context, c *models.Claim, ws *workspace, agent string, rep outcome, say func(string, ...any)) (outcome, bool, error) {
 	author := "BuildBee"
 	if c.Bot != nil {
 		author = c.Bot.DisplayName + " (BuildBee)"
 	}
 	changed, err := ws.commit(ctx, author, c.Task.Title+"\n\nBuildBee Run "+c.Run.ID)
 	if err != nil {
-		return "", false, fmt.Errorf("committing the agent's work: %w", err)
+		return rep, false, fmt.Errorf("committing the agent's work: %w", err)
 	}
 	if !changed {
-		return "agent " + agent + " finished without changing the repo", false, nil
+		rep.detail = "agent " + agent + " finished without changing the repo"
+		return rep, false, nil
 	}
 	if diff, err := ws.diff(ctx); err == nil {
 		if err := w.api.artifact(ctx, c.Task.ID, newArtifact{Kind: "diff", Name: "changes.diff", Body: diff, RunID: c.Run.ID}); err != nil {
 			say("uploading the diff failed: %v", err)
 		}
 	}
-	if err := ws.push(ctx); err != nil {
-		return "", true, fmt.Errorf("pushing %s failed (the work stays on worker %s): %w", ws.branch, w.cfg.Name, err)
+	target := c.Task.Branch
+	if target == "" {
+		target = branchName(c.Task.Title, c.Run.ID)
 	}
-	say("pushed %s", ws.branch)
+	if err := ws.push(ctx, target); err != nil {
+		return rep, true, fmt.Errorf("pushing %s failed (the work stays on worker %s): %w", target, w.cfg.Name, err)
+	}
+	say("pushed %s", target)
+	rep.branch, rep.detail = target, "pushed "+target
 	repo := githubRepo(ws.repo)
-	if repo == "" || !w.cfg.OpenPRs {
-		return "pushed " + ws.branch, false, nil
+	if repo == "" || !w.cfg.OpenPRs || c.Task.PRURL != "" {
+		return rep, false, nil // pushing updated any existing PR
 	}
 	body := fmt.Sprintf("%s\n\nOpened by BuildBee: Task %s, Run %s, agent %s.", c.Task.Body, c.Task.ID, c.Run.ID, agent)
-	url, err := openPR(ctx, repo, ws.branch, ws.start, c.Task.Title, strings.TrimSpace(body))
+	url, err := openPR(ctx, repo, target, ws.defaultBranch, c.Task.Title, strings.TrimSpace(body))
 	if err != nil {
 		say("could not open a pull request: %v", err)
-		return "pushed " + ws.branch + "; no pull request: " + err.Error(), false, nil
+		rep.detail += "; no pull request: " + err.Error()
+		return rep, false, nil
 	}
 	if err := w.api.artifact(ctx, c.Task.ID, newArtifact{Kind: "pr", Name: "Pull request", URL: url, RunID: c.Run.ID}); err != nil {
 		say("recording the pull request failed: %v", err)
 	}
-	return "opened " + url, false, nil
+	rep.prURL, rep.detail = url, "opened "+url
+	return rep, false, nil
+}
+
+// merge lands the Task's branch on the default branch: with the GitHub CLI
+// when the Task has a pull request, else with git.
+func (w *Worker) merge(ctx context.Context, c *models.Claim, say func(string, ...any)) (outcome, error) {
+	p, t := c.Project, c.Task
+	if p.RepoURL == "" || t.Branch == "" {
+		return outcome{}, errors.New("nothing to merge: the Task has no branch")
+	}
+	if repo := githubRepo(p.RepoURL); repo != "" && t.PRURL != "" && w.cfg.OpenPRs {
+		say("merging %s", t.PRURL)
+		if err := mergePR(ctx, t.PRURL); err != nil {
+			return outcome{}, err
+		}
+		return outcome{detail: "merged " + t.PRURL}, nil
+	}
+	ws, err := w.repos.prepare(ctx, p, "", c.Run.ID)
+	if err != nil {
+		return outcome{}, err
+	}
+	defer ws.close(context.WithoutCancel(ctx), false)
+	say("merging %s into %s", t.Branch, ws.start)
+	if err := ws.merge(ctx, t.Branch, fmt.Sprintf("Merge %s: %s\n\nBuildBee Task %s", t.Branch, t.Title, t.ID)); err != nil {
+		return outcome{}, err
+	}
+	return outcome{detail: "merged " + t.Branch + " into " + ws.start}, nil
+}
+
+// finalReply is the agent's closing message: its reply after its last tool
+// call, capped to what a summary needs.
+func finalReply(transcript string) string {
+	if i := strings.LastIndex("\n"+transcript, "\n[tool] "); i >= 0 {
+		rest := transcript[i+len("[tool] "):]
+		if j := strings.IndexByte(rest, '\n'); j >= 0 {
+			transcript = rest[j+1:]
+		} else {
+			transcript = ""
+		}
+	}
+	transcript = strings.TrimSpace(transcript)
+	if len(transcript) > 8000 {
+		transcript = "…" + transcript[len(transcript)-8000:]
+	}
+	return transcript
 }
 
 // keepAlive renews the claim until ctx ends, and stops the Run when the

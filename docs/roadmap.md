@@ -54,6 +54,14 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Host isolation stays as the Buzz-style opt-in (`BUILDBEE_WORKER_ISOLATION=host`)
 - Agents that want an explicit ACP `authenticate` (Grok) get one, reusing their CLI's login
 
+## Phase 4a — Autopilot (done)
+
+- Runs have kinds: `plan` (Scout), `build` (Builder), `review` (Sentry, with a parsed verdict) and `merge` (no agent, any worker)
+- With `auto_run`, each finished Run moves its Task on: plan → build → review → merge; changes requested or failed CI go back to the Builder on the same branch; after 3 builds a person decides
+- CI gate on the latest push (GitHub `check_run` matched by branch); `merge_policy: approval` asks with a `merge` Decision
+- Builds continue the Task's branch and push with a lease; merges use `gh pr merge` or `git merge`
+- Project `instructions` reach every agent; Runs report the agent's closing message as `summary`
+
 ## Phase 2 — Chat UX
 
 - Channels, threads, direct messages, @people and @agents, unread counts, presence
@@ -67,11 +75,11 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Logs and large Artifacts in object storage
 - Retire the Server-side single-file draft PR endpoint (`POST /v1/tasks/{id}/pr`) in favour of worker PRs
 
-## Phase 4 — Autonomy
+## Phase 4 — Autonomy, remaining
 
-- Per-Project orchestrator: backlog → Scout triage → Builder → Sentry review → PR → CI feedback
-- Configurable Bots (agent, model, prompt, tools) and a Project autonomy policy: auto-merge by default, human approval optional
-- Heartbeat prompts, agent memory, scheduled Routines, token and cost tracking
+- Steering a running agent from chat (ACP prompt queueing where the agent supports it)
+- Scheduled Routines that open Tasks (backlog grooming, dependency updates, failing-CI sweeps)
+- Token and cost tracking from `usage` events; per-Project limits on parallel Runs
 
 ## Phase 5 — Scale and operations
 

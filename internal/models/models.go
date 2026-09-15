@@ -175,7 +175,9 @@ type Person struct {
 type Project struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
-	AutoRun       bool       `json:"auto_run"`
+	AutoRun       bool       `json:"auto_run"` // autopilot
+	MergePolicy   string     `json:"merge_policy"`
+	Instructions  string     `json:"instructions,omitempty"`
 	RepoURL       string     `json:"repo_url,omitempty"`
 	DefaultBranch string     `json:"default_branch,omitempty"`
 	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
@@ -212,9 +214,9 @@ type BotSeed struct {
 // DefaultBots are the four Bots created with every Project.
 func DefaultBots() []BotSeed {
 	return []BotSeed{
-		{Name: "Scout", Role: RoleScout, Instructions: "Triage incoming Tasks. Clarify scope, flag ambiguity, and Handoff to Builder when ready."},
-		{Name: "Builder", Role: RoleBuilder, Instructions: "Implement Tasks in a Sandbox. Produce Artifacts and Handoff to Sentry for review."},
-		{Name: "Sentry", Role: RoleSentry, Instructions: "Review Runs, watch CI Pipelines, and flag regressions before merge."},
+		{Name: "Scout", Role: RoleScout, Instructions: "You are Scout. You turn Tasks into clear, small plans and say when a Task is unclear."},
+		{Name: "Builder", Role: RoleBuilder, Instructions: "You are Builder. You make focused, tested changes."},
+		{Name: "Sentry", Role: RoleSentry, Instructions: "You are Sentry. You review changes for correctness, tests and security, and say exactly what must change."},
 		{Name: "Pulse", Role: RolePulse, Instructions: "Run Routines: morning digests, Activity summaries, and Channel nudges."},
 	}
 }
@@ -339,6 +341,9 @@ type Task struct {
 	CreatedByMemberID string     `json:"created_by_member_id,omitempty"`
 	IssueNumber       int        `json:"issue_number,omitempty"`
 	IssueURL          string     `json:"issue_url,omitempty"`
+	Branch            string     `json:"branch,omitempty"`
+	PRURL             string     `json:"pr_url,omitempty"`
+	MergedAt          *time.Time `json:"merged_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
@@ -367,6 +372,7 @@ type Decision struct {
 	Reused             bool       `json:"reused,omitempty"`
 	Fingerprint        string     `json:"fingerprint,omitempty"`
 	AssigneeMemberID   string     `json:"assignee_id,omitempty"`
+	Action             string     `json:"action,omitempty"` // "merge": answering "merge" merges the Task's PR
 	CreatedAt          time.Time  `json:"created_at"`
 	AnsweredAt         *time.Time `json:"answered_at,omitempty"`
 }
@@ -403,7 +409,12 @@ type Run struct {
 	ProjectID   string     `json:"project_id"`
 	BotMemberID string     `json:"bot_member_id,omitempty"`
 	Status      RunStatus  `json:"status"`
+	Kind        RunKind    `json:"kind"`
 	Detail      string     `json:"detail"`
+	Summary     string     `json:"summary,omitempty"`
+	Branch      string     `json:"branch,omitempty"`
+	PRURL       string     `json:"pr_url,omitempty"`
+	Verdict     string     `json:"verdict,omitempty"`
 	Agent       string     `json:"agent,omitempty"`
 	Prompt      string     `json:"prompt,omitempty"`
 	Worker      string     `json:"worker,omitempty"`
@@ -414,6 +425,54 @@ type Run struct {
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 }
+
+// RunKind is what a Run is for.
+type RunKind string
+
+const (
+	RunPlan   RunKind = "plan"   // Scout: read the Task and the repo, propose a plan; no changes
+	RunBuild  RunKind = "build"  // Builder: change the repo and push the Task's branch
+	RunReview RunKind = "review" // Sentry: review the branch and give a verdict; no changes
+	RunMerge  RunKind = "merge"  // a worker merges the Task's branch; no agent
+)
+
+// RunKindForRole is the kind of Run a Bot with role does.
+func RunKindForRole(role string) RunKind {
+	switch strings.ToLower(role) {
+	case RoleScout:
+		return RunPlan
+	case RoleSentry:
+		return RunReview
+	default:
+		return RunBuild
+	}
+}
+
+// ParseVerdict reads a review's verdict from the reviewer's last
+// "VERDICT: APPROVE" or "VERDICT: REQUEST_CHANGES" line; "" when there is none.
+func ParseVerdict(summary string) string {
+	verdict := ""
+	for _, line := range strings.Split(summary, "\n") {
+		line = strings.ToUpper(strings.Trim(strings.TrimSpace(line), "*_`#> "))
+		rest, ok := strings.CutPrefix(line, "VERDICT:")
+		if !ok {
+			continue
+		}
+		switch strings.Trim(strings.TrimSpace(rest), "*_`. ") {
+		case "APPROVE", "APPROVED":
+			verdict = "approve"
+		case "REQUEST_CHANGES", "REQUEST CHANGES", "CHANGES_REQUESTED", "CHANGES REQUESTED":
+			verdict = "changes"
+		}
+	}
+	return verdict
+}
+
+// Merge policies.
+const (
+	MergeAuto     = "auto"     // merge when Sentry approves and CI passes
+	MergeApproval = "approval" // then ask a person
+)
 
 // RunEvent is one incremental ACP / Sandbox event on a Run.
 type RunEvent struct {

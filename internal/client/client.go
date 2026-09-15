@@ -94,6 +94,22 @@ func (c *Client) CreateProject(name string) (map[string]any, error) {
 	return out, err
 }
 
+// UpdateProject changes a Project's settings.
+func (c *Client) UpdateProject(id string, patch map[string]any) (map[string]any, error) {
+	var out map[string]any
+	err := c.do(http.MethodPatch, "/v1/projects/"+id, patch, &out)
+	return out, err
+}
+
+// CreateTask opens a Task, handed to the Bot with role handoffRole ("" =
+// Scout, "none" = nobody).
+func (c *Client) CreateTask(projectID, title, body, handoffRole string) (map[string]any, error) {
+	var out map[string]any
+	err := c.do(http.MethodPost, "/v1/projects/"+projectID+"/tasks",
+		map[string]string{"title": title, "body": body, "handoff_role": handoffRole}, &out)
+	return out, err
+}
+
 func (c *Client) ListTasks(projectID string) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodGet, "/v1/projects/"+projectID+"/tasks", nil, &out)

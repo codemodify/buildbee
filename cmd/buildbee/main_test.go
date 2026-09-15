@@ -38,6 +38,19 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 	mux.HandleFunc("POST /v1/projects", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "p1", "name": "Project"})
 	})
+	mux.HandleFunc("PATCH /v1/projects/p1", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if in["auto_run"] != true || in["merge_policy"] != "approval" || in["instructions"] != "" {
+			t.Errorf("project update sent %v", in)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "p1", "auto_run": true})
+	})
+	mux.HandleFunc("POST /v1/projects/p1/tasks", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "t9", "title": in["title"]})
+	})
 	mux.HandleFunc("GET /v1/projects/p1/tasks", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
 	})
@@ -69,6 +82,14 @@ func TestProjectCreateAndTaskList(t *testing.T) {
 	c := &client.Client{Base: srv.URL, HTTP: srv.Client(), Output: &buf}
 	if err := run([]string{"project", "create", "--name", "Project"}, c); err != nil {
 		t.Fatal(err)
+	}
+	buf.Reset()
+	if err := run([]string{"project", "update", "--id", "p1", "--autopilot", "on", "--merge-policy", "approval", "--instructions="}, c); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if err := run([]string{"task", "create", "--project", "p1", "--title", "Ship it"}, c); err != nil || !strings.Contains(buf.String(), "t9") {
+		t.Fatalf("task create: %v %s", err, buf.String())
 	}
 	buf.Reset()
 	if err := run([]string{"task", "list", "--project", "p1"}, c); err != nil {

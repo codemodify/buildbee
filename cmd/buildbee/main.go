@@ -50,34 +50,82 @@ func run(args []string, c *client.Client) error {
 	}
 }
 
+const projectUsage = "usage: buildbee project create --name NAME | project update --id ID [--autopilot on|off] " +
+	"[--merge-policy auto|approval] [--repo URL] [--branch NAME] [--instructions TEXT]"
+
 func runProject(args []string, c *client.Client) error {
-	if len(args) == 0 || args[0] != "create" {
-		return fmt.Errorf("usage: buildbee project create --name NAME")
+	if len(args) == 0 {
+		return errors.New(projectUsage)
 	}
-	name := flagValue(args[1:], "name")
-	if name == "" {
-		return fmt.Errorf("usage: buildbee project create --name NAME")
+	switch args[0] {
+	case "create":
+		name := flagValue(args[1:], "name")
+		if name == "" {
+			return errors.New(projectUsage)
+		}
+		out, err := c.CreateProject(name)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	case "update":
+		id := flagValue(args[1:], "id")
+		if id == "" {
+			return errors.New(projectUsage)
+		}
+		patch := map[string]any{}
+		switch v := flagValue(args[1:], "autopilot"); v {
+		case "":
+		case "on", "off":
+			patch["auto_run"] = v == "on"
+		default:
+			return errors.New(projectUsage)
+		}
+		for flag, field := range map[string]string{"merge-policy": "merge_policy", "repo": "repo_url", "branch": "default_branch", "instructions": "instructions"} {
+			if v, ok := flagSet(args[1:], flag); ok {
+				patch[field] = v
+			}
+		}
+		out, err := c.UpdateProject(id, patch)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	default:
+		return errors.New(projectUsage)
 	}
-	out, err := c.CreateProject(name)
-	if err != nil {
-		return err
-	}
-	return c.PrintJSON(out)
 }
 
+const taskUsage = "usage: buildbee task list --project ID | task create --project ID --title TITLE [--body TEXT] [--to ROLE|none]"
+
 func runTask(args []string, c *client.Client) error {
-	if len(args) == 0 || args[0] != "list" {
-		return fmt.Errorf("usage: buildbee task list --project ID")
+	if len(args) == 0 {
+		return errors.New(taskUsage)
 	}
 	projectID := flagValue(args[1:], "project")
 	if projectID == "" {
-		return fmt.Errorf("usage: buildbee task list --project ID")
+		return errors.New(taskUsage)
 	}
-	out, err := c.ListTasks(projectID)
-	if err != nil {
-		return err
+	switch args[0] {
+	case "list":
+		out, err := c.ListTasks(projectID)
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	case "create":
+		title := flagValue(args[1:], "title")
+		if title == "" {
+			return errors.New(taskUsage)
+		}
+		out, err := c.CreateTask(projectID, title, flagValue(args[1:], "body"), flagValue(args[1:], "to"))
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
+	default:
+		return errors.New(taskUsage)
 	}
-	return c.PrintJSON(out)
 }
 
 func runHandoff(args []string, c *client.Client) error {
@@ -204,6 +252,20 @@ func hasFlag(args []string, name string) bool {
 	return false
 }
 
+// flagSet returns a flag's value and whether it was given (possibly empty).
+func flagSet(args []string, name string) (string, bool) {
+	long := "--" + name
+	for i, a := range args {
+		if a == long && i+1 < len(args) {
+			return args[i+1], true
+		}
+		if v, ok := strings.CutPrefix(a, long+"="); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 func flagValue(args []string, name string) string {
 	long := "--" + name
 	for i := 0; i < len(args); i++ {
@@ -224,7 +286,10 @@ func usage(w io.Writer) {
 Usage:
   buildbee version
   buildbee project create --name NAME
+  buildbee project update --id ID [--autopilot on|off] [--merge-policy auto|approval]
+                          [--repo URL] [--branch NAME] [--instructions TEXT]
   buildbee task list --project ID
+  buildbee task create --project ID --title TITLE [--body TEXT] [--to ROLE|none]
   buildbee handoff create --task ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]
   buildbee run start --task ID [--agent AGENT] [--bot MEMBER_ID] [--follow]
   buildbee run show --id ID

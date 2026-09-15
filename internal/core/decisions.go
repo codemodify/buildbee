@@ -115,6 +115,7 @@ func (s *Service) CreateDecision(ctx context.Context, a Actor, projectID string,
 type newDecision struct {
 	prompt, recommendation, assignee, taskID string
 	options                                  []string
+	action                                   string // e.g. "merge"; never answered from memory
 }
 
 // openDecision records a Decision, reusing a remembered answer when there is
@@ -122,7 +123,7 @@ type newDecision struct {
 func (w *work) openDecision(ctx context.Context, projectID string, by who, asker *models.Member, in newDecision) (*models.Decision, error) {
 	d := models.Decision{ID: uuid.NewString(), ProjectID: projectID, TaskID: in.taskID, Prompt: in.prompt,
 		Options: in.options, Recommendation: in.recommendation, Fingerprint: models.DecisionFingerprint(in.prompt),
-		AssigneeMemberID: in.assignee, CreatedAt: w.now}
+		AssigneeMemberID: in.assignee, Action: in.action, CreatedAt: w.now}
 	if d.Options == nil {
 		d.Options = []string{}
 	}
@@ -130,7 +131,7 @@ func (w *work) openDecision(ctx context.Context, projectID string, by who, asker
 	if err != nil && err != store.ErrNotFound {
 		return nil, err
 	}
-	if err == nil {
+	if err == nil && d.Action == "" {
 		t := w.now
 		d.Answer, d.Reused, d.AnsweredAt = mem.Answer, true, &t
 	}
@@ -187,12 +188,18 @@ func (s *Service) AnswerDecision(ctx context.Context, a Actor, id, answer string
 		if err != nil {
 			return err
 		}
-		if err := w.st.UpsertDecisionMemory(ctx, models.DecisionMemory{ProjectID: d.ProjectID, Fingerprint: out.Fingerprint,
-			Prompt: out.Prompt, Answer: ans, DecisionID: out.ID, UpdatedAt: w.now}); err != nil {
+		if out.Action == "" { // actions are one-off; remembering them would repeat them
+			if err := w.st.UpsertDecisionMemory(ctx, models.DecisionMemory{ProjectID: d.ProjectID, Fingerprint: out.Fingerprint,
+				Prompt: out.Prompt, Answer: ans, DecisionID: out.ID, UpdatedAt: w.now}); err != nil {
+				return err
+			}
+		}
+		by := whoOf(m, a)
+		if err := w.activity(ctx, d.ProjectID, by, models.TypeDecision, "answered", d.ID,
+			map[string]any{"prompt": truncate(d.Prompt, 300), "answer": ans}); err != nil {
 			return err
 		}
-		return w.activity(ctx, d.ProjectID, whoOf(m, a), models.TypeDecision, "answered", d.ID,
-			map[string]any{"prompt": truncate(d.Prompt, 300), "answer": ans})
+		return w.onDecision(ctx, out, by)
 	})
 	return out, err
 }

@@ -197,30 +197,3 @@ func ownRun(a Actor, r *models.Run) error {
 		return fmt.Errorf("%w: run is claimed by worker %s", store.ErrConflict, r.Worker)
 	}
 }
-
-// runPrompt is what the agent is asked to do: the Bot's standing
-// instructions, the Task, and what people asked for when handing it over.
-func runPrompt(bot *models.Member, task *models.Task, notes []models.Handoff) string {
-	var b strings.Builder
-	if bot != nil && bot.Instructions != "" {
-		b.WriteString(bot.Instructions)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("Task: ")
-	b.WriteString(task.Title)
-	b.WriteString("\n")
-	if task.Body != "" {
-		b.WriteString("\n")
-		b.WriteString(task.Body)
-		b.WriteString("\n")
-	}
-	for _, h := range notes {
-		if h.Note == "" || (bot != nil && h.ToMemberID != bot.ID) {
-			continue
-		}
-		b.WriteString("\nHandoff note: ")
-		b.WriteString(h.Note)
-		b.WriteString("\n")
-	}
-	return b.String()
-}

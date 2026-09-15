@@ -26,7 +26,7 @@ DELETE /v1/me                            → forget this browser's Person
 | Method and path | What it does |
 | --- | --- |
 | `GET/POST /v1/projects` | list (`?archived=1` includes archived) / create `{name, auto_run}` |
-| `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, repo_url, default_branch, archived}` |
+| `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, merge_policy: auto\|approval, instructions, repo_url, default_branch, archived}`; `auto_run` is [autopilot](autopilot.md) |
 | `POST /v1/projects/{id}/join` | join as `member` |
 | `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions, agent}` |
 | `PATCH /v1/members/{id}` | `{display_name, instructions, agent}`; `agent` applies to Bots |
@@ -41,8 +41,8 @@ DELETE /v1/me                            → forget this browser's Person
 | `GET/POST /v1/projects/{id}/decisions` | list (`?open=1`, `?mine=1`) / ask `{prompt, options, recommendation, assignee_id, task_id}` |
 | `POST /v1/decisions/{id}/answer` | answer once `{answer}`; remembered for the same question |
 | `GET /v1/projects/{id}/decisions/memories` | remembered answers |
-| `GET/POST /v1/tasks/{id}/runs` | list / queue `{agent, bot_member_id}`; both default from the Task's Bot |
-| `GET/PATCH /v1/runs/{id}` | Run / `{status, detail}`: `pending → running → succeeded\|failed\|canceled` |
+| `GET/POST /v1/tasks/{id}/runs` | list / queue `{agent, bot_member_id, kind: plan\|build\|review}`; all default from the Task's Bot |
+| `GET/PATCH /v1/runs/{id}` | Run / `{status, detail}`: `pending → running → succeeded\|failed\|canceled`; people may only cancel; workers also report `{summary, branch, pr_url}` |
 | `GET/POST /v1/runs/{id}/events` | `?after=<seq>&limit=` / append `{kind, payload}` (`409` once finished) |
 | `POST /v1/worker/claim` | workers: `{agents, wait_seconds ≤ 30}` → `200 {run, task, project, bot, handoffs}` or `204` |
 | `POST /v1/runs/{id}/heartbeat` | workers: renew the 60 s lease; returns the Run (status `canceled` means stop) |
@@ -53,7 +53,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `GET/POST /v1/projects/{id}/routines`, `PATCH /v1/routines/{id}`, `POST /v1/routines/{id}/run` | Routines; enable, reschedule, fire now |
 | `GET /v1/me/notifications`, `POST /v1/me/notifications/read-all`, `POST /v1/notifications/{id}/read` | the acting Person's inbox across Projects |
 | `GET/PATCH /v1/me/preferences` | `{mute_mentions, mute_routines}` |
-| `POST /v1/pipelines/webhook`, `POST /v1/issues/webhook?project_id=` | GitHub webhooks; signed when `GITHUB_WEBHOOK_SECRET` is set |
+| `POST /v1/pipelines/webhook`, `POST /v1/issues/webhook?project_id=` | GitHub webhooks; signed when `GITHUB_WEBHOOK_SECRET` is set. CI results take `{task_id \| branch, name, status, external_url}` or a GitHub `check_run` event, matched to the Task by branch |
 
 ## Paging
 
@@ -81,3 +81,5 @@ A client that falls too far behind is disconnected; reconnect with the last curs
 ## Workers
 
 Runs are a queue. A worker claims a Run, owns it until it finishes, and must heartbeat to keep it; only the claiming worker may append events, change its status or attach Artifacts to it (`409` otherwise). A Run whose worker stops heartbeating is failed by the Server. See [workers.md](workers.md).
+
+Runs have a `kind`: `plan` (Scout), `build` (Builder), `review` (Sentry, with a `verdict` of `approve` or `changes`) or `merge` (no agent). Tasks record the `branch` and `pr_url` their Builder pushed, and `merged_at`. Decisions with `action: "merge"` merge the Task's branch when answered `merge`. See [autopilot.md](autopilot.md).

@@ -95,6 +95,8 @@ func (s *Service) Project(ctx context.Context, id string) (*models.ProjectBundle
 type ProjectPatch struct {
 	Name          *string `json:"name"`
 	AutoRun       *bool   `json:"auto_run"`
+	MergePolicy   *string `json:"merge_policy"`
+	Instructions  *string `json:"instructions"`
 	RepoURL       *string `json:"repo_url"`
 	DefaultBranch *string `json:"default_branch"`
 	Archived      *bool   `json:"archived"`
@@ -126,6 +128,20 @@ func (s *Service) UpdateProject(ctx context.Context, a Actor, id string, patch P
 		}
 		if patch.AutoRun != nil {
 			changes["auto_run"], p.AutoRun = *patch.AutoRun, *patch.AutoRun
+		}
+		if patch.MergePolicy != nil {
+			mp := strings.ToLower(strings.TrimSpace(*patch.MergePolicy))
+			if mp != models.MergeAuto && mp != models.MergeApproval {
+				return invalid("merge_policy must be auto or approval")
+			}
+			changes["merge_policy"], p.MergePolicy = mp, mp
+		}
+		if patch.Instructions != nil {
+			in, err := text("instructions", *patch.Instructions, false, 16000)
+			if err != nil {
+				return err
+			}
+			changes["instructions"], p.Instructions = true, in
 		}
 		if patch.RepoURL != nil {
 			u, err := text("repo_url", *patch.RepoURL, false, 500)

@@ -10,33 +10,36 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const runCols = `id, task_id, project_id, COALESCE(bot_member_id::text, ''), status, detail, agent, prompt, worker,
-	lease_until, attempts, created_at, updated_at, started_at, finished_at`
+const runCols = `id, task_id, project_id, COALESCE(bot_member_id::text, ''), status, kind, detail, summary, branch, pr_url,
+	verdict, agent, prompt, worker, lease_until, attempts, created_at, updated_at, started_at, finished_at`
 
 func scanRun(row interface{ Scan(...any) error }, r *models.Run) error {
-	return row.Scan(&r.ID, &r.TaskID, &r.ProjectID, &r.BotMemberID, &r.Status, &r.Detail, &r.Agent, &r.Prompt, &r.Worker,
-		&r.LeaseUntil, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt)
+	return row.Scan(&r.ID, &r.TaskID, &r.ProjectID, &r.BotMemberID, &r.Status, &r.Kind, &r.Detail, &r.Summary, &r.Branch, &r.PRURL,
+		&r.Verdict, &r.Agent, &r.Prompt, &r.Worker, &r.LeaseUntil, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt)
 }
 
 func (s *Store) InsertRun(ctx context.Context, r models.Run) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO runs (id, task_id, project_id, bot_member_id, status, detail, agent, prompt, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
-		r.ID, r.TaskID, r.ProjectID, nullID(r.BotMemberID), r.Status, r.Detail, r.Agent, r.Prompt, r.CreatedAt)
+	if r.Kind == "" {
+		r.Kind = models.RunBuild
+	}
+	_, err := s.q.Exec(ctx, `INSERT INTO runs (id, task_id, project_id, bot_member_id, status, kind, detail, agent, prompt, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
+		r.ID, r.TaskID, r.ProjectID, nullID(r.BotMemberID), r.Status, r.Kind, r.Detail, r.Agent, r.Prompt, r.CreatedAt)
 	return mapErr(err)
 }
 
 // ClaimRun hands the oldest queued Run a worker can execute to that worker
 // and leases it until `until`. Concurrent workers never get the same Run.
-// A Run for any agent (agent ”) needs a worker offering a real one: the
-// fake agent only takes Runs that ask for it. ErrNotFound means the queue
-// has nothing for this worker.
+// A Run for any agent (empty agent) needs a worker offering a real one: the
+// fake agent only takes Runs that ask for it. Merge Runs need no agent and
+// go to any worker. ErrNotFound means the queue has nothing for this worker.
 func (s *Store) ClaimRun(ctx context.Context, worker string, agents []string, now, until time.Time) (*models.Run, error) {
 	var r models.Run
 	err := scanRun(s.q.QueryRow(ctx, `UPDATE runs SET status='running', worker=$1, lease_until=$4, attempts=attempts+1,
 			started_at=COALESCE(started_at, $3), updated_at=$3
 		WHERE id = (
 			SELECT r.id FROM runs r JOIN projects p ON p.id = r.project_id
-			WHERE r.status = 'pending' AND p.archived_at IS NULL AND (r.agent = ANY($2) OR (r.agent = '' AND EXISTS (SELECT 1 FROM unnest($2::text[]) a WHERE a <> 'fake')))
+			WHERE r.status = 'pending' AND p.archived_at IS NULL AND (r.kind = 'merge' OR r.agent = ANY($2) OR (r.agent = '' AND EXISTS (SELECT 1 FROM unnest($2::text[]) a WHERE a <> 'fake')))
 			ORDER BY r.created_at, r.id
 			FOR UPDATE OF r SKIP LOCKED
 			LIMIT 1)
@@ -112,10 +115,11 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]models.Run, erro
 	return out, rows.Err()
 }
 
-// UpdateRun writes status, detail, lease and the lifecycle timestamps.
+// UpdateRun writes status, detail, the outcome fields, lease and the lifecycle timestamps.
 func (s *Store) UpdateRun(ctx context.Context, r models.Run) error {
-	return one(s.q.Exec(ctx, `UPDATE runs SET status=$2, detail=$3, updated_at=$4, started_at=$5, finished_at=$6, lease_until=$7 WHERE id=$1`,
-		r.ID, r.Status, r.Detail, r.UpdatedAt, r.StartedAt, r.FinishedAt, r.LeaseUntil))
+	return one(s.q.Exec(ctx, `UPDATE runs SET status=$2, detail=$3, updated_at=$4, started_at=$5, finished_at=$6, lease_until=$7,
+		summary=$8, branch=$9, pr_url=$10, verdict=$11 WHERE id=$1`,
+		r.ID, r.Status, r.Detail, r.UpdatedAt, r.StartedAt, r.FinishedAt, r.LeaseUntil, r.Summary, r.Branch, r.PRURL, r.Verdict))
 }
 
 // AppendRunEvent stores the next event of a Run. The per-Run counter makes

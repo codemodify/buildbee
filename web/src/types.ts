@@ -26,6 +26,8 @@ export type Project = {
   id: string;
   name: string;
   auto_run?: boolean;
+  merge_policy?: "auto" | "approval" | string;
+  instructions?: string;
   repo_url?: string;
   default_branch?: string;
   archived_at?: string;
@@ -52,6 +54,9 @@ export type Task = {
   created_by_member_id?: string;
   issue_number?: number;
   issue_url?: string;
+  branch?: string;
+  pr_url?: string;
+  merged_at?: string;
 };
 
 export type Handoff = {
@@ -74,6 +79,7 @@ export type Decision = {
   answer?: string;
   reused?: boolean;
   assignee_id?: string;
+  action?: string;
 };
 
 export type Run = {
@@ -81,7 +87,12 @@ export type Run = {
   task_id: string;
   bot_member_id?: string;
   status: string;
+  kind?: "plan" | "build" | "review" | "merge" | string;
   detail: string;
+  summary?: string;
+  branch?: string;
+  pr_url?: string;
+  verdict?: string;
   agent?: string;
   worker?: string;
   attempts?: number;

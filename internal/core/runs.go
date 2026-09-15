@@ -33,6 +33,8 @@ func (s *Service) Run(ctx context.Context, id string) (*models.Run, error) {
 type NewRun struct {
 	BotMemberID string `json:"bot_member_id"`
 	Agent       string `json:"agent"`
+	// Kind is plan, build or review; empty means what the Bot's role does.
+	Kind string `json:"kind"`
 }
 
 // CreateRun queues a Run of a Task for a worker to claim.
@@ -42,13 +44,20 @@ func (s *Service) CreateRun(ctx context.Context, a Actor, taskID string, in NewR
 	if !models.ValidAgent(agent) {
 		return nil, invalid("agent must be one of %s", strings.Join(models.Agents, ", "))
 	}
+	kind := models.RunKind(strings.ToLower(strings.TrimSpace(in.Kind)))
+	switch kind {
+	case "", models.RunPlan, models.RunBuild, models.RunReview:
+	default:
+		return nil, invalid("kind must be plan, build or review")
+	}
 	var out *models.Run
 	err := s.tx(ctx, func(w *work) error {
 		task, err := w.st.GetTask(ctx, taskID, false)
 		if err != nil {
 			return err
 		}
-		if _, err := w.openProject(ctx, task.ProjectID); err != nil {
+		proj, err := w.openProject(ctx, task.ProjectID)
+		if err != nil {
 			return err
 		}
 		m, err := w.member(ctx, a, task.ProjectID, true)
@@ -67,21 +76,32 @@ func (s *Service) CreateRun(ctx context.Context, a Actor, taskID string, in NewR
 				return invalid("bot_member_id is not a bot in this project")
 			}
 		}
-		out, err = w.createRun(ctx, task, bot, agent, whoOf(m, a))
+		if kind == models.RunReview && task.Branch == "" {
+			return invalid("the Task has no branch to review yet")
+		}
+		out, err = w.createRun(ctx, proj, task, bot, agent, kind, whoOf(m, a))
 		return err
 	})
 	return out, err
 }
 
 // createRun queues a Run executed by bot (optional) with agent ("" = the
-// Bot's agent, else any), prompted with the Task and its handoff notes.
-func (w *work) createRun(ctx context.Context, task *models.Task, bot *models.Member, agent string, by who) (*models.Run, error) {
+// Bot's agent, else any) and kind ("" = what the Bot's role does),
+// prompted with the Project's guidance, the Task and its handoff notes.
+func (w *work) createRun(ctx context.Context, proj *models.Project, task *models.Task, bot *models.Member, agent string,
+	kind models.RunKind, by who) (*models.Run, error) {
 	notes, err := w.st.ListHandoffs(ctx, task.ID)
 	if err != nil {
 		return nil, err
 	}
-	r := models.Run{ID: uuid.NewString(), TaskID: task.ID, ProjectID: task.ProjectID,
-		Status: models.RunPending, Detail: "queued", Agent: agent, Prompt: runPrompt(bot, task, notes),
+	if kind == "" {
+		kind = models.RunBuild
+		if bot != nil {
+			kind = models.RunKindForRole(bot.Role)
+		}
+	}
+	r := models.Run{ID: uuid.NewString(), TaskID: task.ID, ProjectID: task.ProjectID, Kind: kind,
+		Status: models.RunPending, Detail: "queued", Agent: agent, Prompt: runPrompt(proj, bot, task, notes, kind),
 		CreatedAt: w.now, UpdatedAt: w.now}
 	if bot != nil {
 		r.BotMemberID = bot.ID
@@ -97,22 +117,50 @@ func (w *work) createRun(ctx context.Context, task *models.Task, bot *models.Mem
 		return nil, err
 	}
 	return &r, w.activity(ctx, task.ProjectID, by, models.TypeRun, "created", r.ID,
-		map[string]any{"task_id": task.ID, "bot_member_id": r.BotMemberID, "agent": r.Agent})
+		map[string]any{"task_id": task.ID, "bot_member_id": r.BotMemberID, "agent": r.Agent, "kind": r.Kind})
 }
 
-// UpdateRun moves a Run through its lifecycle: pending → running →
+// RunReport is a worker's report on a Run. Summary, Branch and PRURL are
+// the outcome of a finished Run.
+type RunReport struct {
+	Status  string `json:"status"`
+	Detail  string `json:"detail"`
+	Summary string `json:"summary"`
+	Branch  string `json:"branch"`
+	PRURL   string `json:"pr_url"`
+}
+
+// UpdateRun changes a Run's status and detail; see ReportRun.
+func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail string) (*models.Run, error) {
+	return s.ReportRun(ctx, a, id, RunReport{Status: status, Detail: detail})
+}
+
+// ReportRun moves a Run through its lifecycle: pending → running →
 // succeeded | failed | canceled (or straight to failed/canceled). Finished
 // Runs cannot change. Repeating the current status only updates the detail.
-// Workers report progress; people can only cancel.
-func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail string) (*models.Run, error) {
-	next, ok := models.ParseRunStatus(status)
+// Workers report progress and outcomes; people can only cancel. When a Run
+// finishes, autopilot moves its Task on (see advance).
+func (s *Service) ReportRun(ctx context.Context, a Actor, id string, rep RunReport) (*models.Run, error) {
+	next, ok := models.ParseRunStatus(rep.Status)
 	if !ok {
 		return nil, invalid("status must be pending, running, succeeded, failed or canceled")
 	}
-	if a.Worker == "" && next != models.RunCanceled {
+	if a.Worker == "" && (next != models.RunCanceled || rep.Summary != "" || rep.Branch != "" || rep.PRURL != "") {
 		return nil, invalid("a Run's progress is reported by the worker running it; people can only cancel it")
 	}
-	d, err := text("detail", detail, false, 2000)
+	d, err := text("detail", rep.Detail, false, 2000)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := text("summary", rep.Summary, false, 16000)
+	if err != nil {
+		return nil, err
+	}
+	branch, err := text("branch", rep.Branch, false, 250)
+	if err != nil {
+		return nil, err
+	}
+	prURL, err := text("pr_url", rep.PRURL, false, 500)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +181,18 @@ func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail str
 		}
 		changed := next != r.Status
 		r.Status, r.Detail, r.UpdatedAt = next, d, w.now
+		if summary != "" {
+			r.Summary = summary
+		}
+		if branch != "" {
+			r.Branch = branch
+		}
+		if prURL != "" {
+			r.PRURL = prURL
+		}
+		if r.Kind == models.RunReview && next == models.RunSucceeded {
+			r.Verdict = models.ParseVerdict(r.Summary)
+		}
 		if next == models.RunRunning && r.StartedAt == nil {
 			t := w.now
 			r.StartedAt = &t
@@ -152,7 +212,17 @@ func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail str
 			return nil
 		}
 		by := w.runActor(ctx, a, r)
-		return w.activity(ctx, r.ProjectID, by, models.TypeRun, string(next), r.ID, map[string]any{"task_id": r.TaskID, "detail": d})
+		payload := map[string]any{"task_id": r.TaskID, "detail": d, "kind": r.Kind}
+		if r.Verdict != "" {
+			payload["verdict"] = r.Verdict
+		}
+		if err := w.activity(ctx, r.ProjectID, by, models.TypeRun, string(next), r.ID, payload); err != nil {
+			return err
+		}
+		if next.Terminal() {
+			return w.advance(ctx, r)
+		}
+		return nil
 	})
 	return out, err
 }
@@ -433,9 +503,11 @@ func (w *work) pipelineRecorded(ctx context.Context, a Actor, task *models.Task,
 		map[string]any{"task_id": task.ID, "name": p.Name, "status": p.Status}); err != nil {
 		return err
 	}
-	if p.Status != models.PipelineFailure {
-		return nil
+	if p.Status == models.PipelineFailure {
+		if err := w.notifyPeople(ctx, task.ProjectID, nil, notice{projectID: task.ProjectID, kind: "pipeline",
+			title: "Pipeline failed: " + p.Name + " on " + task.Title, body: p.ExternalURL, href: href(task.ProjectID, "tasks", task.ID)}); err != nil {
+			return err
+		}
 	}
-	return w.notifyPeople(ctx, task.ProjectID, nil, notice{projectID: task.ProjectID, kind: "pipeline",
-		title: "Pipeline failed: " + p.Name + " on " + task.Title, body: p.ExternalURL, href: href(task.ProjectID, "tasks", task.ID)})
+	return w.onPipeline(ctx, task, p)
 }

@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 3b (per-Run containers)
+## Unreleased — LAN rebuild, Phase 4a (autopilot)
+
+### Added
+- [Autopilot](docs/autopilot.md): with `auto_run`, Scout plans, Builder builds and pushes, Sentry reviews, and approved branches merge after CI; changes and CI failures go back to the Builder; after 3 builds a person decides
+- Run `kind` (`plan`, `build`, `review`, `merge`), `summary`, `branch`, `pr_url`, `verdict`; Task `branch`, `pr_url`, `merged_at`; Project `merge_policy` and `instructions`; Decision `action`
+- CI webhooks match Tasks by branch; merge Runs run on any worker (`gh pr merge` or `git merge`)
+
+### Changed
+- Builds on a Task continue its branch; pushes use `--force-with-lease`
+- Handing a Task to Scout or Sentry starts a Run when autorun or autopilot is on (before: only the Builder)
+- Requests the client abandoned are no longer logged as server errors
+
+## LAN rebuild, Phase 3b (per-Run containers)
 
 ### Breaking
 - Workers run each agent in its own container by default; `BUILDBEE_WORKER_ALLOW_HOST_AGENTS` is replaced by `BUILDBEE_WORKER_ISOLATION=host`

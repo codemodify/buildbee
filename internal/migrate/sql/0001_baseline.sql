@@ -27,7 +27,9 @@ CREATE TABLE person_preferences (
 CREATE TABLE projects (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL CHECK (name <> ''),
-    auto_run BOOLEAN NOT NULL DEFAULT false,
+    auto_run BOOLEAN NOT NULL DEFAULT false,  -- autopilot: Bots hand Tasks on and start Runs by themselves
+    merge_policy TEXT NOT NULL DEFAULT 'auto' CHECK (merge_policy IN ('auto', 'approval')),
+    instructions TEXT NOT NULL DEFAULT '',   -- standing guidance every agent in the Project gets
     repo_url TEXT NOT NULL DEFAULT '',
     default_branch TEXT NOT NULL DEFAULT '',
     archived_at TIMESTAMPTZ,
@@ -80,6 +82,9 @@ CREATE TABLE tasks (
     created_by_member_id UUID REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     issue_number INT CHECK (issue_number > 0),
     issue_url TEXT NOT NULL DEFAULT '',
+    branch TEXT NOT NULL DEFAULT '',  -- the branch the Builder pushed
+    pr_url TEXT NOT NULL DEFAULT '',
+    merged_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -112,6 +117,7 @@ CREATE TABLE decisions (
     reused BOOLEAN NOT NULL DEFAULT false,
     fingerprint TEXT NOT NULL DEFAULT '',
     assignee_member_id UUID REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
+    action TEXT NOT NULL DEFAULT '' CHECK (action IN ('', 'merge')),  -- what answering it does
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     answered_at TIMESTAMPTZ
 );
@@ -149,7 +155,12 @@ CREATE TABLE runs (
     project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
     bot_member_id UUID REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled')),
+    kind TEXT NOT NULL DEFAULT 'build' CHECK (kind IN ('plan', 'build', 'review', 'merge')),
     detail TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '', -- the agent's closing message
+    branch TEXT NOT NULL DEFAULT '',  -- the branch a build pushed
+    pr_url TEXT NOT NULL DEFAULT '',
+    verdict TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes')),
     agent TEXT NOT NULL DEFAULT '',   -- '' = any agent the claiming worker offers
     prompt TEXT NOT NULL DEFAULT '',  -- what the agent is asked to do
     worker TEXT NOT NULL DEFAULT '',  -- the worker that claimed the Run
@@ -228,3 +239,5 @@ CREATE TABLE notifications (
 );
 CREATE INDEX notifications_person_seq_idx ON notifications (person_id, seq DESC);
 CREATE INDEX notifications_person_unread_idx ON notifications (person_id) WHERE read_at IS NULL;
+
+CREATE INDEX tasks_branch_idx ON tasks (branch) WHERE branch <> '';

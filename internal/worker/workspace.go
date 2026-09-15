@@ -43,21 +43,25 @@ type workspace struct {
 	dir    string // the worktree the agent works in
 	mirror string
 	repo   string // the Project's repo URL
-	branch string
-	start  string // the branch it started from, and a PR's base
+	branch string // the Run's local branch
+	start  string // the branch it started from
 	base   string // the commit it started from
-	lock   *sync.Mutex
+	// defaultBranch is the repo's default branch, a PR's base.
+	defaultBranch string
+	continues     bool // started from an existing branch of the Task
+	lock          *sync.Mutex
 }
 
-// prepare fetches the Project's repo and checks out a new branch for the
-// Run at the tip of its default branch.
-func (r *repos) prepare(ctx context.Context, p models.Project, branch, runID string) (*workspace, error) {
+// prepare fetches the Project's repo and checks out a branch of the Run's
+// own at the tip of from (a branch name), or of the default branch.
+func (r *repos) prepare(ctx context.Context, p models.Project, from, runID string) (*workspace, error) {
 	if runID == "" || filepath.Base(runID) != runID || strings.HasPrefix(runID, ".") {
 		return nil, fmt.Errorf("unexpected run id %q", runID)
 	}
 	sum := sha256.Sum256([]byte(p.RepoURL))
 	mirror := filepath.Join(r.root, "mirrors", hex.EncodeToString(sum[:8])+".git")
-	ws := &workspace{dir: filepath.Join(r.root, "runs", runID), mirror: mirror, repo: p.RepoURL, branch: branch, lock: r.lock(mirror)}
+	ws := &workspace{dir: filepath.Join(r.root, "runs", runID), mirror: mirror, repo: p.RepoURL, branch: "buildbee-run/" + runID,
+		lock: r.lock(mirror)}
 	ws.lock.Lock()
 	defer ws.lock.Unlock()
 
@@ -75,25 +79,28 @@ func (r *repos) prepare(ctx context.Context, p models.Project, branch, runID str
 	if _, err := git(ctx, mirror, "fetch", "--quiet", "--prune", "--", p.RepoURL, "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", p.RepoURL, err)
 	}
-	start := p.DefaultBranch
-	if start == "" { // the remote's default, recorded by the clone
+	def := p.DefaultBranch
+	if def == "" { // the remote's default, recorded by the clone
 		head, err := git(ctx, mirror, "symbolic-ref", "--short", "HEAD")
 		if err != nil {
 			return nil, fmt.Errorf("the repo has no default branch; set the Project's default_branch")
 		}
-		start = head
+		def = head
+	}
+	start := def
+	if from != "" {
+		start = from
 	}
 	base, err := git(ctx, mirror, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+start+"^{commit}")
 	if err != nil {
 		return nil, fmt.Errorf("the repo has no branch %q to start from", start)
 	}
-	ws.start = start
-	ws.base = base
+	ws.start, ws.base, ws.defaultBranch, ws.continues = start, base, def, from != ""
 	if err := os.MkdirAll(filepath.Dir(ws.dir), 0o755); err != nil {
 		return nil, err
 	}
-	if _, err := git(ctx, mirror, "worktree", "add", "--quiet", "-b", branch, ws.dir, base); err != nil {
-		return nil, fmt.Errorf("checking out %s: %w", branch, err)
+	if _, err := git(ctx, mirror, "worktree", "add", "--quiet", "-B", ws.branch, ws.dir, base); err != nil {
+		return nil, fmt.Errorf("checking out %s: %w", start, err)
 	}
 	return ws, nil
 }
@@ -129,10 +136,32 @@ func (ws *workspace) diff(ctx context.Context) (string, error) {
 	return out, err
 }
 
-// push publishes the branch with this machine's git credentials.
-func (ws *workspace) push(ctx context.Context) error {
-	_, err := git(ctx, ws.dir, "push", "--quiet", "--", ws.repo, "HEAD:refs/heads/"+ws.branch)
+// push publishes the work as branch target with this machine's git
+// credentials. The lease makes the push fail rather than overwrite commits
+// someone else pushed to target meanwhile (a new branch must not exist).
+func (ws *workspace) push(ctx context.Context, target string) error {
+	expect := ""
+	if ws.continues && target == ws.start {
+		expect = ws.base
+	}
+	_, err := git(ctx, ws.dir, "push", "--quiet", "--force-with-lease=refs/heads/"+target+":"+expect,
+		"--", ws.repo, "HEAD:refs/heads/"+target)
 	return err
+}
+
+// merge merges branch into the checkout (the default branch) and pushes
+// the result, then deletes the merged branch.
+func (ws *workspace) merge(ctx context.Context, branch, message string) error {
+	if _, err := git(ctx, ws.dir, "-c", "user.name=BuildBee", "-c", "user.email=buildbee@localhost",
+		"merge", "--no-ff", "--no-edit", "-m", message, "refs/remotes/origin/"+branch); err != nil {
+		_, _ = git(ctx, ws.dir, "merge", "--abort")
+		return fmt.Errorf("%s does not merge cleanly into %s: %w", branch, ws.start, err)
+	}
+	if _, err := git(ctx, ws.dir, "push", "--quiet", "--", ws.repo, "HEAD:refs/heads/"+ws.start); err != nil {
+		return fmt.Errorf("pushing %s: %w", ws.start, err)
+	}
+	_, _ = git(ctx, ws.dir, "push", "--quiet", "--", ws.repo, ":refs/heads/"+branch)
+	return nil
 }
 
 // close removes the worktree. The branch stays in the mirror when keep is
@@ -193,6 +222,19 @@ func githubRepo(url string) string {
 		}
 	}
 	return ""
+}
+
+// mergePR squash-merges a pull request with the GitHub CLI and deletes its branch.
+func mergePR(ctx context.Context, url string) error {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return errors.New("the GitHub CLI (gh) is not installed on this worker")
+	}
+	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", url, "--squash", "--delete-branch")
+	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "NO_COLOR=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh pr merge: %s", strings.TrimSpace(string(out)+" "+err.Error()))
+	}
+	return nil
 }
 
 // openPR opens a pull request with the GitHub CLI, using this machine's gh

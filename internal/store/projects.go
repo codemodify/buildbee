@@ -6,15 +6,19 @@ import (
 	"github.com/codemodify/buildbee/internal/models"
 )
 
-const projectCols = `id, name, auto_run, repo_url, default_branch, archived_at, created_at`
+const projectCols = `id, name, auto_run, merge_policy, instructions, repo_url, default_branch, archived_at, created_at`
 
 func scanProject(row interface{ Scan(...any) error }, p *models.Project) error {
-	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.RepoURL, &p.DefaultBranch, &p.ArchivedAt, &p.CreatedAt)
+	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.MergePolicy, &p.Instructions, &p.RepoURL, &p.DefaultBranch, &p.ArchivedAt, &p.CreatedAt)
 }
 
 func (s *Store) InsertProject(ctx context.Context, p models.Project) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO projects (id, name, auto_run, repo_url, default_branch, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
-		p.ID, p.Name, p.AutoRun, p.RepoURL, p.DefaultBranch, p.CreatedAt)
+	if p.MergePolicy == "" {
+		p.MergePolicy = models.MergeAuto
+	}
+	_, err := s.q.Exec(ctx, `INSERT INTO projects (id, name, auto_run, merge_policy, instructions, repo_url, default_branch, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		p.ID, p.Name, p.AutoRun, p.MergePolicy, p.Instructions, p.RepoURL, p.DefaultBranch, p.CreatedAt)
 	return mapErr(err)
 }
 
@@ -43,10 +47,11 @@ func (s *Store) ListProjects(ctx context.Context, includeArchived bool) ([]model
 	return out, rows.Err()
 }
 
-// UpdateProject writes name, auto_run, repo settings and archived_at.
+// UpdateProject writes the Project's settings and archived_at.
 func (s *Store) UpdateProject(ctx context.Context, p models.Project) error {
-	return one(s.q.Exec(ctx, `UPDATE projects SET name=$2, auto_run=$3, repo_url=$4, default_branch=$5, archived_at=$6 WHERE id=$1`,
-		p.ID, p.Name, p.AutoRun, p.RepoURL, p.DefaultBranch, p.ArchivedAt))
+	return one(s.q.Exec(ctx, `UPDATE projects SET name=$2, auto_run=$3, merge_policy=$4, instructions=$5, repo_url=$6,
+		default_branch=$7, archived_at=$8 WHERE id=$1`,
+		p.ID, p.Name, p.AutoRun, p.MergePolicy, p.Instructions, p.RepoURL, p.DefaultBranch, p.ArchivedAt))
 }
 
 // --- members ---

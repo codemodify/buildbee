@@ -131,6 +131,11 @@ func (s *Service) Tasks(ctx context.Context, projectID string) ([]models.Task, e
 	return s.st.ListTasks(ctx, projectID)
 }
 
+// TaskByBranch finds the Task whose Builder pushed branch.
+func (s *Service) TaskByBranch(ctx context.Context, branch string) (*models.Task, error) {
+	return s.st.TaskByBranch(ctx, strings.TrimSpace(branch))
+}
+
 // Task returns one Task.
 func (s *Service) Task(ctx context.Context, id string) (*models.Task, error) {
 	return s.st.GetTask(ctx, id, false)
@@ -433,8 +438,8 @@ func (w *work) handoff(ctx context.Context, proj *models.Project, task *models.T
 		title: "Task handed to you: " + t.Title, body: noteText(note), href: href(task.ProjectID, "tasks", task.ID)}); err != nil {
 		return nil, nil, err
 	}
-	if to.Kind == models.KindBot && strings.EqualFold(to.Role, models.RoleBuilder) && (autorun || proj.AutoRun) {
-		run, err := w.createRun(ctx, &t, to, "", by)
+	if to.Kind == models.KindBot && worksOnTasks(to.Role) && (autorun || proj.AutoRun) {
+		run, err := w.createRun(ctx, proj, &t, to, "", "", by)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -444,6 +449,15 @@ func (w *work) handoff(ctx context.Context, proj *models.Project, task *models.T
 }
 
 func noteText(s string) string { return truncate(s, 500) }
+
+// worksOnTasks reports whether a Bot with role runs on the Tasks handed to it.
+func worksOnTasks(role string) bool {
+	switch strings.ToLower(role) {
+	case models.RoleScout, models.RoleBuilder, models.RoleSentry:
+		return true
+	}
+	return false
+}
 
 // CompletedHandoff is a completed Handoff and the Decision it opened, if any.
 type CompletedHandoff struct {

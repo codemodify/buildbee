@@ -180,11 +180,20 @@ func (f *fakeAgent) work(prompt string) any {
 		{"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": status,
 			"content": []map[string]any{{"type": "content", "content": map[string]string{"type": "text", "text": result}}}},
 		{"sessionUpdate": "usage_update", "used": 1200, "size": 200000},
-		chunk("Done.\n"),
+		chunk(fakeClosing(prompt)),
 	} {
 		if !update(u) {
 			return cancelled
 		}
 	}
 	return map[string]string{"stopReason": "end_turn"}
+}
+
+// fakeClosing is the fake agent's last message; asked for a verdict, it
+// approves, so demos run through review.
+func fakeClosing(prompt string) string {
+	if strings.Contains(prompt, "VERDICT: APPROVE") {
+		return "Done.\nVERDICT: APPROVE\n"
+	}
+	return "Done.\n"
 }

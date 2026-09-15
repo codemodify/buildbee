@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -35,6 +36,10 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 	case errors.As(err, &tooBig):
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
+	case errors.Is(err, context.Canceled):
+		// The client went away (a worker stopping a Run, a closed tab);
+		// nobody reads this answer and nothing is wrong with the Server.
+		w.WriteHeader(499)
 	default:
 		s.log.Error("request failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})

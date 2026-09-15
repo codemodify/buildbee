@@ -49,9 +49,20 @@ func (a *api) heartbeat(ctx context.Context, runID string) (*models.Run, error) 
 	return &r, err
 }
 
-func (a *api) updateRun(ctx context.Context, runID string, status models.RunStatus, detail string) error {
-	_, err := a.do(ctx, http.MethodPatch, "/v1/runs/"+runID, map[string]string{"status": string(status), "detail": detail}, nil)
+func (a *api) report(ctx context.Context, runID string, status models.RunStatus, o outcome) error {
+	_, err := a.do(ctx, http.MethodPatch, "/v1/runs/"+runID, map[string]string{"status": string(status), "detail": truncate(o.detail, 2000),
+		"summary": o.summary, "branch": o.branch, "pr_url": o.prURL}, nil)
 	return err
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && s[n]&0xC0 == 0x80 {
+		n--
+	}
+	return s[:n] + "…"
 }
 
 func (a *api) event(ctx context.Context, runID, kind string, payload map[string]any) error {

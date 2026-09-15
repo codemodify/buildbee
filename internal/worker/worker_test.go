@@ -283,3 +283,16 @@ func TestRunTimeoutFailsTheRun(t *testing.T) {
 		t.Fatalf("run: %+v", got)
 	}
 }
+
+func TestFinalReply(t *testing.T) {
+	for in, want := range map[string]string{
+		"Plan: do it.":       "Plan: do it.",
+		"[tool] Read\nDone.": "Done.",
+		"Thinking.\n[tool] Read\nx\n[tool] Edit\n\nAll set.\n": "All set.",
+		"[tool] Edit": "",
+	} {
+		if got := finalReply(in); got != want {
+			t.Errorf("finalReply(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

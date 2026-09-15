@@ -282,14 +282,11 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) patchRun(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Status string `json:"status"`
-		Detail string `json:"detail"`
-	}
+	var in core.RunReport
 	if !s.decode(w, r, &in) {
 		return
 	}
-	run, err := s.core.UpdateRun(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Status, in.Detail)
+	run, err := s.core.ReportRun(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
 	respond(s, w, http.StatusOK, run, err)
 }
 
@@ -422,11 +419,15 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Status      string `json:"status"`
 		ExternalURL string `json:"external_url"`
+		Branch      string `json:"branch"`
 		CheckRun    *struct {
 			Name       string `json:"name"`
 			Status     string `json:"status"`
 			Conclusion string `json:"conclusion"`
 			HTMLURL    string `json:"html_url"`
+			CheckSuite struct {
+				HeadBranch string `json:"head_branch"`
+			} `json:"check_suite"`
 		} `json:"check_run"`
 		ClientPayload *struct {
 			TaskID string `json:"task_id"`
@@ -455,12 +456,23 @@ func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
 		if in.ExternalURL == "" {
 			in.ExternalURL = cr.HTMLURL
 		}
+		if in.Branch == "" {
+			in.Branch = cr.CheckSuite.HeadBranch
+		}
+	}
+	if in.TaskID == "" && in.Branch != "" { // CI on a branch a Builder pushed
+		t, err := s.core.TaskByBranch(r.Context(), in.Branch)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		in.TaskID = t.ID
 	}
 	if in.Name == "" {
 		in.Name = "pipeline"
 	}
 	if in.TaskID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_id is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_id or branch is required"})
 		return
 	}
 	p, err := s.core.RecordPipeline(r.Context(), core.System("github"), in.TaskID, core.NewPipeline{
