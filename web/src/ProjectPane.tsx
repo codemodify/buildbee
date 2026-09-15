@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "./api";
+import { useMe } from "./me";
 import { Empty, formatError, renderMentions } from "./ui";
 import type {
+  Activity,
   Channel,
   Decision,
   Member,
@@ -44,9 +46,7 @@ export function ProjectPane({
   const [memberKind, setMemberKind] = useState("human");
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [handoffRole, setHandoffRole] = useState("scout");
-  const [activity, setActivity] = useState<
-    { id: string; type: string; payload: Record<string, unknown>; created_at: string }[]
-  >([]);
+  const [activity, setActivity] = useState<Activity[]>([]);
   const [assigneeId, setAssigneeId] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
   const [toast, setToast] = useState("");
@@ -57,20 +57,19 @@ export function ProjectPane({
     return channels[0];
   }, [channels, channelId]);
 
-  const human = members.find((m) => m.kind === "human");
+  const me = useMe();
   const bots = members.filter((m) => m.kind === "bot");
 
   async function loadProject() {
     const p = await api.getProject(projectId);
     setProject(p);
     const m = await api.listMembers(projectId);
-    const me = m.items.find((x) => x.kind === "human");
     const [c, t, d, rts, act] = await Promise.all([
       api.listChannels(projectId),
       api.listTasks(projectId),
       api.listDecisions(
         projectId,
-        mineOnly && me?.id ? { mine: true, memberId: me.id } : undefined,
+        mineOnly ? { mine: true } : undefined,
       ),
       api.listRoutines(projectId),
       api.listActivity(projectId),
@@ -110,9 +109,9 @@ export function ProjectPane({
 
   async function send(e: FormEvent) {
     e.preventDefault();
-    if (!activeChannel || !human || !body.trim()) return;
+    if (!activeChannel || !me || !body.trim()) return;
     try {
-      await api.postMessage(activeChannel.id, body.trim(), human.id);
+      await api.postMessage(activeChannel.id, body.trim());
       setBody("");
       const data = await api.listMessages(activeChannel.id);
       setMessages(data.items);
@@ -479,9 +478,9 @@ export function ProjectPane({
             <h2 className="text-sm font-medium text-bb-muted">Activity</h2>
             <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-xs text-bb-muted">
               {activity.map((a) => (
-                <li key={a.id}>
-                  <span className="text-bb-accent">{a.type}</span>{" "}
-                  {a.payload?.action ? String(a.payload.action) : ""}{" "}
+                <li key={a.seq}>
+                  <span className="text-bb-fg">{a.actor}</span>{" "}
+                  <span className="text-bb-accent">{a.type}</span> {a.action}{" "}
                   {a.payload?.title ? String(a.payload.title) : ""}
                   {a.payload?.name ? String(a.payload.name) : ""}
                 </li>

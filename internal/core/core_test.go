@@ -1,0 +1,601 @@
+package core
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/codemodify/buildbee/internal/models"
+	"github.com/codemodify/buildbee/internal/store"
+	"github.com/codemodify/buildbee/internal/testdb"
+)
+
+func TestMain(m *testing.M) { testdb.Main(m) }
+
+// recorder is a Publisher that keeps what was published.
+type recorder struct {
+	mu     sync.Mutex
+	events []Event
+}
+
+func (r *recorder) Publish(e Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, e)
+}
+
+func (r *recorder) topic(prefix string) []Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []Event
+	for _, e := range r.events {
+		if strings.HasPrefix(e.Topic, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+type fixture struct {
+	t   *testing.T
+	ctx context.Context
+	s   *Service
+	pub *recorder
+}
+
+func newFixture(t *testing.T) *fixture {
+	pub := &recorder{}
+	return &fixture{t: t, ctx: context.Background(), s: New(store.New(testdb.New(t)), pub, Options{}), pub: pub}
+}
+
+func (f *fixture) person(name string) Actor {
+	f.t.Helper()
+	p, err := f.s.Hello(f.ctx, name)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return Actor{PersonID: p.ID, Name: p.Name}
+}
+
+func (f *fixture) project(a Actor, name string) *models.ProjectBundle {
+	f.t.Helper()
+	p, err := f.s.CreateProject(f.ctx, a, name, false)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return p
+}
+
+func (f *fixture) must(err error) {
+	f.t.Helper()
+	if err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func bot(p *models.ProjectBundle, role string) *models.Member {
+	return models.MemberByRole(p.Members, role)
+}
+
+func (f *fixture) memberOf(projectID string, a Actor) *models.Member {
+	f.t.Helper()
+	m, err := f.s.st.MemberForPerson(f.ctx, projectID, a.PersonID)
+	f.must(err)
+	return m
+}
+
+func (f *fixture) inbox(a Actor) []models.Notification {
+	f.t.Helper()
+	in, err := f.s.Notifications(f.ctx, a, false, store.Page{})
+	f.must(err)
+	return in.Items
+}
+
+func (f *fixture) activity(projectID string) []models.Activity {
+	f.t.Helper()
+	items, _, err := f.s.Activity(f.ctx, projectID, "", store.Page{Limit: 1000})
+	f.must(err)
+	return items
+}
+
+// --- people and projects ---
+
+func TestHelloIsCaseInsensitiveAndValidated(t *testing.T) {
+	f := newFixture(t)
+	a, _ := f.s.Hello(f.ctx, "Ada")
+	b, _ := f.s.Hello(f.ctx, "  ada ")
+	if a.ID != b.ID || b.Name != "Ada" {
+		t.Fatalf("same person expected: %+v %+v", a, b)
+	}
+	for _, bad := range []string{"", "   ", strings.Repeat("x", 61), "tab\there"} {
+		if _, err := f.s.Hello(f.ctx, bad); !errors.Is(err, store.ErrInvalid) {
+			t.Fatalf("%q: got %v", bad, err)
+		}
+	}
+}
+
+func TestCreateProjectSeedsOwnerBotsChannelAndRoutine(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Rocket")
+	if len(p.Members) != 5 || p.Members[0].PersonID != ada.PersonID || p.Members[0].Role != models.RoleOwner {
+		t.Fatalf("members: %+v", p.Members)
+	}
+	for _, role := range []string{models.RoleScout, models.RoleBuilder, models.RoleSentry, models.RolePulse} {
+		if b := bot(p, role); b == nil || b.Kind != models.KindBot {
+			t.Fatalf("missing bot %s", role)
+		}
+	}
+	if len(p.Channels) != 1 || p.Channels[0].Name != "general" {
+		t.Fatalf("channels: %+v", p.Channels)
+	}
+	rs, err := f.s.Routines(f.ctx, p.ID)
+	f.must(err)
+	if len(rs) != 1 || rs[0].Enabled || rs[0].BotMemberID != bot(p, models.RolePulse).ID {
+		t.Fatalf("routines: %+v", rs)
+	}
+	acts := f.activity(p.ID)
+	if len(acts) != 1 || acts[0].Action != "created" || acts[0].ActorMemberID != p.Members[0].ID || acts[0].Actor != "Ada" {
+		t.Fatalf("activity: %+v", acts)
+	}
+}
+
+func TestSecondPersonIsAttributedToThemselves(t *testing.T) {
+	f := newFixture(t)
+	ada, bob := f.person("Ada"), f.person("Bob")
+	p := f.project(ada, "Shared")
+	posted, err := f.s.PostMessage(f.ctx, bob, p.Channels[0].ID, "hello from bob")
+	f.must(err)
+	bobMember := f.memberOf(p.ID, bob)
+	if posted.MemberID != bobMember.ID || bobMember.Role != models.RoleMember {
+		t.Fatalf("message by %s, bob is %+v", posted.MemberID, bobMember)
+	}
+	acts := f.activity(p.ID)
+	if acts[0].Type != models.TypeMember || acts[0].Action != "joined" || acts[0].ActorMemberID != bobMember.ID {
+		t.Fatalf("bob joining must be recorded as bob: %+v", acts[0])
+	}
+}
+
+func TestAnonymousCannotPost(t *testing.T) {
+	f := newFixture(t)
+	p := f.project(f.person("Ada"), "P")
+	if _, err := f.s.PostMessage(f.ctx, System("anonymous"), p.Channels[0].ID, "hi"); !errors.Is(err, ErrNoActor) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestArchivedProjectIsReadOnly(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Old")
+	yes, no := true, false
+	_, err := f.s.UpdateProject(f.ctx, ada, p.ID, ProjectPatch{Archived: &yes})
+	f.must(err)
+	if _, err := f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "hi"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("post to archived: %v", err)
+	}
+	if _, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "x"}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("task in archived: %v", err)
+	}
+	list, _ := f.s.Projects(f.ctx, false)
+	if len(list) != 0 {
+		t.Fatalf("archived project listed: %+v", list)
+	}
+	_, err = f.s.UpdateProject(f.ctx, ada, p.ID, ProjectPatch{Archived: &no})
+	f.must(err)
+	if _, err := f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "back"); err != nil {
+		t.Fatalf("unarchived project must accept writes: %v", err)
+	}
+}
+
+// --- messages, mentions, tasks, handoffs ---
+
+func TestMentioningABotCreatesATaskHandedToIt(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "M")
+	posted, err := f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "@Builder add rate limiting to /login\nuse 10 req/min")
+	f.must(err)
+	builder := bot(p, models.RoleBuilder)
+	if len(posted.Tasks) != 1 || len(posted.Handoffs) != 1 {
+		t.Fatalf("posted: %+v", posted)
+	}
+	task := posted.Tasks[0]
+	if task.AssigneeMemberID != builder.ID || task.Status != models.TaskInProgress ||
+		!strings.Contains(task.Body, "10 req/min") || task.Title != "add rate limiting to /login" {
+		t.Fatalf("task: %+v", task)
+	}
+	if h := posted.Handoffs[0]; h.FromMemberID != posted.MemberID || h.ToMemberID != builder.ID {
+		t.Fatalf("handoff: %+v", h)
+	}
+	if evs := f.pub.topic("channel:" + p.Channels[0].ID); len(evs) != 1 || evs[0].Cursor != posted.Seq {
+		t.Fatalf("channel events: %+v", evs)
+	}
+}
+
+func TestMentionTitle(t *testing.T) {
+	for in, want := range map[string]string{
+		"@Builder add caching":                "add caching",
+		"@Scout, @Builder: triage this\nmore": "triage this",
+		"@Builder":                            "Request from #general",
+		"please @Builder look":                "please @Builder look",
+	} {
+		if got := mentionTitle(in, "general"); got != want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestMentioningAPersonNotifiesThemUnlessMuted(t *testing.T) {
+	f := newFixture(t)
+	ada, grace := f.person("Ada"), f.person("Grace")
+	p := f.project(ada, "M")
+	_, err := f.s.Join(f.ctx, grace, p.ID)
+	f.must(err)
+	_, err = f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "@Grace can you look?")
+	f.must(err)
+	if n := f.inbox(grace); len(n) != 1 || n[0].Kind != "mention" || !strings.Contains(n[0].Title, "Ada mentioned you") {
+		t.Fatalf("grace inbox: %+v", n)
+	}
+	mute := true
+	_, err = f.s.SetPreferences(f.ctx, grace, PreferencesPatch{MuteMentions: &mute})
+	f.must(err)
+	_, err = f.s.PostMessage(f.ctx, ada, p.Channels[0].ID, "@Grace again")
+	f.must(err)
+	if n := f.inbox(grace); len(n) != 1 {
+		t.Fatalf("muted mention delivered: %+v", n)
+	}
+	if n := f.inbox(ada); len(n) != 0 {
+		t.Fatalf("author notified: %+v", n)
+	}
+}
+
+func TestCreateTaskHandsToScoutByDefault(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "T")
+	tc, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Ship it", Body: "details"})
+	f.must(err)
+	if tc.Handoff == nil || tc.Handoff.ToMemberID != bot(p, models.RoleScout).ID || tc.Status != models.TaskInProgress {
+		t.Fatalf("task: %+v", tc)
+	}
+	none, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Later", HandoffRole: "none"})
+	f.must(err)
+	if none.Handoff != nil || none.Status != models.TaskOpen {
+		t.Fatalf("handoff=none: %+v", none)
+	}
+	if _, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "x", HandoffRole: "astronaut"}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("unknown role: %v", err)
+	}
+}
+
+func TestHandoffToBuilderWithAutorunStartsARun(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "R")
+	tc, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Build", HandoffRole: "none"})
+	f.must(err)
+	h, err := f.s.CreateHandoff(f.ctx, ada, tc.ID, NewHandoff{ToRole: "builder", Note: "go", AutoRun: true})
+	f.must(err)
+	if h.Run == nil || h.Run.Status != models.RunPending || h.Run.BotMemberID != bot(p, models.RoleBuilder).ID {
+		t.Fatalf("run: %+v", h.Run)
+	}
+	evs, _, err := f.s.RunEvents(f.ctx, h.Run.ID, 0, 0)
+	f.must(err)
+	if len(evs) != 1 || evs[0].Kind != models.RunEventStatus {
+		t.Fatalf("a queued Run starts with a status event: %+v", evs)
+	}
+	noRun, err := f.s.CreateHandoff(f.ctx, ada, tc.ID, NewHandoff{ToRole: "builder"})
+	f.must(err)
+	if noRun.Run != nil {
+		t.Fatal("no autorun, no Run")
+	}
+}
+
+func TestHandoffReopensAClosedTask(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "R")
+	tc, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Done thing", HandoffRole: "none"})
+	f.must(err)
+	done := "done"
+	_, err = f.s.UpdateTask(f.ctx, ada, tc.ID, TaskPatch{Status: &done})
+	f.must(err)
+	h, err := f.s.CreateHandoff(f.ctx, ada, tc.ID, NewHandoff{ToRole: "scout"})
+	f.must(err)
+	if h.Task.Status != models.TaskInProgress {
+		t.Fatalf("status %s", h.Task.Status)
+	}
+	acts := f.activity(p.ID)
+	if acts[0].Type != models.TypeHandoff || acts[0].Payload["reopened_from"] != "done" {
+		t.Fatalf("reopening must be visible in Activity: %+v", acts[0])
+	}
+}
+
+func TestTaskStatusVocabulary(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "S")
+	tc, _ := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "x", HandoffRole: "none"})
+	bad := "Done "
+	if _, err := f.s.UpdateTask(f.ctx, ada, tc.ID, TaskPatch{Status: &bad}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestCompleteHandoffOnceAndScoutDecision(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "D")
+	tc, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Is caching worth it?"})
+	f.must(err)
+	done, err := f.s.CompleteHandoff(f.ctx, ada, tc.Handoff.ID, false)
+	f.must(err)
+	if done.Decision == nil || done.Decision.TaskID != tc.ID || len(done.Decision.Options) != 2 {
+		t.Fatalf("ambiguous Task after Scout triage opens a linked Decision: %+v", done.Decision)
+	}
+	if _, err := f.s.CompleteHandoff(f.ctx, ada, tc.Handoff.ID, false); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("second completion: %v", err)
+	}
+	hs, _ := f.s.Handoffs(f.ctx, tc.ID)
+	if len(hs) != 1 || hs[0].Status != models.HandoffComplete || hs[0].CompletedAt == nil {
+		t.Fatalf("handoffs: %+v", hs)
+	}
+}
+
+// --- decisions ---
+
+func TestDecisionMemoryAndNotifications(t *testing.T) {
+	f := newFixture(t)
+	ada, bob := f.person("Ada"), f.person("Bob")
+	p := f.project(ada, "Mem")
+	_, err := f.s.Join(f.ctx, bob, p.ID)
+	f.must(err)
+
+	d, err := f.s.CreateDecision(f.ctx, ada, p.ID, NewDecision{Prompt: "Use Postgres?", Options: []string{"yes", "no"}})
+	f.must(err)
+	if n := f.inbox(bob); len(n) != 1 || n[0].Kind != "decision" {
+		t.Fatalf("bob should be asked: %+v", n)
+	}
+	if n := f.inbox(ada); len(n) != 0 {
+		t.Fatalf("the asker is not notified: %+v", n)
+	}
+	answered, err := f.s.AnswerDecision(f.ctx, bob, d.ID, "yes")
+	f.must(err)
+	if answered.AnsweredByMemberID != f.memberOf(p.ID, bob).ID {
+		t.Fatalf("answered by: %+v", answered)
+	}
+	if _, err := f.s.AnswerDecision(f.ctx, ada, d.ID, "no"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("re-answer: %v", err)
+	}
+	again, err := f.s.CreateDecision(f.ctx, ada, p.ID, NewDecision{Prompt: "use postgres"})
+	f.must(err)
+	if !again.Reused || again.Answer != "yes" || again.Fingerprint != "use postgres" {
+		t.Fatalf("memory not reused: %+v", again)
+	}
+	if n := f.inbox(bob); len(n) != 1 {
+		t.Fatalf("a remembered answer must not ask anyone: %+v", n)
+	}
+	open, err := f.s.Decisions(f.ctx, ada, p.ID, DecisionFilter{Open: true})
+	f.must(err)
+	if len(open) != 0 {
+		t.Fatalf("open decisions: %+v", open)
+	}
+}
+
+func TestDecisionForAnAssigneeNotifiesOnlyThem(t *testing.T) {
+	f := newFixture(t)
+	ada, bob, cy := f.person("Ada"), f.person("Bob"), f.person("Cy")
+	p := f.project(ada, "A")
+	f.s.Join(f.ctx, bob, p.ID)
+	f.s.Join(f.ctx, cy, p.ID)
+	_, err := f.s.CreateDecision(f.ctx, ada, p.ID, NewDecision{Prompt: "Bob, merge?", AssigneeMemberID: f.memberOf(p.ID, bob).ID})
+	f.must(err)
+	if len(f.inbox(bob)) != 1 || len(f.inbox(cy)) != 0 {
+		t.Fatal("only the assignee is notified")
+	}
+	mine, _ := f.s.Decisions(f.ctx, cy, p.ID, DecisionFilter{Mine: true})
+	if len(mine) != 0 {
+		t.Fatalf("cy's decisions: %+v", mine)
+	}
+}
+
+// --- runs ---
+
+func TestRunLifecycle(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Runs")
+	tc, _ := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "x", HandoffRole: "builder"})
+	run, err := f.s.CreateRun(f.ctx, ada, tc.ID, "")
+	f.must(err)
+	if run.BotMemberID != bot(p, models.RoleBuilder).ID {
+		t.Fatalf("run defaults to the assigned Bot: %+v", run)
+	}
+	worker := System("worker w1")
+	if _, err := f.s.UpdateRun(f.ctx, worker, run.ID, "succeeded", ""); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("pending -> succeeded skips running: %v", err)
+	}
+	r, err := f.s.UpdateRun(f.ctx, worker, run.ID, "running", "sandbox up")
+	f.must(err)
+	if r.StartedAt == nil {
+		t.Fatal("started_at")
+	}
+	_, err = f.s.AppendRunEvent(f.ctx, run.ID, "token", map[string]any{"text": "hi"})
+	f.must(err)
+	r, err = f.s.UpdateRun(f.ctx, worker, run.ID, "succeeded", "exit 0")
+	f.must(err)
+	if r.FinishedAt == nil {
+		t.Fatal("finished_at")
+	}
+	if _, err := f.s.UpdateRun(f.ctx, worker, run.ID, "running", ""); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("finished runs cannot change: %v", err)
+	}
+	if _, err := f.s.AppendRunEvent(f.ctx, run.ID, "token", nil); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("finished runs take no events: %v", err)
+	}
+	if _, err := f.s.UpdateRun(f.ctx, worker, run.ID, "finished", ""); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("unknown status: %v", err)
+	}
+	evs, _, _ := f.s.RunEvents(f.ctx, run.ID, 0, 0)
+	for i, ev := range evs {
+		if ev.Seq != i+1 {
+			t.Fatalf("seq must be contiguous: %+v", evs)
+		}
+	}
+	for _, a := range f.activity(p.ID) {
+		if a.Type == models.TypeRun && a.Action == "succeeded" && a.ActorMemberID != bot(p, models.RoleBuilder).ID {
+			t.Fatalf("worker changes are the Bot's: %+v", a)
+		}
+	}
+}
+
+func TestArtifactListingsOmitBodies(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "A")
+	tc, _ := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "x", HandoffRole: "none"})
+	a, err := f.s.CreateArtifact(f.ctx, ada, tc.ID, NewArtifact{Kind: "log", Name: "acp.log", Body: "hello world"})
+	f.must(err)
+	list, _ := f.s.Artifacts(f.ctx, tc.ID)
+	if len(list) != 1 || list[0].Body != "" || list[0].Size != 11 {
+		t.Fatalf("list: %+v", list)
+	}
+	full, _ := f.s.Artifact(f.ctx, a.ID)
+	if full.Body != "hello world" {
+		t.Fatalf("get: %+v", full)
+	}
+}
+
+// --- pipelines, issues, routines ---
+
+func TestPipelineFailureNotifiesEveryone(t *testing.T) {
+	f := newFixture(t)
+	ada, bob := f.person("Ada"), f.person("Bob")
+	p := f.project(ada, "CI")
+	f.s.Join(f.ctx, bob, p.ID)
+	tc, _ := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "x", HandoffRole: "none"})
+	_, err := f.s.RecordPipeline(f.ctx, System("github"), tc.ID, NewPipeline{Name: "test", Status: "success"})
+	f.must(err)
+	if len(f.inbox(ada)) != 0 {
+		t.Fatal("success notifies nobody")
+	}
+	_, err = f.s.RecordPipeline(f.ctx, System("github"), tc.ID, NewPipeline{Name: "test", Status: "timed_out"})
+	f.must(err)
+	if len(f.inbox(ada)) != 1 || len(f.inbox(bob)) != 1 {
+		t.Fatal("failure notifies every Person")
+	}
+	if _, err := f.s.RecordPipeline(f.ctx, System("github"), tc.ID, NewPipeline{Name: "t", Status: "banana"}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("unknown status: %v", err)
+	}
+}
+
+func TestIssueWebhookUpserts(t *testing.T) {
+	f := newFixture(t)
+	p := f.project(f.person("Ada"), "Issues")
+	a, err := f.s.IssueWebhook(f.ctx, p.ID, 7, "First title", "https://x/7")
+	f.must(err)
+	b, err := f.s.IssueWebhook(f.ctx, p.ID, 7, "Edited title", "https://x/7")
+	f.must(err)
+	if a.ID != b.ID || b.Title != "Edited title" {
+		t.Fatalf("%+v %+v", a, b)
+	}
+	if _, err := f.s.SyncIssues(f.ctx, f.person("Ada"), p.ID, "", false); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("sync without GitHub: %v", err)
+	}
+}
+
+func TestRoutineFiresOnceAcrossConcurrentTicks(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Pulse")
+	rs, _ := f.s.Routines(f.ctx, p.ID)
+	enabled := true
+	_, err := f.s.UpdateRoutine(f.ctx, ada, rs[0].ID, RoutinePatch{Enabled: &enabled})
+	f.must(err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); f.s.TickRoutines(f.ctx) }()
+	}
+	wg.Wait()
+	tasks, _ := f.s.Tasks(f.ctx, p.ID)
+	if len(tasks) != 1 || !strings.HasPrefix(tasks[0].Title, "Routine: morning-digest") ||
+		tasks[0].AssigneeMemberID != bot(p, models.RolePulse).ID {
+		t.Fatalf("concurrent ticks fired %d times: %+v", len(tasks), tasks)
+	}
+	msgs, _, _ := f.s.Messages(f.ctx, p.Channels[0].ID, store.Page{})
+	if len(msgs) != 1 || msgs[0].MemberID != bot(p, models.RolePulse).ID {
+		t.Fatalf("digest message: %+v", msgs)
+	}
+	if n := f.inbox(ada); len(n) != 1 || n[0].Kind != "routine" {
+		t.Fatalf("inbox: %+v", n)
+	}
+	f.s.TickRoutines(f.ctx) // not due again for 24h
+	tasks, _ = f.s.Tasks(f.ctx, p.ID)
+	if len(tasks) != 1 {
+		t.Fatal("fired before its interval")
+	}
+}
+
+func TestRoutineScheduleValidation(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "S")
+	if _, err := f.s.CreateRoutine(f.ctx, ada, p.ID, NewRoutine{Name: "x", Schedule: "5s"}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("sub-minute schedule: %v", err)
+	}
+	if !Due(models.Routine{Enabled: true}, time.Now()) {
+		t.Fatal("never fired is due")
+	}
+}
+
+// --- events and replay ---
+
+func TestEventsArePublishedOnlyAfterCommit(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "E")
+	published := len(f.pub.topic("project:" + p.ID))
+	// The Task and its Activity are written, then the unknown handoff role
+	// fails the transaction: nothing may be published or persisted.
+	_, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "doomed", HandoffRole: "astronaut"})
+	if !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("got %v", err)
+	}
+	if got := len(f.pub.topic("project:" + p.ID)); got != published {
+		t.Fatalf("a rolled-back transaction published %d events", got-published)
+	}
+	if tasks, _ := f.s.Tasks(f.ctx, p.ID); len(tasks) != 0 {
+		t.Fatalf("rolled-back Task persisted: %+v", tasks)
+	}
+}
+
+func TestReplayCatchesUpEachTopic(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Replay")
+	ch := p.Channels[0].ID
+	first, _ := f.s.PostMessage(f.ctx, ada, ch, "one")
+	f.s.PostMessage(f.ctx, ada, ch, "two")
+	f.s.PostMessage(f.ctx, ada, ch, "three")
+	evs, err := f.s.Replay(f.ctx, "channel:"+ch, first.Seq)
+	f.must(err)
+	if len(evs) != 2 || evs[0].Data.(Posted).Body != "two" || evs[1].Cursor <= evs[0].Cursor {
+		t.Fatalf("channel replay: %+v", evs)
+	}
+	acts, err := f.s.Replay(f.ctx, "project:"+p.ID, 0)
+	f.must(err)
+	for i := 1; i < len(acts); i++ {
+		if acts[i].Cursor <= acts[i-1].Cursor {
+			t.Fatal("project replay must be oldest first")
+		}
+	}
+	if _, err := f.s.Replay(f.ctx, "bogus:1", 0); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("unknown topic: %v", err)
+	}
+}

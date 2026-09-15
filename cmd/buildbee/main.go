@@ -80,18 +80,17 @@ func runTask(args []string, c *client.Client) error {
 
 func runHandoff(args []string, c *client.Client) error {
 	if len(args) == 0 || args[0] != "create" {
-		return fmt.Errorf("usage: buildbee handoff create --task ID --from ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]")
+		return fmt.Errorf("usage: buildbee handoff create --task ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]")
 	}
 	task := flagValue(args[1:], "task")
-	from := flagValue(args[1:], "from")
 	to := flagValue(args[1:], "to")
 	toRole := flagValue(args[1:], "to-role")
 	note := flagValue(args[1:], "note")
 	autorun := hasFlag(args[1:], "autorun")
-	if task == "" || from == "" || (to == "" && toRole == "") {
-		return fmt.Errorf("usage: buildbee handoff create --task ID --from ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]")
+	if task == "" || (to == "" && toRole == "") {
+		return fmt.Errorf("usage: buildbee handoff create --task ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]")
 	}
-	out, err := c.CreateHandoff(task, from, to, note, toRole, autorun)
+	out, err := c.CreateHandoff(task, to, note, toRole, autorun)
 	if err != nil {
 		return err
 	}
@@ -213,13 +212,14 @@ Usage:
   buildbee version
   buildbee project create --name NAME
   buildbee task list --project ID
-  buildbee handoff create --task ID --from ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]
+  buildbee handoff create --task ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]
   buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake] [--acp] [--agent claude|codex|fake]
   buildbee routine list --project ID
   buildbee routine run --id ID
 
 Environment:
   BUILDBEE_URL           Server base URL (default http://127.0.0.1:8080)
+  BUILDBEE_AS            your name in BuildBee (default: your login name)
   BUILDBEE_WORKER_URL   Worker (default http://127.0.0.1:8090)
 `)
 }

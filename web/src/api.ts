@@ -1,6 +1,25 @@
-export function runEventsWsUrl(runId: string): string {
+import type {
+  Activity,
+  Artifact,
+  Channel,
+  Decision,
+  Member,
+  Message,
+  Notification,
+  Person,
+  Preferences,
+  Project,
+  Routine,
+  Run,
+  RunEvent,
+  Task,
+  TaskDetail,
+} from "./types";
+
+export function runEventsWsUrl(runId: string, after = 0): string {
   const u = new URL(`/v1/runs/${runId}/ws`, window.location.origin);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  if (after > 0) u.searchParams.set("after", String(after));
   return u.toString();
 }
 
@@ -17,165 +36,78 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return text ? (JSON.parse(text) as T) : ({} as T);
 }
 
+const post = (body: unknown = {}) => ({ method: "POST", body: JSON.stringify(body) });
+const patch = (body: unknown) => ({ method: "PATCH", body: JSON.stringify(body) });
+
+type Items<T> = { items: T[] };
+type Page<T> = { items: T[]; has_more: boolean };
+
 export const api = {
-  listProjects: () =>
-    request<{ items: { id: string; name: string }[] }>("/v1/projects"),
-  createProject: (name: string) =>
-    request<import("./types").Project>("/v1/projects", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
-  getProject: (id: string) =>
-    request<import("./types").Project>(`/v1/projects/${id}`),
-  updateProject: (id: string, body: { auto_run: boolean }) =>
-    request<import("./types").Project>(`/v1/projects/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
-  listMembers: (projectId: string) =>
-    request<{ items: import("./types").Member[] }>(
-      `/v1/projects/${projectId}/members`,
-    ),
-  addMember: (
-    projectId: string,
-    body: { display_name: string; kind: string },
-  ) =>
-    request(`/v1/projects/${projectId}/members`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  listChannels: (projectId: string) =>
-    request<{ items: import("./types").Channel[] }>(
-      `/v1/projects/${projectId}/channels`,
-    ),
+  // who is using this browser
+  me: () => request<{ person: Person | null }>("/v1/me"),
+  setMe: (name: string) => request<{ person: Person }>("/v1/me", post({ name })),
+  forgetMe: () => request<unknown>("/v1/me", { method: "DELETE" }),
+
+  listProjects: () => request<Items<Project>>("/v1/projects"),
+  createProject: (name: string) => request<Project>("/v1/projects", post({ name })),
+  getProject: (id: string) => request<Project>(`/v1/projects/${id}`),
+  updateProject: (id: string, body: { auto_run?: boolean; name?: string; archived?: boolean }) =>
+    request<Project>(`/v1/projects/${id}`, patch(body)),
+  listMembers: (projectId: string) => request<Items<Member>>(`/v1/projects/${projectId}/members`),
+  addMember: (projectId: string, body: { display_name: string; kind: string; role?: string }) =>
+    request<Member>(`/v1/projects/${projectId}/members`, post(body)),
+  listChannels: (projectId: string) => request<Items<Channel>>(`/v1/projects/${projectId}/channels`),
   createChannel: (projectId: string, name: string) =>
-    request<import("./types").Channel>(`/v1/projects/${projectId}/channels`, {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
-  listMessages: (channelId: string) =>
-    request<{ items: import("./types").Message[] }>(
-      `/v1/channels/${channelId}/messages`,
-    ),
-  postMessage: (channelId: string, body: string, memberId: string) =>
-    request<import("./types").Message>(`/v1/channels/${channelId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ body, member_id: memberId }),
-    }),
-  listTasks: (projectId: string) =>
-    request<{ items: import("./types").Task[] }>(
-      `/v1/projects/${projectId}/tasks`,
-    ),
+    request<Channel>(`/v1/projects/${projectId}/channels`, post({ name })),
+
+  listMessages: (channelId: string) => request<Page<Message>>(`/v1/channels/${channelId}/messages`),
+  postMessage: (channelId: string, body: string) =>
+    request<Message>(`/v1/channels/${channelId}/messages`, post({ body })),
+
+  listTasks: (projectId: string) => request<Items<Task>>(`/v1/projects/${projectId}/tasks`),
   createTask: (projectId: string, title: string, handoffRole = "scout") =>
-    request<import("./types").Task & { handoff?: { id: string } }>(
-      `/v1/projects/${projectId}/tasks?handoff=${encodeURIComponent(handoffRole)}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ title, handoff_role: handoffRole }),
-      },
-    ),
-  updateTask: (taskId: string, status: string) =>
-    request(`/v1/tasks/${taskId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    }),
-  createHandoff: (
-    taskId: string,
-    from: string,
-    to: string,
-    note: string,
-    opts?: { toRole?: string; autorun?: boolean },
-  ) => {
-    const q = opts?.autorun ? "?autorun=1" : "";
-    return request(`/v1/tasks/${taskId}/handoffs${q}`, {
-      method: "POST",
-      body: JSON.stringify({
-        from_member_id: from,
-        to_member_id: to,
-        to_role: opts?.toRole ?? "",
-        note,
-      }),
-    });
-  },
-  listDecisions: (projectId: string, opts?: { inbox?: boolean; mine?: boolean; memberId?: string }) => {
+    request<Task & { handoff?: { id: string } }>(`/v1/projects/${projectId}/tasks`, post({ title, handoff_role: handoffRole })),
+  updateTask: (taskId: string, status: string) => request<Task>(`/v1/tasks/${taskId}`, patch({ status })),
+  createHandoff: (taskId: string, note: string, opts: { toRole?: string; toMemberId?: string; autorun?: boolean }) =>
+    request(`/v1/tasks/${taskId}/handoffs`, post({
+      to_role: opts.toRole ?? "",
+      to_member_id: opts.toMemberId ?? "",
+      note,
+      autorun: Boolean(opts.autorun),
+    })),
+
+  listDecisions: (projectId: string, opts?: { open?: boolean; mine?: boolean }) => {
     const q = new URLSearchParams();
-    if (opts?.inbox) q.set("inbox", "1");
+    if (opts?.open) q.set("open", "1");
     if (opts?.mine) q.set("mine", "1");
-    if (opts?.memberId) q.set("member_id", opts.memberId);
     const suffix = q.toString() ? `?${q.toString()}` : "";
-    return request<{ items: import("./types").Decision[] }>(
-      `/v1/projects/${projectId}/decisions${suffix}`,
-    );
+    return request<Items<Decision>>(`/v1/projects/${projectId}/decisions${suffix}`);
   },
   listDecisionMemories: (projectId: string) =>
-    request<{ items: { fingerprint: string; prompt: string; answer: string }[] }>(
-      `/v1/projects/${projectId}/decisions/memories`,
-    ),
-  createDecision: (
-    projectId: string,
-    body: { prompt: string; options: string[]; recommendation: string; assignee_id?: string },
-  ) =>
-    request(`/v1/projects/${projectId}/decisions`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  answerDecision: (id: string, answer: string) =>
-    request(`/v1/decisions/${id}/answer`, {
-      method: "POST",
-      body: JSON.stringify({ answer }),
-    }),
-  startRun: (taskId: string) =>
-    request<import("./types").Run>(`/v1/tasks/${taskId}/runs`, {
-      method: "POST",
-      body: "{}",
-    }),
+    request<Items<{ fingerprint: string; prompt: string; answer: string }>>(`/v1/projects/${projectId}/decisions/memories`),
+  createDecision: (projectId: string, body: { prompt: string; options: string[]; recommendation: string; assignee_id?: string }) =>
+    request<Decision>(`/v1/projects/${projectId}/decisions`, post(body)),
+  answerDecision: (id: string, answer: string) => request<Decision>(`/v1/decisions/${id}/answer`, post({ answer })),
+
+  startRun: (taskId: string) => request<Run>(`/v1/tasks/${taskId}/runs`, post()),
   listRunEvents: (runId: string, after = 0) =>
-    request<{ items: import("./types").RunEvent[] }>(
-      `/v1/runs/${runId}/events${after > 0 ? `?after=${after}` : ""}`,
-    ),
-  getTaskDetail: (taskId: string) =>
-    request<import("./types").TaskDetail>(`/v1/tasks/${taskId}/detail`),
+    request<Page<RunEvent>>(`/v1/runs/${runId}/events${after > 0 ? `?after=${after}` : ""}`),
+  getTaskDetail: (taskId: string) => request<TaskDetail>(`/v1/tasks/${taskId}/detail`),
+  getArtifact: (id: string) => request<Artifact>(`/v1/artifacts/${id}`),
+
   syncIssues: (projectId: string) =>
-    request<{ items: import("./types").Task[]; fake?: boolean }>(
-      `/v1/projects/${projectId}/issues/sync`,
-      { method: "POST", body: "{}" },
-    ),
-  listRoutines: (projectId: string) =>
-    request<{ items: import("./types").Routine[] }>(
-      `/v1/projects/${projectId}/routines`,
-    ),
-  fireRoutine: (id: string) =>
-    request(`/v1/routines/${id}/run`, { method: "POST", body: "{}" }),
+    request<{ items: Task[]; fake?: boolean }>(`/v1/projects/${projectId}/issues/sync`, post()),
+  listRoutines: (projectId: string) => request<Items<Routine>>(`/v1/projects/${projectId}/routines`),
+  fireRoutine: (id: string) => request<Routine>(`/v1/routines/${id}/run`, post()),
   listActivity: (projectId: string, type = "") =>
-    request<{ items: { id: string; type: string; payload: Record<string, unknown>; created_at: string }[] }>(
-      `/v1/projects/${projectId}/activity${type ? `?type=${encodeURIComponent(type)}` : ""}`,
-    ),
-  listNotifications: (memberId: string, unread = false) => {
-    const q = new URLSearchParams();
-    if (memberId) q.set("member_id", memberId);
-    if (unread) q.set("unread", "1");
-    const suffix = q.toString() ? `?${q.toString()}` : "";
-    return request<{ items: import("./types").Notification[]; unread: number }>(
-      `/v1/notifications${suffix}`,
-    );
-  },
-  readNotification: (id: string) =>
-    request<import("./types").Notification>(`/v1/notifications/${id}/read`, {
-      method: "POST",
-      body: "{}",
-    }),
-  readAllNotifications: (memberId: string) =>
-    request<{ read: number }>(
-      `/v1/notifications/read-all?member_id=${encodeURIComponent(memberId)}`,
-      { method: "POST", body: "{}" },
-    ),
-  getPreferences: (memberId: string) =>
-    request<import("./types").Preferences>(
-      `/v1/me/preferences?member_id=${encodeURIComponent(memberId)}`,
-    ),
-  patchPreferences: (memberId: string, body: { mute_mentions?: boolean; mute_routines?: boolean }) =>
-    request<import("./types").Preferences>(
-      `/v1/me/preferences?member_id=${encodeURIComponent(memberId)}`,
-      { method: "PATCH", body: JSON.stringify(body) },
-    ),
+    request<Page<Activity>>(`/v1/projects/${projectId}/activity${type ? `?type=${encodeURIComponent(type)}` : ""}`),
+
+  // the inbox and preferences of whoever is using this browser
+  listNotifications: (unread = false) =>
+    request<{ items: Notification[]; unread: number; has_more: boolean }>(`/v1/me/notifications${unread ? "?unread=1" : ""}`),
+  readNotification: (id: string) => request<Notification>(`/v1/notifications/${id}/read`, post()),
+  readAllNotifications: () => request<{ read: number }>("/v1/me/notifications/read-all", post()),
+  getPreferences: () => request<Preferences>("/v1/me/preferences"),
+  patchPreferences: (body: { mute_mentions?: boolean; mute_routines?: boolean }) =>
+    request<Preferences>("/v1/me/preferences", patch(body)),
 };

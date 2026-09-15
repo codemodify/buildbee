@@ -14,7 +14,7 @@ trap '"${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
 base="http://127.0.0.1:${BUILDBEE_PORT}"
 curl -fsS "$base/healthz"
 echo
-curl -fsS -X POST "$base/v1/projects" -H 'Content-Type: application/json' -d '{"name":"smoke"}' >/dev/null
+curl -fsS -X POST "$base/v1/projects" -H 'Content-Type: application/json' -H 'X-BuildBee-As: smoke' -d '{"name":"smoke"}' >/dev/null
 curl -fsS "$base/v1/projects" | grep -q '"smoke"'
 curl -fsS "http://127.0.0.1:${BUILDBEE_WORKER_PORT}/healthz" >/dev/null
 echo "smoke ok"

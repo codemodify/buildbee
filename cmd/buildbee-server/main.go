@@ -1,4 +1,5 @@
-// Command buildbee-server runs the BuildBee Server: REST, WebSocket and the web UI.
+// Command buildbee-server runs the BuildBee Server: REST, WebSockets,
+// the Routines scheduler and the web UI.
 package main
 
 import (
@@ -12,8 +13,8 @@ import (
 	"time"
 
 	"github.com/codemodify/buildbee/internal/config"
+	"github.com/codemodify/buildbee/internal/core"
 	"github.com/codemodify/buildbee/internal/httpapi"
-	"github.com/codemodify/buildbee/internal/routines"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/codemodify/buildbee/internal/ws"
 )
@@ -35,7 +36,7 @@ func run() error {
 	defer stop()
 
 	connectCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	pool, err := store.OpenPostgres(connectCtx, cfg.DatabaseURL)
+	pool, err := store.Open(connectCtx, cfg.DatabaseURL)
 	if err == nil {
 		err = store.Migrate(connectCtx, pool)
 	}
@@ -46,8 +47,15 @@ func run() error {
 	defer pool.Close()
 	slog.Info("postgres connected; migrations applied")
 
-	st := store.NewPostgres(pool)
-	api := httpapi.NewServer(st, ws.NewHub(), httpapi.Options{
+	// The hub replays through the service and the service publishes through
+	// the hub.
+	var svc *core.Service
+	hub := ws.NewHub(func(ctx context.Context, topic string, after int64) ([]core.Event, error) {
+		return svc.Replay(ctx, topic, after)
+	}, nil)
+	svc = core.New(store.New(pool), hub, core.Options{GitHub: cfg.GitHub})
+
+	api := httpapi.NewServer(svc, hub, httpapi.Options{
 		GitHub:       cfg.GitHub,
 		WebDir:       cfg.WebDir,
 		MaxBodyBytes: cfg.MaxBodyBytes,
@@ -59,10 +67,19 @@ func run() error {
 		IdleTimeout:       2 * time.Minute,
 	}
 
-	workerDone := make(chan struct{})
+	tickerDone := make(chan struct{})
 	go func() {
-		defer close(workerDone)
-		routines.StartWorker(ctx, st, 15*time.Second)
+		defer close(tickerDone)
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				svc.TickRoutines(ctx)
+			}
+		}
 	}()
 
 	serveErr := make(chan error, 1)
@@ -72,7 +89,7 @@ func run() error {
 	select {
 	case err := <-serveErr:
 		stop()
-		<-workerDone
+		<-tickerDone
 		return err
 	case <-ctx.Done():
 	}
@@ -80,7 +97,8 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	err = srv.Shutdown(shutdownCtx)
-	<-workerDone
+	hub.Close()
+	<-tickerDone
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}

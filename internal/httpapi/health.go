@@ -10,7 +10,7 @@ import (
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
-	if err := s.store.Ping(ctx); err != nil {
+	if err := s.core.Ping(ctx); err != nil {
 		s.log.Warn("health check failed", "err", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "database unreachable"})
 		return

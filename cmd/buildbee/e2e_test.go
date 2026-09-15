@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/codemodify/buildbee/internal/client"
+	"github.com/codemodify/buildbee/internal/core"
 	"github.com/codemodify/buildbee/internal/httpapi"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/codemodify/buildbee/internal/testdb"
@@ -29,9 +31,15 @@ func TestFakeACPRunStreamsLive(t *testing.T) {
 	acp.StreamStep = 25 * time.Millisecond
 	t.Cleanup(func() { acp.StreamStep = prev })
 
-	srv := httptest.NewServer(httpapi.NewServer(store.NewPostgres(testdb.New(t)), ws.NewHub(), httpapi.Options{}).Handler())
+	var svc *core.Service
+	hub := ws.NewHub(func(ctx context.Context, topic string, after int64) ([]core.Event, error) {
+		return svc.Replay(ctx, topic, after)
+	}, nil)
+	svc = core.New(store.New(testdb.New(t)), hub, core.Options{})
+	srv := httptest.NewServer(httpapi.NewServer(svc, hub, httpapi.Options{}).Handler())
 	t.Cleanup(srv.Close)
-	c := &client.Client{Base: srv.URL, HTTP: srv.Client(), Output: &bytes.Buffer{}}
+	t.Cleanup(hub.Close)
+	c := &client.Client{Base: srv.URL, As: "Ada", HTTP: srv.Client(), Output: &bytes.Buffer{}}
 
 	proj, err := c.CreateProject("Stream")
 	if err != nil {
@@ -132,6 +140,7 @@ func doJSON(c *client.Client, method, path string, body, dest any) error {
 	req := httptest.NewRequest(method, c.Base+path, rdr)
 	req.RequestURI = ""
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-BuildBee-As", c.As)
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return err

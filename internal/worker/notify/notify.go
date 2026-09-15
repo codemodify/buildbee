@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
 
+// Client reports a worker's Runs to the Server. Name is sent as
+// X-BuildBee-Worker so changes are attributed to the Run's Bot.
 type Client struct {
 	Base string
+	Name string
 	HTTP *http.Client
 }
 
@@ -20,7 +24,11 @@ func New(base string) *Client {
 	if base == "" {
 		base = "http://127.0.0.1:8080"
 	}
-	return &Client{Base: strings.TrimRight(base, "/"), HTTP: &http.Client{Timeout: 30 * time.Second}}
+	name, _ := os.Hostname()
+	if name == "" {
+		name = "worker"
+	}
+	return &Client{Base: strings.TrimRight(base, "/"), Name: name, HTTP: &http.Client{Timeout: 30 * time.Second}}
 }
 
 type Run struct {
@@ -118,6 +126,7 @@ func (c *Client) do(method, path string, body any, dest any) error {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("X-BuildBee-Worker", c.Name)
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return err

@@ -1,9 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, runEventsWsUrl } from "./api";
 import { parseHash, type Route } from "./hash";
+import { MeContext, useMe } from "./me";
 import type {
+  Artifact,
   Member,
   Notification,
+  Person,
   Preferences,
   TaskDetail,
   RunEvent,
@@ -13,13 +16,24 @@ import { Workspace } from "./Workspace";
 
 export default function App() {
   const [route, setRoute] = useState<Route>(parseHash);
+  const [me, setMe] = useState<Person | null | undefined>(undefined);
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  useEffect(() => {
+    void api.me().then((r) => setMe(r.person)).catch(() => setMe(null));
+  }, []);
 
+  if (me === undefined) {
+    return <main className="min-h-screen bg-bb-bg px-6 py-16 text-sm text-bb-muted">Connecting…</main>;
+  }
+  if (me === null) {
+    return <NamePrompt onDone={setMe} />;
+  }
   return (
+    <MeContext.Provider value={me}>
     <div className="flex h-dvh flex-col overflow-hidden bg-bb-bg">
       <Chrome />
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -32,6 +46,43 @@ export default function App() {
         )}
       </div>
     </div>
+    </MeContext.Provider>
+  );
+}
+
+function NamePrompt({ onDone }: { onDone: (p: Person) => void }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    try {
+      onDone((await api.setMe(name.trim())).person);
+    } catch (err) {
+      setError(formatError(err));
+    }
+  }
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-bb-bg px-6 text-bb-fg">
+      <form onSubmit={submit} className="w-full max-w-sm space-y-3">
+        <h1 className="text-2xl font-semibold">Welcome to BuildBee</h1>
+        <p className="text-sm text-bb-muted">
+          What should people and Bots call you? There is no password: this Server trusts its network.
+        </p>
+        <input
+          id="your-name"
+          autoFocus
+          className="w-full rounded-md border border-bb-border bg-bb-surface px-3 py-2"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Your name"
+          maxLength={60}
+        />
+        {error ? <p className="text-sm text-bb-danger">{error}</p> : null}
+        <button type="submit" disabled={!name.trim()} className="rounded-md bg-amber-400 px-4 py-2 font-medium text-zinc-950 disabled:opacity-50">
+          Continue
+        </button>
+      </form>
+    </main>
   );
 }
 
@@ -39,43 +90,44 @@ function Chrome() {
   return (
     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-bb-border bg-bb-surface px-4 py-2 text-sm">
       <div className="min-w-0 flex-1 font-medium text-bb-fg">BuildBee</div>
+      <WhoAmI />
       <PrefsBar />
       <InboxBell />
     </div>
   );
 }
 
+function WhoAmI() {
+  const me = useMe();
+  return (
+    <span className="text-xs text-bb-muted">
+      {me?.name}{" "}
+      <button
+        type="button"
+        className="text-bb-accent"
+        onClick={() => void api.forgetMe().then(() => window.location.reload())}
+      >
+        switch
+      </button>
+    </span>
+  );
+}
+
 function PrefsBar() {
-  const [memberId, setMemberId] = useState("");
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const projs = await api.listProjects();
-        for (const p of projs.items) {
-          const m = await api.listMembers(p.id);
-          const human = m.items.find((x) => x.kind === "human");
-          if (human) {
-            setMemberId(human.id);
-            setPrefs(await api.getPreferences(human.id));
-            return;
-          }
-        }
-      } catch (e) {
-        setError(formatError(e));
-      }
-    })();
+    void api.getPreferences().then(setPrefs).catch((e) => setError(formatError(e)));
   }, []);
 
-  if (!memberId || !prefs) {
+  if (!prefs) {
     return error ? <span className="text-xs text-bb-danger">{error}</span> : null;
   }
 
   async function patch(next: Partial<Preferences>) {
     try {
-      setPrefs(await api.patchPreferences(memberId, next));
+      setPrefs(await api.patchPreferences(next));
     } catch (e) {
       setError(formatError(e));
     }
@@ -107,33 +159,12 @@ function InboxBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
-  const [memberIds, setMemberIds] = useState<string[]>([]);
   const [error, setError] = useState("");
 
   async function load() {
-    const projs = await api.listProjects();
-    const ids: string[] = [];
-    const seen = new Set<string>();
-    for (const p of projs.items) {
-      const members = await api.listMembers(p.id);
-      for (const mem of members.items) {
-        if (mem.kind === "human" && !seen.has(mem.id)) {
-          seen.add(mem.id);
-          ids.push(mem.id);
-        }
-      }
-    }
-    const list: Notification[] = [];
-    let unreadN = 0;
-    for (const id of ids) {
-      const data = await api.listNotifications(id);
-      list.push(...data.items);
-      unreadN += data.unread;
-    }
-    list.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-    setMemberIds(ids);
-    setItems(list);
-    setUnread(unreadN);
+    const data = await api.listNotifications();
+    setItems(data.items);
+    setUnread(data.unread);
     setError("");
   }
 
@@ -163,9 +194,7 @@ function InboxBell() {
   }
 
   async function markAll() {
-    for (const id of memberIds) {
-      await api.readAllNotifications(id);
-    }
+    await api.readAllNotifications();
     await load();
   }
 
@@ -275,7 +304,7 @@ function RunTranscript({ runId, status }: { runId: string; status: string }) {
       .then(() => {
         if (stop) return;
         try {
-          ws = new WebSocket(runEventsWsUrl(runId));
+          ws = new WebSocket(runEventsWsUrl(runId, after));
           ws.onopen = () => setLive("ws");
           ws.onmessage = (msg) => {
             try {
@@ -383,17 +412,12 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
     return () => window.clearInterval(id);
   }, [detail?.runs, taskId, projectId]);
 
-  const human = members.find((m) => m.kind === "human");
   const bots = members.filter((m) => m.kind === "bot");
 
   async function handoff(e: FormEvent) {
     e.preventDefault();
-    if (!human) return;
     try {
-      await api.createHandoff(taskId, human.id, "", note.trim() || "please take this", {
-        toRole,
-        autorun,
-      });
+      await api.createHandoff(taskId, note.trim() || "please take this", { toRole, autorun });
       setNote("");
       setError("");
       await refresh();
@@ -409,6 +433,9 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
       </a>
       <h1 className="mt-3 text-2xl font-semibold">{detail?.title ?? "Task"}</h1>
       <p className="text-sm text-bb-subtle">status {detail?.status}</p>
+      {detail?.body ? (
+        <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm text-bb-fg">{detail.body}</p>
+      ) : null}
       {error ? <p className="mt-2 text-sm text-bb-danger">{error}</p> : null}
       {toast ? <p className="mt-2 text-sm text-bb-success">{toast}</p> : null}
       <button
@@ -489,22 +516,7 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
         <h2 className="text-sm font-medium text-bb-muted">Artifacts</h2>
         <ul className="mt-2 space-y-2">
           {(detail?.artifacts ?? []).map((a) => (
-            <li key={a.id} className="rounded border border-bb-border px-3 py-2 text-sm">
-              <span className="text-bb-muted">{a.kind}</span> {a.name}
-              {a.url ? (
-                <>
-                  {" "}
-                  <a className="text-bb-accent underline" href={a.url}>
-                    {a.url}
-                  </a>
-                </>
-              ) : null}
-              {a.body ? (
-                <pre className="mt-2 max-h-40 overflow-auto text-xs text-bb-muted">
-                  {a.body}
-                </pre>
-              ) : null}
-            </li>
+            <ArtifactItem key={a.id} artifact={a} />
           ))}
           {detail && detail.artifacts.length === 0 ? (
             <li className="text-sm text-bb-subtle">No Artifacts yet</li>
@@ -535,4 +547,47 @@ function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) 
       </section>
     </main>
   );
+}
+
+// ArtifactItem shows an Artifact; its body is fetched only when opened.
+function ArtifactItem({ artifact: a }: { artifact: Artifact }) {
+  const [body, setBody] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  async function toggle() {
+    if (body !== null) {
+      setBody(null);
+      return;
+    }
+    try {
+      setBody((await api.getArtifact(a.id)).body ?? "");
+    } catch (err) {
+      setError(formatError(err));
+    }
+  }
+  return (
+    <li className="rounded border border-bb-border px-3 py-2 text-sm">
+      <span className="text-bb-muted">{a.kind}</span> {a.name}
+      {a.url ? (
+        <>
+          {" "}
+          <a className="text-bb-accent underline" href={a.url}>
+            {a.url}
+          </a>
+        </>
+      ) : null}
+      {a.size > 0 ? (
+        <button type="button" className="ml-2 text-xs text-bb-accent" onClick={() => void toggle()}>
+          {body === null ? `Show (${formatBytes(a.size)})` : "Hide"}
+        </button>
+      ) : null}
+      {error ? <p className="text-xs text-bb-danger">{error}</p> : null}
+      {body !== null ? <pre className="mt-2 max-h-96 overflow-auto text-xs text-bb-muted">{body}</pre> : null}
+    </li>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

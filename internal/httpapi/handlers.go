@@ -1,21 +1,56 @@
 package httpapi
 
 import (
-	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/codemodify/buildbee/internal/models"
+	"github.com/codemodify/buildbee/internal/core"
 )
 
-func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListProjects(r.Context())
+// --- inbox ---
+
+func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
+	p, err := pageParams(r)
 	if err != nil {
-		writeError(w, err)
+		s.fail(w, err)
 		return
 	}
-	writeItems(w, items)
+	inbox, err := s.core.Notifications(r.Context(), actorFrom(r.Context()), flag(r, "unread"), p)
+	respond(s, w, http.StatusOK, inbox, err)
+}
+
+func (s *Server) readNotification(w http.ResponseWriter, r *http.Request) {
+	n, err := s.core.MarkRead(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, n, err)
+}
+
+func (s *Server) readAllNotifications(w http.ResponseWriter, r *http.Request) {
+	n, err := s.core.MarkAllRead(r.Context(), actorFrom(r.Context()))
+	respond(s, w, http.StatusOK, map[string]int{"read": n}, err)
+}
+
+func (s *Server) getPreferences(w http.ResponseWriter, r *http.Request) {
+	p, err := s.core.Preferences(r.Context(), actorFrom(r.Context()))
+	respond(s, w, http.StatusOK, p, err)
+}
+
+func (s *Server) patchPreferences(w http.ResponseWriter, r *http.Request) {
+	var in core.PreferencesPatch
+	if !s.decode(w, r, &in) {
+		return
+	}
+	p, err := s.core.SetPreferences(r.Context(), actorFrom(r.Context()), in)
+	respond(s, w, http.StatusOK, p, err)
+}
+
+// --- projects ---
+
+func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Projects(r.Context(), flag(r, "archived"))
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
@@ -23,564 +58,247 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 		AutoRun bool   `json:"auto_run"`
 	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Name) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+	if !s.decode(w, r, &in) {
 		return
 	}
-	p, err := s.store.CreateProject(r.Context(), strings.TrimSpace(in.Name), in.AutoRun)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, p)
+	p, err := s.core.CreateProject(r.Context(), actorFrom(r.Context()), in.Name, in.AutoRun)
+	respond(s, w, http.StatusCreated, p, err)
 }
 
 func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
-	p, err := s.store.GetProject(r.Context(), r.PathValue("projectID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, p)
+	p, err := s.core.Project(r.Context(), r.PathValue("id"))
+	respond(s, w, http.StatusOK, p, err)
 }
 
-func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		AutoRun *bool `json:"auto_run"`
-	}
-	if err := decodeJSON(r, &in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
+	var in core.ProjectPatch
+	if !s.decode(w, r, &in) {
 		return
 	}
-	p, err := s.store.UpdateProject(r.Context(), r.PathValue("projectID"), in.AutoRun)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, p)
+	p, err := s.core.UpdateProject(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusOK, p, err)
+}
+
+func (s *Server) joinProject(w http.ResponseWriter, r *http.Request) {
+	m, err := s.core.Join(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, m, err)
 }
 
 func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListMembers(r.Context(), r.PathValue("projectID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeItems(w, items)
+	list, err := s.core.Members(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		DisplayName  string `json:"display_name"`
-		Kind         string `json:"kind"`
-		Role         string `json:"role"`
-		Instructions string `json:"instructions"`
-	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.DisplayName) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "display_name is required"})
+	var in core.NewMember
+	if !s.decode(w, r, &in) {
 		return
 	}
-	kind := strings.ToLower(in.Kind)
-	if kind != "bot" {
-		kind = "human"
-	}
-	role := strings.ToLower(strings.TrimSpace(in.Role))
-	if role == "" {
-		if kind == "bot" {
-			role = "bot"
-		} else {
-			role = "member"
-		}
-	}
-	m, err := s.store.AddMember(r.Context(), models.Member{
-		ProjectID:    r.PathValue("projectID"),
-		DisplayName:  strings.TrimSpace(in.DisplayName),
-		Kind:         kind,
-		Role:         role,
-		Instructions: strings.TrimSpace(in.Instructions),
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, m)
+	m, err := s.core.AddMember(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, m, err)
 }
 
 func (s *Server) listChannels(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListChannels(r.Context(), r.PathValue("projectID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeItems(w, items)
+	list, err := s.core.Channels(r.Context(), r.PathValue("id"), flag(r, "archived"))
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) createChannel(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name string `json:"name"`
 	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Name) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+	if !s.decode(w, r, &in) {
 		return
 	}
-	ch, err := s.store.CreateChannel(r.Context(), r.PathValue("projectID"), strings.TrimSpace(in.Name))
-	if err != nil {
-		writeError(w, err)
+	ch, err := s.core.CreateChannel(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Name)
+	respond(s, w, http.StatusCreated, ch, err)
+}
+
+func (s *Server) patchChannel(w http.ResponseWriter, r *http.Request) {
+	var in core.ChannelPatch
+	if !s.decode(w, r, &in) {
 		return
 	}
-	writeJSON(w, http.StatusCreated, ch)
+	ch, err := s.core.UpdateChannel(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusOK, ch, err)
 }
 
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListMessages(r.Context(), r.PathValue("channelID"))
+	p, err := pageParams(r)
 	if err != nil {
-		writeError(w, err)
+		s.fail(w, err)
 		return
 	}
-	writeItems(w, items)
+	list, more, err := s.core.Messages(r.Context(), r.PathValue("id"), p)
+	respondPage(s, w, list, more, err)
 }
 
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Body     string `json:"body"`
-		MemberID string `json:"member_id"`
+		Body string `json:"body"`
 	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Body) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body is required"})
+	if !s.decode(w, r, &in) {
 		return
 	}
-	channelID := r.PathValue("channelID")
-	memberID := strings.TrimSpace(in.MemberID)
-	if memberID == "" {
-		memberID = r.Header.Get("X-Member-ID")
-	}
-	if memberID == "" {
-		ch, err := s.store.GetChannel(r.Context(), channelID)
-		if err != nil {
-			writeError(w, err)
-			return
-		}
-		members, err := s.store.ListMembers(r.Context(), ch.ProjectID)
-		if err != nil {
-			writeError(w, err)
-			return
-		}
-		for _, m := range members {
-			if m.Kind == "human" {
-				memberID = m.ID
-				break
-			}
-		}
-	}
-	if memberID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "member_id is required"})
-		return
-	}
-	body := strings.TrimSpace(in.Body)
-	msg, err := s.store.PostMessage(r.Context(), channelID, memberID, body)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	ch, err := s.store.GetChannel(r.Context(), channelID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	members, err := s.store.ListMembers(r.Context(), ch.ProjectID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	mentioned := models.MentionedBots(body, members)
-	var mentionTasks []models.Task
-	var mentionHandoffs []models.Handoff
-	for _, bot := range mentioned {
-		title := truncateUTF8("Mention @"+bot.DisplayName+": "+body, 120)
-		task, err := s.store.CreateTask(r.Context(), ch.ProjectID, title, bot.ID)
-		if err != nil {
-			s.log.Error("mention: create task", "bot", bot.ID, "err", err)
-			continue
-		}
-		mentionTasks = append(mentionTasks, *task)
-		if h, err := s.store.CreateHandoff(r.Context(), task.ID, memberID, bot.ID, body); err == nil {
-			mentionHandoffs = append(mentionHandoffs, *h)
-		}
-	}
-	if len(mentionTasks) > 0 {
-		s.notify(r.Context(), ch.ProjectID, memberID, "mention",
-			"@mention created a Task", body,
-			"#/projects/"+ch.ProjectID+"/tasks/"+mentionTasks[0].ID)
-	}
-	if len(mentioned) > 0 {
-		ids := make([]string, 0, len(mentioned))
-		roles := make([]string, 0, len(mentioned))
-		for _, bot := range mentioned {
-			ids = append(ids, bot.ID)
-			roles = append(roles, bot.Role)
-		}
-		_ = s.store.AppendActivity(r.Context(), ch.ProjectID, models.TypeMention, map[string]any{
-			"message_id": msg.ID, "channel_id": channelID, "member_ids": ids, "roles": roles,
-		})
-	}
-	s.hub.Publish(channelID, map[string]any{"type": "message", "message": msg, "mentions": mentioned})
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"id": msg.ID, "channel_id": msg.ChannelID, "member_id": msg.MemberID,
-		"body": msg.Body, "created_at": msg.CreatedAt,
-		"mentions": mentioned, "tasks": mentionTasks, "handoffs": mentionHandoffs,
-	})
+	m, err := s.core.PostMessage(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Body)
+	respond(s, w, http.StatusCreated, m, err)
 }
 
-func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListTasks(r.Context(), r.PathValue("projectID"))
+func (s *Server) listActivity(w http.ResponseWriter, r *http.Request) {
+	p, err := pageParams(r)
 	if err != nil {
-		writeError(w, err)
+		s.fail(w, err)
 		return
 	}
-	writeItems(w, items)
+	list, more, err := s.core.Activity(r.Context(), r.PathValue("id"), r.URL.Query().Get("type"), p)
+	respondPage(s, w, list, more, err)
+}
+
+// --- tasks and handoffs ---
+
+func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Tasks(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Title            string `json:"title"`
-		AssigneeMemberID string `json:"assignee_member_id"`
-		HandoffRole      string `json:"handoff_role"`
-		HandoffNote      string `json:"handoff_note"`
-	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Title) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title is required"})
+	var in core.NewTask
+	if !s.decode(w, r, &in) {
 		return
 	}
-	projectID := r.PathValue("projectID")
-	t, err := s.store.CreateTask(r.Context(), projectID, strings.TrimSpace(in.Title), in.AssigneeMemberID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	role := strings.ToLower(strings.TrimSpace(in.HandoffRole))
 	if q := r.URL.Query().Get("handoff"); q != "" {
-		role = strings.ToLower(strings.TrimSpace(q))
+		in.HandoffRole = q
 	}
-	if role == "" {
-		role = models.RoleScout
-	}
-	if role == "0" || role == "none" || role == "off" {
-		writeJSON(w, http.StatusCreated, t)
-		return
-	}
-	members, err := s.store.ListMembers(r.Context(), projectID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	to := models.MemberByRole(members, role)
-	from := models.MemberByRole(members, models.RoleOwner)
-	if from == nil {
-		for i := range members {
-			if members[i].Kind == "human" {
-				from = &members[i]
-				break
-			}
-		}
-	}
-	if to == nil || from == nil {
-		writeJSON(w, http.StatusCreated, t)
-		return
-	}
-	note := strings.TrimSpace(in.HandoffNote)
-	if note == "" {
-		note = "auto-Handoff to " + to.Role
-	}
-	h, err := s.store.CreateHandoff(r.Context(), t.ID, from.ID, to.ID, note)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	s.notify(r.Context(), projectID, to.ID, "handoff",
-		"Task handed to you: "+t.Title, note,
-		"#/projects/"+projectID+"/tasks/"+t.ID)
-	task, _ := s.store.GetTask(r.Context(), t.ID)
-	if task == nil {
-		task = t
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"task": task, "handoff": h,
-		"id": task.ID, "project_id": task.ProjectID, "title": task.Title, "status": task.Status,
-		"assignee_member_id": task.AssigneeMemberID, "created_at": task.CreatedAt, "updated_at": task.UpdatedAt,
-	})
+	t, err := s.core.CreateTask(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, t, err)
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
-	t, err := s.store.GetTask(r.Context(), r.PathValue("taskID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
+	t, err := s.core.Task(r.Context(), r.PathValue("id"))
+	respond(s, w, http.StatusOK, t, err)
 }
 
-func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Status string `json:"status"`
-	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Status) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status is required"})
+func (s *Server) patchTask(w http.ResponseWriter, r *http.Request) {
+	var in core.TaskPatch
+	if !s.decode(w, r, &in) {
 		return
 	}
-	t, err := s.store.UpdateTaskStatus(r.Context(), r.PathValue("taskID"), strings.TrimSpace(in.Status))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
+	t, err := s.core.UpdateTask(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusOK, t, err)
+}
+
+func (s *Server) getTaskDetail(w http.ResponseWriter, r *http.Request) {
+	d, err := s.core.TaskDetail(r.Context(), r.PathValue("id"))
+	respond(s, w, http.StatusOK, d, err)
+}
+
+func (s *Server) listHandoffs(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Handoffs(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) createHandoff(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		FromMemberID string `json:"from_member_id"`
-		ToMemberID   string `json:"to_member_id"`
-		ToRole       string `json:"to_role"`
-		Note         string `json:"note"`
-		AutoRun      bool   `json:"autorun"`
-	}
-	if err := decodeJSON(r, &in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+	var in core.NewHandoff
+	if !s.decode(w, r, &in) {
 		return
 	}
-	taskID := r.PathValue("taskID")
-	task, err := s.store.GetTask(r.Context(), taskID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	members, err := s.store.ListMembers(r.Context(), task.ProjectID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	toID := strings.TrimSpace(in.ToMemberID)
-	toRole := strings.ToLower(strings.TrimSpace(in.ToRole))
 	if q := r.URL.Query().Get("to_role"); q != "" {
-		toRole = strings.ToLower(strings.TrimSpace(q))
+		in.ToRole = q
 	}
-	if toID == "" && toRole != "" {
-		if m := models.MemberByRole(members, toRole); m != nil {
-			toID = m.ID
-		}
+	if flag(r, "autorun") {
+		in.AutoRun = true
 	}
-	fromID := strings.TrimSpace(in.FromMemberID)
-	if fromID == "" {
-		if m := models.MemberByRole(members, models.RoleOwner); m != nil {
-			fromID = m.ID
-		} else {
-			for _, mem := range members {
-				if mem.Kind == "human" {
-					fromID = mem.ID
-					break
-				}
-			}
-		}
-	}
-	if fromID == "" || toID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from_member_id and to_member_id or to_role are required"})
-		return
-	}
-	h, err := s.store.CreateHandoff(r.Context(), taskID, fromID, toID, in.Note)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	s.notify(r.Context(), task.ProjectID, toID, "handoff",
-		"Task handed to you: "+task.Title, in.Note,
-		"#/projects/"+task.ProjectID+"/tasks/"+taskID)
-	autorun := in.AutoRun || r.URL.Query().Get("autorun") == "1"
-	if !autorun {
-		if proj, err := s.store.GetProject(r.Context(), task.ProjectID); err == nil && proj.AutoRun {
-			autorun = true
-		}
-	}
-	var run *models.Run
-	if autorun {
-		if to, err := s.store.GetMember(r.Context(), toID); err == nil && strings.EqualFold(to.Role, models.RoleBuilder) {
-			run, _ = s.store.CreateRun(r.Context(), taskID)
-		}
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"id": h.ID, "task_id": h.TaskID, "from_member_id": h.FromMemberID, "to_member_id": h.ToMemberID,
-		"note": h.Note, "status": h.Status, "created_at": h.CreatedAt, "run": run,
-	})
+	h, err := s.core.CreateHandoff(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, h, err)
 }
 
 func (s *Server) completeHandoff(w http.ResponseWriter, r *http.Request) {
-	h, err := s.store.CompleteHandoff(r.Context(), r.PathValue("handoffID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var decision *models.Decision
-	from, _ := s.store.GetMember(r.Context(), h.FromMemberID)
-	to, _ := s.store.GetMember(r.Context(), h.ToMemberID)
-	scoutSide := (from != nil && strings.EqualFold(from.Role, models.RoleScout)) ||
-		(to != nil && strings.EqualFold(to.Role, models.RoleScout))
-	if scoutSide {
-		task, err := s.store.GetTask(r.Context(), h.TaskID)
-		if err == nil && (models.TaskLooksAmbiguous(task.Title, h.Note) || r.URL.Query().Get("decision") == "1") {
-			decision, _ = s.openDecision(r.Context(), task.ProjectID,
-				"Scout: is Task \""+task.Title+"\" ready for Builder?",
-				"handoff to Builder",
-				[]string{"handoff to Builder", "needs more info"},
-				"",
-			)
-			s.notifyNewDecision(r.Context(), decision)
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id": h.ID, "task_id": h.TaskID, "from_member_id": h.FromMemberID, "to_member_id": h.ToMemberID,
-		"note": h.Note, "status": h.Status, "created_at": h.CreatedAt, "completed_at": h.CompletedAt,
-		"decision": decision,
-	})
+	h, err := s.core.CompleteHandoff(r.Context(), actorFrom(r.Context()), r.PathValue("id"), flag(r, "decision"))
+	respond(s, w, http.StatusOK, h, err)
 }
+
+// --- decisions ---
 
 func (s *Server) listDecisions(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListDecisions(r.Context(), r.PathValue("projectID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if r.URL.Query().Get("inbox") == "1" {
-		open := items[:0]
-		for _, d := range items {
-			if d.Answer == "" && !d.Reused {
-				open = append(open, d)
-			}
-		}
-		items = open
-	}
-	if r.URL.Query().Get("mine") == "1" {
-		memberID := s.resolveNotifyMember(r)
-		if memberID != "" {
-			mine := items[:0]
-			for _, d := range items {
-				if d.AssigneeMemberID == "" || d.AssigneeMemberID == memberID {
-					mine = append(mine, d)
-				}
-			}
-			items = mine
-		}
-	}
-	writeItems(w, items)
-}
-
-func (s *Server) listDecisionMemories(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListDecisionMemories(r.Context(), r.PathValue("projectID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeItems(w, items)
+	f := core.DecisionFilter{Open: flag(r, "open") || flag(r, "inbox"), Mine: flag(r, "mine")}
+	list, err := s.core.Decisions(r.Context(), actorFrom(r.Context()), r.PathValue("id"), f)
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) createDecision(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Prompt           string   `json:"prompt"`
-		Options          []string `json:"options"`
-		Recommendation   string   `json:"recommendation"`
-		AssigneeID       string   `json:"assignee_id"`
-		AssigneeMemberID string   `json:"assignee_member_id"`
-	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Prompt) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "prompt is required"})
+	var in core.NewDecision
+	if !s.decode(w, r, &in) {
 		return
 	}
-	assignee := strings.TrimSpace(in.AssigneeID)
-	if assignee == "" {
-		assignee = strings.TrimSpace(in.AssigneeMemberID)
-	}
-	d, err := s.openDecision(r.Context(), r.PathValue("projectID"), strings.TrimSpace(in.Prompt), in.Recommendation, in.Options, assignee)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	s.notifyNewDecision(r.Context(), d)
-	writeJSON(w, http.StatusCreated, d)
+	d, err := s.core.CreateDecision(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, d, err)
 }
 
-func (s *Server) openDecision(ctx context.Context, projectID, prompt, recommendation string, options []string, assigneeMemberID string) (*models.Decision, error) {
-	fp := models.DecisionFingerprint(prompt)
-	if mem, err := s.store.GetDecisionMemory(ctx, projectID, fp); err == nil && mem != nil && mem.Answer != "" {
-		return s.store.CreateReusedDecision(ctx, projectID, prompt, recommendation, options, mem.Answer, assigneeMemberID)
-	}
-	return s.store.CreateDecision(ctx, projectID, prompt, recommendation, options, assigneeMemberID)
+func (s *Server) listDecisionMemories(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.DecisionMemories(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) answerDecision(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Answer string `json:"answer"`
 	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Answer) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "answer is required"})
+	if !s.decode(w, r, &in) {
 		return
 	}
-	d, err := s.store.AnswerDecision(r.Context(), r.PathValue("decisionID"), strings.TrimSpace(in.Answer))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, d)
+	d, err := s.core.AnswerDecision(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Answer)
+	respond(s, w, http.StatusOK, d, err)
 }
 
-func (s *Server) listActivity(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListActivity(r.Context(), r.PathValue("projectID"), r.URL.Query().Get("type"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeItems(w, items)
+// --- runs ---
+
+func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Runs(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
 }
 
 func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
-	run, err := s.store.CreateRun(r.Context(), r.PathValue("taskID"))
-	if err != nil {
-		writeError(w, err)
+	var in struct {
+		BotMemberID string `json:"bot_member_id"`
+	}
+	if !s.decode(w, r, &in) {
 		return
 	}
-	s.recordRunEvent(r.Context(), run.ID, models.RunEventStatus, map[string]any{"status": run.Status, "detail": run.Detail})
-	writeJSON(w, http.StatusCreated, run)
+	run, err := s.core.CreateRun(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.BotMemberID)
+	respond(s, w, http.StatusCreated, run, err)
 }
 
 func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
-	run, err := s.store.GetRun(r.Context(), r.PathValue("runID"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, run)
+	run, err := s.core.Run(r.Context(), r.PathValue("id"))
+	respond(s, w, http.StatusOK, run, err)
 }
 
-func (s *Server) updateRun(w http.ResponseWriter, r *http.Request) {
+func (s *Server) patchRun(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Status string `json:"status"`
 		Detail string `json:"detail"`
 	}
-	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Status) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status is required"})
+	if !s.decode(w, r, &in) {
 		return
 	}
-	run, err := s.store.UpdateRun(r.Context(), r.PathValue("runID"), strings.TrimSpace(in.Status), in.Detail)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	s.recordRunEvent(r.Context(), run.ID, models.RunEventStatus, map[string]any{"status": run.Status, "detail": run.Detail})
-	writeJSON(w, http.StatusOK, run)
+	run, err := s.core.UpdateRun(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Status, in.Detail)
+	respond(s, w, http.StatusOK, run, err)
 }
 
-func (s *Server) recordRunEvent(ctx context.Context, runID, kind string, payload map[string]any) *models.RunEvent {
-	ev, err := s.store.AppendRunEvent(ctx, runID, kind, payload)
-	if err != nil {
-		return nil
+func (s *Server) listRunEvents(w http.ResponseWriter, r *http.Request) {
+	after, limit := 0, 0
+	for key, dst := range map[string]*int{"after": &after, "limit": &limit} {
+		if v := strings.TrimSpace(r.URL.Query().Get(key)); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": key + " must be a non-negative integer"})
+				return
+			}
+			*dst = n
+		}
 	}
-	s.hub.PublishRun(runID, ev)
-	return ev
+	list, more, err := s.core.RunEvents(r.Context(), r.PathValue("id"), after, limit)
+	respondPage(s, w, list, more, err)
 }
 
 func (s *Server) createRunEvent(w http.ResponseWriter, r *http.Request) {
@@ -588,36 +306,257 @@ func (s *Server) createRunEvent(w http.ResponseWriter, r *http.Request) {
 		Kind    string         `json:"kind"`
 		Payload map[string]any `json:"payload"`
 	}
-	if err := decodeJSON(r, &in); err != nil || models.NormalizeRunEventKind(in.Kind) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind must be token, tool_call, tool_result, status, or log"})
+	if !s.decode(w, r, &in) {
 		return
 	}
-	ev := s.recordRunEvent(r.Context(), r.PathValue("runID"), in.Kind, in.Payload)
-	if ev == nil {
-		if _, err := s.store.GetRun(r.Context(), r.PathValue("runID")); err != nil {
-			writeError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not append run event"})
-		return
-	}
-	writeJSON(w, http.StatusCreated, ev)
+	ev, err := s.core.AppendRunEvent(r.Context(), r.PathValue("id"), in.Kind, in.Payload)
+	respond(s, w, http.StatusCreated, ev, err)
 }
 
-func (s *Server) listRunEvents(w http.ResponseWriter, r *http.Request) {
-	after := 0
-	if q := strings.TrimSpace(r.URL.Query().Get("after")); q != "" {
-		n, err := strconv.Atoi(q)
-		if err != nil || n < 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "after must be a sequence number"})
-			return
-		}
-		after = n
-	}
-	items, err := s.store.ListRunEvents(r.Context(), r.PathValue("runID"), after)
-	if err != nil {
-		writeError(w, err)
+// --- artifacts, PRs, pipelines ---
+
+func (s *Server) listArtifacts(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Artifacts(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
+}
+
+func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
+	var in core.NewArtifact
+	if !s.decode(w, r, &in) {
 		return
 	}
-	writeItems(w, items)
+	a, err := s.core.CreateArtifact(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	if a != nil {
+		a.Body = "" // the caller already has it
+	}
+	respond(s, w, http.StatusCreated, a, err)
+}
+
+func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request) {
+	a, err := s.core.Artifact(r.Context(), r.PathValue("id"))
+	respond(s, w, http.StatusOK, a, err)
+}
+
+func (s *Server) openPR(w http.ResponseWriter, r *http.Request) {
+	var in core.NewPR
+	if !s.decode(w, r, &in) {
+		return
+	}
+	pr, err := s.core.OpenPR(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, pr, err)
+}
+
+func (s *Server) listPipelines(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Pipelines(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
+}
+
+func (s *Server) createPipeline(w http.ResponseWriter, r *http.Request) {
+	var in core.NewPipeline
+	if !s.decode(w, r, &in) {
+		return
+	}
+	p, err := s.core.RecordPipeline(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, p, err)
+}
+
+func (s *Server) patchPipeline(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Status      string `json:"status"`
+		ExternalURL string `json:"external_url"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	p, err := s.core.UpdatePipeline(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Status, in.ExternalURL)
+	respond(s, w, http.StatusOK, p, err)
+}
+
+// --- integrations ---
+
+// pipelinesWebhook accepts {task_id, name, status, external_url} or a GitHub
+// check_run payload carrying task_id (body, client_payload or ?task_id=).
+func (s *Server) pipelinesWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, ok := s.webhookBody(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		TaskID      string `json:"task_id"`
+		ArtifactID  string `json:"artifact_id"`
+		Name        string `json:"name"`
+		Status      string `json:"status"`
+		ExternalURL string `json:"external_url"`
+		CheckRun    *struct {
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			HTMLURL    string `json:"html_url"`
+		} `json:"check_run"`
+		ClientPayload *struct {
+			TaskID string `json:"task_id"`
+		} `json:"client_payload"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if in.TaskID == "" && in.ClientPayload != nil {
+		in.TaskID = in.ClientPayload.TaskID
+	}
+	if in.TaskID == "" {
+		in.TaskID = r.URL.Query().Get("task_id")
+	}
+	if cr := in.CheckRun; cr != nil {
+		if in.Name == "" {
+			in.Name = cr.Name
+		}
+		if in.Status == "" {
+			in.Status = cr.Conclusion
+			if in.Status == "" {
+				in.Status = cr.Status
+			}
+		}
+		if in.ExternalURL == "" {
+			in.ExternalURL = cr.HTMLURL
+		}
+	}
+	if in.Name == "" {
+		in.Name = "pipeline"
+	}
+	if in.TaskID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_id is required"})
+		return
+	}
+	p, err := s.core.RecordPipeline(r.Context(), core.System("github"), in.TaskID, core.NewPipeline{
+		Name: in.Name, Status: in.Status, ExternalURL: in.ExternalURL, ArtifactID: in.ArtifactID,
+	})
+	respond(s, w, http.StatusCreated, p, err)
+}
+
+func (s *Server) syncIssues(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Repo string `json:"repo"`
+		Fake bool   `json:"fake"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	list, err := s.core.SyncIssues(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Repo, in.Fake)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "fake": in.Fake})
+}
+
+// issuesWebhook applies GitHub "issues" events to ?project_id= (or
+// client_payload.project_id).
+func (s *Server) issuesWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, ok := s.webhookBody(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Action string `json:"action"`
+		Issue  *struct {
+			Number  int    `json:"number"`
+			Title   string `json:"title"`
+			HTMLURL string `json:"html_url"`
+		} `json:"issue"`
+		ClientPayload *struct {
+			ProjectID string `json:"project_id"`
+		} `json:"client_payload"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil || in.Issue == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "an issue payload is required"})
+		return
+	}
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" && in.ClientPayload != nil {
+		projectID = in.ClientPayload.ProjectID
+	}
+	if projectID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project_id is required (query or client_payload)"})
+		return
+	}
+	switch strings.ToLower(in.Action) {
+	case "opened", "edited", "reopened", "":
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored", "action": in.Action})
+		return
+	}
+	t, err := s.core.IssueWebhook(r.Context(), projectID, in.Issue.Number, in.Issue.Title, in.Issue.HTMLURL)
+	respond(s, w, http.StatusOK, t, err)
+}
+
+// webhookBody reads and verifies a webhook body; it answers on failure.
+func (s *Server) webhookBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	defer r.Body.Close()
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.fail(w, err)
+		return nil, false
+	}
+	if !s.verifyGitHubSignature(r, raw) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid GitHub webhook signature"})
+		return nil, false
+	}
+	return sanitizeJSON(raw), true
+}
+
+// --- routines ---
+
+func (s *Server) listRoutines(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Routines(r.Context(), r.PathValue("id"))
+	respondItems(s, w, list, err)
+}
+
+func (s *Server) createRoutine(w http.ResponseWriter, r *http.Request) {
+	var in core.NewRoutine
+	if !s.decode(w, r, &in) {
+		return
+	}
+	rt, err := s.core.CreateRoutine(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusCreated, rt, err)
+}
+
+func (s *Server) patchRoutine(w http.ResponseWriter, r *http.Request) {
+	var in core.RoutinePatch
+	if !s.decode(w, r, &in) {
+		return
+	}
+	rt, err := s.core.UpdateRoutine(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusOK, rt, err)
+}
+
+func (s *Server) fireRoutine(w http.ResponseWriter, r *http.Request) {
+	rt, err := s.core.FireRoutine(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, rt, err)
+}
+
+// --- helpers ---
+
+func respond[T any](s *Server, w http.ResponseWriter, status int, v T, err error) {
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, status, v)
+}
+
+func respondItems[T any](s *Server, w http.ResponseWriter, list []T, err error) {
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	items(w, list)
+}
+
+func respondPage[T any](s *Server, w http.ResponseWriter, list []T, more bool, err error) {
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	page(w, list, more)
 }

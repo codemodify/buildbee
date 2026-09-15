@@ -8,18 +8,22 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/user"
 	"strings"
 	"time"
 
 	"github.com/codemodify/buildbee/internal/worker/acp"
 )
 
+// Client calls the Server as a Person: As is sent in X-BuildBee-As.
 type Client struct {
 	Base   string
+	As     string
 	HTTP   *http.Client
 	Output io.Writer
 }
 
+// New reads BUILDBEE_URL and BUILDBEE_AS (default: the login name).
 func New() *Client {
 	base := os.Getenv("BUILDBEE_URL")
 	if base == "" {
@@ -27,9 +31,20 @@ func New() *Client {
 	}
 	return &Client{
 		Base:   strings.TrimRight(base, "/"),
+		As:     actingAs(),
 		HTTP:   &http.Client{Timeout: 3 * time.Minute},
 		Output: os.Stdout,
 	}
+}
+
+func actingAs() string {
+	if v := strings.TrimSpace(os.Getenv("BUILDBEE_AS")); v != "" {
+		return v
+	}
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }
 
 func (c *Client) do(method, path string, body any, dest any) error {
@@ -47,6 +62,9 @@ func (c *Client) do(method, path string, body any, dest any) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.As != "" {
+		req.Header.Set("X-BuildBee-As", c.As)
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
@@ -90,17 +108,17 @@ func (c *Client) GetTask(taskID string) (map[string]any, error) {
 	return out, err
 }
 
-func (c *Client) CreateHandoff(taskID, fromID, toID, note, toRole string, autorun bool) (map[string]any, error) {
+// CreateHandoff hands a Task from the acting Person to a Member or Role.
+func (c *Client) CreateHandoff(taskID, toID, note, toRole string, autorun bool) (map[string]any, error) {
 	var out map[string]any
 	path := "/v1/tasks/" + taskID + "/handoffs"
 	if autorun {
 		path += "?autorun=1"
 	}
 	body := map[string]string{
-		"from_member_id": fromID,
-		"to_member_id":   toID,
-		"to_role":        toRole,
-		"note":           note,
+		"to_member_id": toID,
+		"to_role":      toRole,
+		"note":         note,
 	}
 	err := c.do(http.MethodPost, path, body, &out)
 	return out, err
