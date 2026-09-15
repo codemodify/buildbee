@@ -57,7 +57,7 @@ func run(args []string, c *client.Client) error {
 	}
 }
 
-const projectUsage = "usage: buildbee project create --name NAME | project update --id ID [--autopilot on|off] " +
+const projectUsage = "usage: buildbee project create --name NAME [--bots] | project update --id ID [--autopilot on|off] " +
 	"[--merge-policy auto|approval] [--max-runs N] [--repo URL] [--branch NAME] [--instructions TEXT]"
 
 func runProject(args []string, c *client.Client) error {
@@ -70,7 +70,7 @@ func runProject(args []string, c *client.Client) error {
 		if name == "" {
 			return errors.New(projectUsage)
 		}
-		out, err := c.CreateProject(name)
+		out, err := c.CreateProject(name, hasFlag(args[1:], "bots"))
 		if err != nil {
 			return err
 		}
@@ -320,7 +320,7 @@ func usage(w io.Writer) {
 
 Usage:
   buildbee version
-  buildbee project create --name NAME
+  buildbee project create --name NAME [--bots]     (--bots adds Scout, Builder, Sentry, Pulse)
   buildbee project update --id ID [--autopilot on|off] [--merge-policy auto|approval]
                           [--max-runs N] [--repo URL] [--branch NAME] [--instructions TEXT]
   buildbee task list --project ID

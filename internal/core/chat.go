@@ -194,14 +194,6 @@ func (w *work) post(ctx context.Context, proj *models.Project, ch *models.Channe
 	}
 	if author.Kind == models.KindHuman {
 		bots := models.MentionedBots(body, members)
-		if root == nil && ch.Kind == models.ChannelDM { // talking to a Bot directly
-			for i := range members {
-				if members[i].Kind == models.KindBot && ch.Allows(members[i].ID) &&
-					!slices.ContainsFunc(bots, func(b models.Member) bool { return b.ID == members[i].ID }) {
-					bots = append(bots, members[i])
-				}
-			}
-		}
 		var task *models.Task
 		if root != nil && root.TaskID != "" {
 			if task, err = w.st.GetTask(ctx, root.TaskID, true); err != nil {
@@ -358,44 +350,6 @@ func (w *work) steerTask(ctx context.Context, task *models.Task, author *models.
 
 // --- DMs ---
 
-// OpenDM returns the DM between the acting Person and memberIDs (people or
-// Bots of the Project), creating it the first time.
-func (s *Service) OpenDM(ctx context.Context, a Actor, projectID string, memberIDs []string) (*models.Channel, error) {
-	if len(memberIDs) == 0 || len(memberIDs) > 20 {
-		return nil, invalid("a direct message is with 1 to 20 members")
-	}
-	var out *models.Channel
-	err := s.tx(ctx, func(w *work) error {
-		if _, err := w.openProject(ctx, projectID); err != nil {
-			return err
-		}
-		me, err := w.requireMember(ctx, a, projectID)
-		if err != nil {
-			return err
-		}
-		ids := []string{me.ID}
-		var names []string
-		for _, id := range memberIDs {
-			m, err := w.st.GetMember(ctx, strings.TrimSpace(id))
-			if err != nil || m.ProjectID != projectID {
-				return invalid("member %s is not in this project", id)
-			}
-			if m.ID != me.ID {
-				ids = append(ids, m.ID)
-				names = append(names, m.DisplayName)
-			}
-		}
-		if len(ids) < 2 {
-			return invalid("a direct message needs someone besides you")
-		}
-		slices.Sort(names)
-		out, err = w.st.OpenDM(ctx, models.Channel{ID: uuid.NewString(), ProjectID: projectID,
-			Name: truncate(strings.Join(names, ", "), 100), CreatedAt: w.now}, ids)
-		return err
-	})
-	return out, err
-}
-
 // DMs lists the acting Person's DMs in a Project.
 func (s *Service) DMs(ctx context.Context, a Actor, projectID string) ([]models.Channel, error) {
 	if !a.IsPerson() {
@@ -408,33 +362,19 @@ func (s *Service) DMs(ctx context.Context, a Actor, projectID string) ([]models.
 	return s.st.ListDMs(ctx, projectID, m.ID)
 }
 
-// NewDirect is whom to message: people, anywhere on the Server, or one
-// Bot, in its Project.
+// NewDirect is whom to message: people, anywhere on the Server.
 type NewDirect struct {
 	PersonIDs []string `json:"person_ids"`
-	MemberID  string   `json:"member_id"`
 }
 
-// OpenDirect returns the DM with the given people or Bot, creating it if
-// needed. DMs between people live in the direct space, so there is one
-// conversation however many Projects they share; a DM with a Bot lives in
-// the Bot's Project, where it works.
+// OpenDirect returns the DM with the given people, creating it if needed,
+// and puts it back in the acting Person's list if they had closed it. DMs
+// live in the direct space, so there is one conversation however many
+// Projects the people share. DMs are between people; Bots are asked in
+// channels.
 func (s *Service) OpenDirect(ctx context.Context, a Actor, in NewDirect) (*models.Channel, error) {
 	if !a.IsPerson() {
 		return nil, ErrNoActor
-	}
-	if in.MemberID != "" {
-		if len(in.PersonIDs) > 0 {
-			return nil, invalid("message either people or a bot")
-		}
-		m, err := s.st.GetMember(ctx, strings.TrimSpace(in.MemberID))
-		if err != nil {
-			return nil, err
-		}
-		if m.Kind != models.KindBot {
-			return nil, invalid("member_id must be a bot; message people by person_ids")
-		}
-		return s.OpenDM(ctx, a, m.ProjectID, []string{m.ID})
 	}
 	if len(in.PersonIDs) == 0 || len(in.PersonIDs) > 20 {
 		return nil, invalid("a direct message is with 1 to 20 people")
@@ -474,11 +414,32 @@ func (s *Service) OpenDirect(ctx context.Context, a Actor, in NewDirect) (*model
 			return invalid("a direct message needs someone besides you")
 		}
 		slices.Sort(names)
-		out, err = w.st.OpenDM(ctx, models.Channel{ID: uuid.NewString(), ProjectID: space.ID,
-			Name: truncate(strings.Join(names, ", "), 100), CreatedAt: w.now}, ids)
-		return err
+		if out, err = w.st.OpenDM(ctx, models.Channel{ID: uuid.NewString(), ProjectID: space.ID,
+			Name: truncate(strings.Join(names, ", "), 100), CreatedAt: w.now}, ids); err != nil {
+			return err
+		}
+		return w.st.ReopenDM(ctx, a.PersonID, out.ID)
 	})
 	return out, err
+}
+
+// CloseDM takes a DM out of the acting Person's list. It comes back when
+// someone writes in it, or when they open it again; nothing is deleted.
+func (s *Service) CloseDM(ctx context.Context, a Actor, channelID string) error {
+	if !a.IsPerson() {
+		return ErrNoActor
+	}
+	return s.tx(ctx, func(w *work) error {
+		ch, err := w.st.GetChannel(ctx, channelID)
+		if err != nil {
+			return err
+		}
+		m, err := w.st.MemberForPerson(ctx, ch.ProjectID, a.PersonID)
+		if err != nil || ch.Kind != models.ChannelDM || !ch.Allows(m.ID) {
+			return store.ErrNotFound
+		}
+		return w.st.CloseDM(ctx, a.PersonID, ch.ID)
+	})
 }
 
 // DirectMessages lists every DM the acting Person is in, across the Server.

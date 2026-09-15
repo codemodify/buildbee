@@ -278,14 +278,16 @@ export type Roster = {
   events: { name: string; action: string; project_id: string; project_name: string; at: string }[];
 };
 
-/** DM is a direct message as its reader sees it. */
+/** DM is a direct message between people, as its reader sees it. */
 export type DM = Channel & {
-  project_name?: string; // empty for DMs between people
   with: { member_id: string; person_id?: string; name: string; kind: string; role: string }[];
   unread: number;
   last_seq: number;
   last_at: string;
 };
+
+/** BotTemplate is one of the autopilot's Bots, offered when adding a Bot. */
+export type BotTemplate = { name: string; role: string; instructions: string };
 
 /** A message as posted, with what its mentions set in motion. */
 export type Posted = Message & {

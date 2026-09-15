@@ -47,7 +47,7 @@ func newStack(t *testing.T) *stack {
 		t.Fatal(err)
 	}
 	ada := core.Actor{PersonID: p.ID, Name: p.Name}
-	proj, err := svc.CreateProject(ctx, ada, core.NewProject{Name: "Work"})
+	proj, err := svc.CreateProject(ctx, ada, core.NewProject{Name: "Work", DefaultBots: true})
 	if err != nil {
 		t.Fatal(err)
 	}

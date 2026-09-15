@@ -45,7 +45,7 @@ func TestRunThroughWorker(t *testing.T) {
 	var out bytes.Buffer
 	c := &client.Client{Base: srv.URL, As: "Ada", HTTP: srv.Client(), Output: &out}
 
-	proj, err := c.CreateProject("Stream")
+	proj, err := c.CreateProject("Stream", true)
 	if err != nil {
 		t.Fatal(err)
 	}

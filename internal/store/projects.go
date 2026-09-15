@@ -165,10 +165,24 @@ func (s *Store) ListDMs(ctx context.Context, projectID, memberID string) ([]mode
 		ORDER BY created_at DESC, id`, projectID, memberID)
 }
 
-// PersonDMs lists every DM a Person is in, across Projects and the direct
-// space, most recently active first.
+// CloseDM hides a DM from a Person's list until someone writes in it again.
+func (s *Store) CloseDM(ctx context.Context, personID, channelID string) error {
+	_, err := s.q.Exec(ctx, `INSERT INTO closed_dms (person_id, channel_id, closed_seq)
+		VALUES ($1, $2, COALESCE((SELECT max(seq) FROM messages WHERE channel_id = $2), 0))
+		ON CONFLICT (person_id, channel_id) DO UPDATE SET closed_seq = EXCLUDED.closed_seq`, personID, channelID)
+	return mapErr(err)
+}
+
+// ReopenDM puts a closed DM back in a Person's list.
+func (s *Store) ReopenDM(ctx context.Context, personID, channelID string) error {
+	_, err := s.q.Exec(ctx, `DELETE FROM closed_dms WHERE person_id = $1 AND channel_id = $2`, personID, channelID)
+	return mapErr(err)
+}
+
+// PersonDMs lists the DMs between people a Person is in and has not
+// closed, most recently active first.
 func (s *Store) PersonDMs(ctx context.Context, personID string) ([]models.DM, error) {
-	rows, err := s.q.Query(ctx, `SELECT `+prefixedChannelCols+`, pr.kind, pr.name,
+	rows, err := s.q.Query(ctx, `SELECT `+prefixedChannelCols+`,
 			(SELECT count(*) FROM messages m WHERE m.channel_id = c.id AND m.seq > COALESCE(rm.last_seq, 0) AND m.member_id <> me.id),
 			COALESCE((SELECT max(m.seq) FROM messages m WHERE m.channel_id = c.id), 0),
 			COALESCE((SELECT max(m.created_at) FROM messages m WHERE m.channel_id = c.id), c.created_at) AS last_at
@@ -177,7 +191,9 @@ func (s *Store) PersonDMs(ctx context.Context, personID string) ([]models.DM, er
 		JOIN members me ON me.project_id = c.project_id AND me.person_id = $1
 		JOIN channel_members mine ON mine.channel_id = c.id AND mine.member_id = me.id
 		LEFT JOIN read_markers rm ON rm.channel_id = c.id AND rm.person_id = $1
-		WHERE c.kind = 'dm' AND c.archived_at IS NULL
+		WHERE c.kind = 'dm' AND c.archived_at IS NULL AND pr.kind = 'direct'
+			AND NOT EXISTS (SELECT 1 FROM closed_dms x WHERE x.person_id = $1 AND x.channel_id = c.id
+				AND x.closed_seq >= COALESCE((SELECT max(m.seq) FROM messages m WHERE m.channel_id = c.id), 0))
 		ORDER BY last_at DESC, c.id`, personID)
 	if err != nil {
 		return nil, mapErr(err)
@@ -186,14 +202,10 @@ func (s *Store) PersonDMs(ctx context.Context, personID string) ([]models.DM, er
 	var ids []string
 	for rows.Next() {
 		var d models.DM
-		var kind string
 		if err := rows.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Kind, &d.Locked, &d.ArchivedAt, &d.CreatedAt, &d.Members,
-			&kind, &d.ProjectName, &d.Unread, &d.LastSeq, &d.LastAt); err != nil {
+			&d.Unread, &d.LastSeq, &d.LastAt); err != nil {
 			rows.Close()
 			return nil, err
-		}
-		if kind == models.DirectSpace {
-			d.ProjectName = ""
 		}
 		d.With = []models.DMPeer{}
 		out = append(out, d)

@@ -5,9 +5,10 @@ import { go } from "../route";
 import { useLoad } from "../store";
 import { ago } from "../text";
 import type { AgentLoad, Person, Presence, Project, Roster } from "../types";
-import { Avatar, Button, ErrorNote, Field, Pill, Sheet, cx, inputBase, inputClass } from "./kit";
+import { Avatar, Button, ErrorNote, Field, Pill, Sheet, cx, inputClass } from "./kit";
 import { ProjectScope } from "./scope";
-import { UsagePanel, agents } from "./Settings";
+import { AddBot } from "./AddBot";
+import { UsagePanel } from "./Settings";
 import { TaskBoard } from "./Tasks";
 
 /** invitedName is the name in an invite link (#/hi/<name>), if this is one. */
@@ -283,75 +284,11 @@ function Invite({ projects, onClose, onDone }: { projects: Project[]; onClose: (
           ))}
         </fieldset>
         <ErrorNote>{err}</ErrorNote>
-        <Button tone="primary" type="submit" disabled={!name.trim() || picked.size === 0}>
-          Invite
-        </Button>
-      </form>
-    </Sheet>
-  );
-}
-
-/** AddBot adds a Bot to one Project. */
-function AddBot({ projects, onClose, onDone }: { projects: Project[]; onClose: () => void; onDone: () => void }) {
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [agent, setAgent] = useState("");
-  const [instructions, setInstructions] = useState("");
-  const [err, setErr] = useState("");
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setErr("");
-    try {
-      await api.addMember(projectId, { kind: "bot", display_name: name.trim(), role: role.trim(), agent, instructions: instructions.trim() });
-      onDone();
-      onClose();
-    } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : String(e2));
-    }
-  }
-  return (
-    <Sheet title="Add bot" onClose={onClose}>
-      <form className="space-y-3" onSubmit={submit}>
-        <Field label="Project">
-          <select id="bot-project" className={cx(inputBase, "w-full")} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Name">
-            <input id="bot-name" className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Docs" />
-          </Field>
-          <Field label="Role">
-            <input id="bot-role" className={inputClass} value={role} onChange={(e) => setRole(e.target.value)} placeholder="writer" />
-          </Field>
+        <div className="flex justify-end">
+          <Button tone="primary" type="submit" disabled={!name.trim() || picked.size === 0}>
+            Invite
+          </Button>
         </div>
-        <Field label="Agent">
-          <select id="bot-agent" className={cx(inputBase, "w-full")} value={agent} onChange={(e) => setAgent(e.target.value)}>
-            {agents.map((a) => (
-              <option key={a} value={a}>
-                {a || "Any agent"}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Instructions">
-          <textarea
-            id="bot-instructions"
-            className={cx(inputClass, "min-h-20 text-[13px]")}
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            placeholder="You write and fix docs."
-          />
-        </Field>
-        <ErrorNote>{err}</ErrorNote>
-        <Button tone="primary" type="submit" disabled={!projectId || !name.trim() || !role.trim()}>
-          Add
-        </Button>
       </form>
     </Sheet>
   );

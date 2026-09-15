@@ -17,7 +17,7 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | --- | --- |
 | **Person** | Someone using BuildBee, identified by the name they chose. A Person is a Member of each Project they work in. |
 | **Member** | A Person or a Bot in one Project. |
-| **Role** | What a Member does in a Project. Humans start as **owner**. Seeded Bots: **Scout** (plans), **Builder** (implements and pushes), **Sentry** (reviews), **Pulse** (opens the Tasks Routines schedule). |
+| **Role** | What a Member does in a Project. Humans start as **owner**. A Project starts with no Bots; the autopilot's are offered when adding one: **Scout** (plans), **Builder** (implements and pushes), **Sentry** (reviews), **Pulse** (opens the Tasks Routines schedule). |
 | **Identity** | Who is acting: a Person (by the name they chose — there is no login on a trusted LAN), a Bot, or a named system process such as a worker. Agent credentials stay on worker machines, never in BuildBee. |
 
 ## Work

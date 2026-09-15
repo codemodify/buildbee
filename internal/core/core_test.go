@@ -62,7 +62,7 @@ func (f *fixture) person(name string) Actor {
 
 func (f *fixture) project(a Actor, name string) *models.ProjectBundle {
 	f.t.Helper()
-	p, err := f.s.CreateProject(f.ctx, a, NewProject{Name: name})
+	p, err := f.s.CreateProject(f.ctx, a, NewProject{Name: name, DefaultBots: true})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -114,6 +114,16 @@ func TestHelloIsCaseInsensitiveAndValidated(t *testing.T) {
 		if _, err := f.s.Hello(f.ctx, bad); !errors.Is(err, store.ErrInvalid) {
 			t.Fatalf("%q: got %v", bad, err)
 		}
+	}
+}
+
+func TestNewProjectsHaveNoBotsUnlessAsked(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p, err := f.s.CreateProject(f.ctx, ada, NewProject{Name: "Bare"})
+	f.must(err)
+	if len(p.Members) != 1 || p.Members[0].Kind != models.KindHuman || len(p.Channels) != 1 {
+		t.Fatalf("bare project: %+v", p)
 	}
 }
 

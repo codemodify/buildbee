@@ -97,5 +97,5 @@ func (p projectJSON) role(role string) string {
 
 func (s *stack) project(as, name string) projectJSON {
 	s.t.Helper()
-	return ok[projectJSON](s.t, s.call(http.MethodPost, "/v1/projects", as, obj{"name": name}), http.StatusCreated)
+	return ok[projectJSON](s.t, s.call(http.MethodPost, "/v1/projects", as, obj{"name": name, "default_bots": true}), http.StatusCreated)
 }

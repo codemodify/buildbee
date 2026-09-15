@@ -34,13 +34,9 @@ export function ChannelView({
     atBottom.current = true;
   }, [channel.id]);
 
-  const bots = channel.kind === "dm" ? (channel.member_ids ?? []).map((id) => members.get(id)).filter((m) => m?.kind === "bot") : [];
-  const placeholder =
-    channel.kind === "dm"
-      ? bots.length
-        ? `Tell ${bots.map((b) => b?.display_name).join(", ")} what to do`
-        : `Message ${channel.name}`
-      : `Message #${channel.name}`;
+  const placeholder = channel.kind === "dm" ? `Message ${channel.name}` : `Message #${channel.name}`;
+  const bot = [...members.values()].find((m) => m.kind === "bot" && !m.left_at);
+  const hint = channel.kind === "dm" || !bot ? undefined : `@${bot.display_name} to delegate`;
 
   return (
     <section className="flex h-full min-w-0 flex-col">
@@ -90,7 +86,7 @@ export function ChannelView({
             atBottom.current = true;
             add(await api.postMessage(channel.id, body));
           }}
-          hint={channel.kind === "dm" ? undefined : "@Builder to delegate"}
+          hint={hint}
         />
       </div>
     </section>

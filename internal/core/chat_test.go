@@ -95,44 +95,58 @@ func TestTaskThreadsCarryTheWork(t *testing.T) {
 
 func TestDMs(t *testing.T) {
 	f := newFixture(t)
-	ada, bob := f.person("Ada"), f.person("Bob")
+	ada, bob, cy := f.person("Ada"), f.person("Bob"), f.person("Cy")
 	p := f.project(ada, "DMs")
-	_, err := f.s.Join(f.ctx, bob, p.ID)
+	dm, err := f.s.OpenDirect(f.ctx, ada, NewDirect{PersonIDs: []string{bob.PersonID, bob.PersonID}})
 	f.must(err)
-	builder := bot(p, models.RoleBuilder)
-	dm, err := f.s.OpenDM(f.ctx, ada, p.ID, []string{builder.ID})
-	f.must(err)
-	again, err := f.s.OpenDM(f.ctx, ada, p.ID, []string{builder.ID, builder.ID})
-	f.must(err)
-	if dm.Kind != models.ChannelDM || again.ID != dm.ID || len(dm.Members) != 2 || dm.Name != "Builder" {
-		t.Fatalf("one DM per set of members: %+v %+v", dm, again)
+	if dm.Kind != models.ChannelDM || len(dm.Members) != 2 || dm.Name != "Bob" {
+		t.Fatalf("dm: %+v", dm)
 	}
-	// A message to a Bot in a DM asks it to work.
-	posted, err := f.s.PostMessage(f.ctx, ada, dm.ID, "Bump the Go version")
+	// A DM is talk between people: mentioning a Bot there starts nothing.
+	posted, err := f.s.PostMessage(f.ctx, ada, dm.ID, "@Builder bump the Go version")
 	f.must(err)
-	if len(posted.Tasks) != 1 || posted.Tasks[0].AssigneeMemberID != builder.ID || posted.TaskID != posted.Tasks[0].ID {
+	if len(posted.Tasks) != 0 {
 		t.Fatalf("posted: %+v", posted)
 	}
-	th, err := f.s.Thread(f.ctx, ada, posted.Tasks[0].ThreadID, store.Page{})
-	f.must(err)
-	if th.Root.ChannelID != p.Channels[0].ID || th.Root.Body != "Task: Bump the Go version" {
-		t.Fatalf("the Task's thread is in #tasks: %+v", th.Root)
-	}
 	// Others do not see it.
-	if dms, _ := f.s.DMs(f.ctx, bob, p.ID); len(dms) != 0 {
-		t.Fatalf("Bob sees %+v", dms)
+	if dms, _ := f.s.DirectMessages(f.ctx, cy); len(dms) != 0 {
+		t.Fatalf("Cy sees %+v", dms)
 	}
-	if _, _, err := f.s.Messages(f.ctx, bob, dm.ID, store.Page{}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("Bob reads the DM: %v", err)
+	if _, _, err := f.s.Messages(f.ctx, cy, dm.ID, store.Page{}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Cy reads the DM: %v", err)
 	}
-	if _, err := f.s.PostMessage(f.ctx, bob, dm.ID, "hi"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("Bob writes to the DM: %v", err)
+	if err := f.s.CloseDM(f.ctx, cy, dm.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Cy closes the DM: %v", err)
 	}
 	if chs, _ := f.s.Channels(f.ctx, p.ID, false); len(chs) != 1 {
 		t.Fatalf("DMs are not Channels: %+v", chs)
 	}
-	if _, err := f.s.OpenDM(f.ctx, ada, p.ID, []string{p.Members[0].ID}); !errors.Is(err, store.ErrInvalid) {
+	if _, err := f.s.OpenDirect(f.ctx, ada, NewDirect{PersonIDs: []string{ada.PersonID}}); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("a DM with yourself only: %v", err)
+	}
+	// Closing hides it until someone writes, or you open it again.
+	listed := func(a Actor) bool {
+		dms, err := f.s.DirectMessages(f.ctx, a)
+		f.must(err)
+		return len(dms) == 1
+	}
+	f.must(f.s.CloseDM(f.ctx, bob, dm.ID))
+	if listed(bob) || !listed(ada) {
+		t.Fatal("closing is for the closer only")
+	}
+	_, err = f.s.PostMessage(f.ctx, ada, dm.ID, "still there?")
+	f.must(err)
+	if !listed(bob) {
+		t.Fatal("a new message brings it back")
+	}
+	f.must(f.s.CloseDM(f.ctx, bob, dm.ID))
+	_, err = f.s.OpenDirect(f.ctx, bob, NewDirect{PersonIDs: []string{ada.PersonID}})
+	f.must(err)
+	if !listed(bob) {
+		t.Fatal("opening it again brings it back")
+	}
+	if msgs, _, _ := f.s.Messages(f.ctx, bob, dm.ID, store.Page{}); len(msgs) != 2 {
+		t.Fatalf("closing deletes nothing: %+v", msgs)
 	}
 }
 
@@ -270,7 +284,7 @@ func TestAskingElsewhereOpensTheTaskThreadInTasks(t *testing.T) {
 func TestDirectMessagesSpanTheServer(t *testing.T) {
 	f := newFixture(t)
 	ada, bob, cy := f.person("Ada"), f.person("Bob"), f.person("Cy")
-	pay := f.project(ada, "Payments")
+	f.project(ada, "Payments")
 	f.project(bob, "Website")
 	// Ada and Bob share no Project; a DM needs none.
 	dm, err := f.s.OpenDirect(f.ctx, ada, NewDirect{PersonIDs: []string{bob.PersonID}})
@@ -291,25 +305,10 @@ func TestDirectMessagesSpanTheServer(t *testing.T) {
 	if _, err := f.s.PostMessage(f.ctx, cy, dm.ID, "let me in"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("others cannot write in it: %v", err)
 	}
-	// A DM with a Bot lives in the Bot's Project.
-	builder := bot(pay, models.RoleBuilder)
-	withBot, err := f.s.OpenDirect(f.ctx, ada, NewDirect{MemberID: builder.ID})
-	f.must(err)
-	if withBot.ProjectID != pay.ID {
-		t.Fatalf("bot DM in %s", withBot.ProjectID)
-	}
-	if _, err := f.s.OpenDirect(f.ctx, ada, NewDirect{MemberID: pay.Members[0].ID}); !errors.Is(err, store.ErrInvalid) {
-		t.Fatalf("people are messaged by person: %v", err)
-	}
 	list, err := f.s.DirectMessages(f.ctx, bob)
 	f.must(err)
-	if len(list) != 1 || list[0].Unread != 1 || len(list[0].With) != 1 || list[0].With[0].Name != "Ada" || list[0].ProjectName != "" {
+	if len(list) != 1 || list[0].Unread != 1 || len(list[0].With) != 1 || list[0].With[0].Name != "Ada" {
 		t.Fatalf("bob's DMs: %+v", list)
-	}
-	list, err = f.s.DirectMessages(f.ctx, ada)
-	f.must(err)
-	if len(list) != 2 || list[0].ID != withBot.ID || list[0].ProjectName != "Payments" || list[0].With[0].Kind != models.KindBot || list[1].Unread != 0 {
-		t.Fatalf("ada's DMs, newest first: %+v", list)
 	}
 	// The direct space is not a Project anyone sees or changes.
 	ps, err := f.s.Projects(f.ctx, false)

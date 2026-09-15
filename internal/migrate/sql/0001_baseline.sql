@@ -285,3 +285,11 @@ CREATE TABLE read_markers (
     last_seq BIGINT NOT NULL,
     PRIMARY KEY (person_id, channel_id)
 );
+
+-- A DM someone closed stays out of their list until a newer message.
+CREATE TABLE closed_dms (
+    person_id UUID NOT NULL REFERENCES people (id) ON DELETE CASCADE,
+    channel_id UUID NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    closed_seq BIGINT NOT NULL,
+    PRIMARY KEY (person_id, channel_id)
+);

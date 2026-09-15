@@ -385,7 +385,7 @@ func TestPresenceShowsEachAgentsLoad(t *testing.T) {
 func TestNewProjectsBotsUseTheChosenAgent(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
-	p, err := f.s.CreateProject(f.ctx, ada, NewProject{Name: "Codexed", Agent: "Codex"})
+	p, err := f.s.CreateProject(f.ctx, ada, NewProject{Name: "Codexed", DefaultBots: true, Agent: "Codex"})
 	f.must(err)
 	for _, m := range p.Members {
 		if m.Kind == models.KindBot && m.Agent != "codex" {

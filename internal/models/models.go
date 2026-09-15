@@ -195,15 +195,14 @@ const (
 	DirectSpace = "direct"
 )
 
-// DM is a direct message Channel as its reader sees it: who else is in it,
-// where it lives and what they have not read.
+// DM is a direct message between people as its reader sees it: who else
+// is in it and what they have not read.
 type DM struct {
 	Channel
-	ProjectName string    `json:"project_name,omitempty"` // empty in the direct space
-	With        []DMPeer  `json:"with"`
-	Unread      int       `json:"unread"`
-	LastSeq     int64     `json:"last_seq"`
-	LastAt      time.Time `json:"last_at"`
+	With    []DMPeer  `json:"with"`
+	Unread  int       `json:"unread"`
+	LastSeq int64     `json:"last_seq"`
+	LastAt  time.Time `json:"last_at"`
 }
 
 // DMPeer is someone else in a DM.
@@ -238,12 +237,13 @@ type Member struct {
 
 // BotSeed is the Role + instructions blurb for a seeded Bot Member.
 type BotSeed struct {
-	Name         string
-	Role         string
-	Instructions string
+	Name         string `json:"name"`
+	Role         string `json:"role"`
+	Instructions string `json:"instructions"`
 }
 
-// DefaultBots are the four Bots created with every Project.
+// DefaultBots are the autopilot's Bots: offered when adding a Bot, and
+// created with a Project only when asked (default_bots).
 func DefaultBots() []BotSeed {
 	return []BotSeed{
 		{Name: "Scout", Role: RoleScout, Instructions: "You are Scout. You turn Tasks into clear, small plans and say when a Task is unclear."},

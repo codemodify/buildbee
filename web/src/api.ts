@@ -1,6 +1,7 @@
 import type {
   Activity,
   Artifact,
+  BotTemplate,
   Channel,
   Decision,
   DM,
@@ -73,7 +74,7 @@ export const api = {
   forgetMe: () => request<unknown>("/v1/me", { method: "DELETE" }),
 
   projects: () => request<Items<Project>>("/v1/projects"),
-  createProject: (name: string, agent = "") => request<Project>("/v1/projects", post({ name, agent })),
+  createProject: (name: string) => request<Project>("/v1/projects", post({ name })),
   project: (id: string) => request<Project>(`/v1/projects/${id}`),
   updateProject: (id: string, body: ProjectPatch) => request<Project>(`/v1/projects/${id}`, patch(body)),
   addMember: (
@@ -88,10 +89,10 @@ export const api = {
   createChannel: (projectId: string, name: string) =>
     request<Channel>(`/v1/projects/${projectId}/channels`, post({ name })),
   directMessages: () => request<Items<DM>>("/v1/dms"),
-  openDirect: (body: { person_ids?: string[]; member_id?: string }) => request<Channel>("/v1/dms", post(body)),
+  openDirect: (personIds: string[]) => request<Channel>("/v1/dms", post({ person_ids: personIds })),
+  closeDM: (id: string) => request<unknown>(`/v1/dms/${id}/close`, post()),
+  botTemplates: () => request<Items<BotTemplate>>("/v1/bot-templates"),
   dms: (projectId: string) => request<Items<Channel>>(`/v1/projects/${projectId}/dms`),
-  openDM: (projectId: string, memberIds: string[]) =>
-    request<Channel>(`/v1/projects/${projectId}/dms`, post({ member_ids: memberIds })),
   unread: (projectId: string) => request<Items<Unread>>(`/v1/projects/${projectId}/unread`),
   markRead: (channelId: string, seq: number) => request<unknown>(`/v1/channels/${channelId}/read`, post({ seq })),
 

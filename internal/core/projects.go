@@ -14,12 +14,13 @@ import (
 
 // CreateProject creates a Project owned by the acting Person, with the four
 // default Bots, a #general Channel and a disabled morning-digest Routine.
-// NewProject describes a Project to create. Agent is what its Bots run
-// ("" = any agent a worker has).
+// NewProject describes a Project to create: its owner and #tasks, and the
+// autopilot's Bots only with DefaultBots, running Agent ("" = any).
 type NewProject struct {
-	Name    string `json:"name"`
-	AutoRun bool   `json:"auto_run"`
-	Agent   string `json:"agent"`
+	Name        string `json:"name"`
+	AutoRun     bool   `json:"auto_run"`
+	DefaultBots bool   `json:"default_bots"`
+	Agent       string `json:"agent"`
 }
 
 func (s *Service) CreateProject(ctx context.Context, a Actor, in NewProject) (*models.ProjectBundle, error) {
@@ -54,6 +55,9 @@ func (s *Service) CreateProject(ctx context.Context, a Actor, in NewProject) (*m
 			owner = &members[0]
 		}
 		for i, b := range models.DefaultBots() {
+			if !in.DefaultBots {
+				break
+			}
 			m := models.Member{ID: uuid.NewString(), ProjectID: p.ID, Kind: models.KindBot, DisplayName: b.Name,
 				Role: b.Role, Instructions: b.Instructions, Agent: agent, CreatedAt: w.now.Add(time.Duration(i+1) * time.Microsecond)}
 			if err := w.st.InsertMember(ctx, m); err != nil {

@@ -4,6 +4,7 @@ import { go } from "../route";
 import { useLoad } from "../store";
 import { ago, Markdown, money, tokens } from "../text";
 import type { Member, Routine, Usage } from "../types";
+import { AddBot } from "./AddBot";
 import { useCtx } from "./context";
 import { Avatar, Button, ErrorNote, Field, Pill, Toggle, cx, inputBase, inputClass } from "./kit";
 
@@ -64,6 +65,9 @@ export function Settings({ header }: { header: ReactNode }) {
   const { data, reload } = useCtx();
   const p = data.project;
   const [err, setErr] = useState("");
+  const [addingBot, setAddingBot] = useState(false);
+  const bots = data.members.filter((m) => m.kind === "bot" && !m.left_at);
+  const missing = ["scout", "builder", "sentry"].filter((r) => !bots.some((b) => b.role === r));
   async function save(patch: ProjectPatch) {
     setErr("");
     try {
@@ -77,7 +81,7 @@ export function Settings({ header }: { header: ReactNode }) {
     <Page header={header}>
       <ErrorNote>{err}</ErrorNote>
       <Card title="Autopilot">
-        <Row label="Autopilot" hint="Scout → Builder → Sentry → merge, unattended.">
+        <Row label="Autopilot" hint={missing.length ? `Scout → Builder → Sentry → merge. Needs ${missing.map((r) => r[0].toUpperCase() + r.slice(1)).join(", ")}: add in Bots.` : "Scout → Builder → Sentry → merge, unattended."}>
           <Toggle label="Autopilot" checked={!!p.auto_run} onChange={(v) => void save({ auto_run: v })} />
         </Row>
         <Row label="Merging" hint="Auto: after approval and green CI. Approval: ask first.">
@@ -100,15 +104,22 @@ export function Settings({ header }: { header: ReactNode }) {
         <TextSetting multiline value={p.instructions ?? ""} onSave={(v) => save({ instructions: v })} />
       </Card>
 
-      <Card title="Bots">
+      <Card
+        title="Bots"
+        action={
+          <Button size="sm" onClick={() => setAddingBot(true)}>
+            Add bot
+          </Button>
+        }
+      >
+        {bots.length === 0 && <p className="text-[13px] text-bb-subtle">None yet. Bots do the work you @mention them for.</p>}
         <div className="divide-y divide-bb-border">
-          {data.members
-            .filter((m) => m.kind === "bot")
-            .map((m) => (
-              <BotRow key={m.id} bot={m} onSaved={reload} />
-            ))}
+          {bots.map((m) => (
+            <BotRow key={m.id} bot={m} onSaved={reload} />
+          ))}
         </div>
       </Card>
+      {addingBot && <AddBot projects={[p]} onClose={() => setAddingBot(false)} onDone={reload} />}
 
       <Routines />
 

@@ -88,8 +88,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages/{id}/replies", s.postReply)
 	mux.HandleFunc("GET /v1/dms", s.listDirect)
 	mux.HandleFunc("POST /v1/dms", s.openDirect)
+	mux.HandleFunc("POST /v1/dms/{id}/close", s.closeDirect)
 	mux.HandleFunc("GET /v1/projects/{id}/dms", s.listDMs)
-	mux.HandleFunc("POST /v1/projects/{id}/dms", s.openDM)
+	mux.HandleFunc("GET /v1/bot-templates", s.botTemplates)
 	mux.HandleFunc("GET /v1/projects/{id}/unread", s.listUnread)
 	mux.HandleFunc("GET /v1/projects/{id}/activity", s.listActivity)
 

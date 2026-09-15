@@ -13,7 +13,7 @@ import { useProjectCtx } from "./ui/scope";
 import { Button, Empty, ErrorNote, cx, inputClass } from "./ui/kit";
 import { Settings } from "./ui/Settings";
 import { Status, invitedName } from "./ui/Status";
-import { AgentField, Sidebar, dmName } from "./ui/Sidebar";
+import { Sidebar, dmName } from "./ui/Sidebar";
 import { TaskPage } from "./ui/Tasks";
 import { ThreadPanel } from "./ui/Thread";
 
@@ -36,7 +36,6 @@ export default function App() {
 function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Person) => void }) {
   const [name, setName] = useState(invitedName);
   const [project, setProject] = useState("");
-  const [agent, setAgent] = useState("");
   const [error, setError] = useState("");
   const ready = name.trim() && (!needProject || project.trim());
   async function submit(e: FormEvent) {
@@ -45,7 +44,7 @@ function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Pers
       const { person } = await api.setMe(name.trim());
       if (window.location.hash.startsWith("#/hi/")) go({ view: "home" });
       if (needProject) {
-        const p = await api.createProject(project.trim(), agent);
+        const p = await api.createProject(project.trim());
         go({ view: "channel", projectId: p.id });
       }
       onDone(person);
@@ -61,12 +60,7 @@ function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Pers
           <h1 className="text-[18px] font-semibold">BuildBee</h1>
         </div>
         <input className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" aria-label="Your name" />
-        {needProject && (
-          <>
-            <input className={inputClass} value={project} onChange={(e) => setProject(e.target.value)} placeholder="Project name" aria-label="Project name" />
-            <AgentField value={agent} onChange={setAgent} />
-          </>
-        )}
+        {needProject && <input className={inputClass} value={project} onChange={(e) => setProject(e.target.value)} placeholder="Project name" aria-label="Project name" />}
         <ErrorNote>{error}</ErrorNote>
         <Button tone="primary" type="submit" disabled={!ready} className="w-full">
           Start

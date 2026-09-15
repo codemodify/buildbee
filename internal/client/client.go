@@ -88,9 +88,9 @@ func (c *Client) PrintJSON(v any) error {
 	return enc.Encode(v)
 }
 
-func (c *Client) CreateProject(name string) (map[string]any, error) {
+func (c *Client) CreateProject(name string, bots bool) (map[string]any, error) {
 	var out map[string]any
-	err := c.do(http.MethodPost, "/v1/projects", map[string]string{"name": name}, &out)
+	err := c.do(http.MethodPost, "/v1/projects", map[string]any{"name": name, "default_bots": bots}, &out)
 	return out, err
 }
 

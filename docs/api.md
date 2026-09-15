@@ -26,7 +26,8 @@ DELETE /v1/me                            → forget this browser's Person
 
 | Method and path | What it does |
 | --- | --- |
-| `GET/POST /v1/projects` | list (`?archived=1` includes archived) / create `{name, auto_run, agent}`; `agent` is what the new Bots run (`""` = any) |
+| `GET/POST /v1/projects` | list (`?archived=1` includes archived) / create `{name, auto_run}`: you and `#tasks`, no Bots. `default_bots: true` also adds Scout, Builder, Sentry and Pulse, running `agent` (`""` = any) |
+| `GET /v1/bot-templates` | the autopilot's Bots (`name`, `role`, `instructions`), to add with `POST /v1/projects/{id}/members` |
 | `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, merge_policy: auto\|approval, max_runs, instructions, repo_url, default_branch, archived}`; `auto_run` is [autopilot](autopilot.md) |
 | `POST /v1/projects/{id}/join`, `POST /v1/projects/{id}/leave` | join as `member` / leave (messages keep your name; writing again rejoins). Both show in `GET /v1/members` |
 | `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions, agent}` |
@@ -34,8 +35,8 @@ DELETE /v1/me                            → forget this browser's Person
 | `GET/POST /v1/projects/{id}/channels`, `PATCH /v1/channels/{id}` | Channels; `{name, archived}`. Every Project starts with `#tasks` (`locked`: first, cannot be renamed or archived), where every Task's thread lives |
 | `GET/POST /v1/channels/{id}/messages` | page root messages (each with `reply_count`, `task_id`) / post `{body}`; `@Bot` opens a Task handed to it, with this message as its thread, and starts the Bot's Run; `@Person` notifies them |
 | `GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies` | a thread `{root, replies, has_more}` / reply `{body}`. In a Task's thread, `@Bot` hands that Task on, and any other reply reaches the agent working on it |
-| `GET/POST /v1/dms` | every DM you are in across the Server, newest first, with `with` (the others), `project_name` (Bot DMs), `unread` / open one with `{person_ids}` (people anywhere: one conversation per set of people) or `{member_id}` (a Bot, in its Project). Writing in a DM notifies the other people in it |
-| `GET/POST /v1/projects/{id}/dms` | your DMs / open the DM with `{member_ids}` (people or Bots; one DM per set of members). A message in a DM with a Bot asks it to work, as a mention does |
+| `GET/POST /v1/dms` | DMs are between people. Every DM you are in and have not closed, newest first, with `with` (the others) and `unread` / open one with `{person_ids}`: one conversation per set of people, whichever Projects they share. Writing in a DM notifies the others in it; Bots are asked in channels |
+| `POST /v1/dms/{id}/close` | take a DM out of your list; it comes back with a new message or when you open it again. Nothing is deleted |
 | `GET /v1/projects/{id}/unread`, `POST /v1/channels/{id}/read` | per Channel and DM: `{channel_id, unread, last_seq}` / mark read up to `{seq}` |
 | `GET /v1/members` | everyone on the Server: `people` with their Projects (`left_at` if they left), `bots` with `project_name`, and recent `events` (created, joined, left, added), newest first |
 | `GET /v1/presence` | people with the app open; workers seen in the last 90 s with their agents, `slots` and `running`; `agents` (each agent's `workers`, `running`, `queued`; `any` is Runs that take whichever); `local`, the Server's own worker (`state` off, starting, running or unavailable, with `reason` and `isolation`) |

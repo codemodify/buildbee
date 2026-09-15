@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/codemodify/buildbee/internal/core"
+	"github.com/codemodify/buildbee/internal/models"
 )
 
 // --- inbox ---
@@ -181,15 +182,13 @@ func (s *Server) listDMs(w http.ResponseWriter, r *http.Request) {
 	respondItems(s, w, list, err)
 }
 
-func (s *Server) openDM(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		MemberIDs []string `json:"member_ids"`
-	}
-	if !s.decode(w, r, &in) {
-		return
-	}
-	ch, err := s.core.OpenDM(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.MemberIDs)
-	respond(s, w, http.StatusOK, ch, err)
+func (s *Server) closeDirect(w http.ResponseWriter, r *http.Request) {
+	err := s.core.CloseDM(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, map[string]bool{"closed": true}, err)
+}
+
+func (s *Server) botTemplates(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"items": models.DefaultBots()})
 }
 
 func (s *Server) listDirect(w http.ResponseWriter, r *http.Request) {

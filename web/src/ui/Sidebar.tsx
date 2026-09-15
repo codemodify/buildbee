@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { useLiveStatus } from "../live";
 import { go, type Route } from "../route";
 import { useDMs, useLoad, useProject, useUnread } from "../store";
 import type { Channel, DM, Member, Person, Presence, Project, Roster } from "../types";
-import { Avatar, Button, Field, Sheet, cx, inputBase, inputClass } from "./kit";
-import { agents } from "./Settings";
+import { Avatar, Button, Sheet, cx, inputClass } from "./kit";
 
 /** dmName names a DM by the other people in it. */
 export function dmName(c: Channel, members: Map<string, Member>, myMemberId?: string): string {
@@ -14,7 +13,7 @@ export function dmName(c: Channel, members: Map<string, Member>, myMemberId?: st
 }
 
 const OPEN_KEY = "buildbee.sidebar.closed";
-const DM_KEY = "dm"; // the DM group's entry among the closed sections
+const DM_KEY = "dm"; // the DM group's entry among the closed sections; closed unless opened
 
 function loadClosed(): Record<string, boolean> {
   try {
@@ -51,9 +50,10 @@ export function Sidebar({
     }
   }, [closed]);
   const keys = [DM_KEY, ...projects.map((p) => p.id)];
-  const allClosed = keys.every((k) => closed[k]);
+  const allClosed = keys.every((k) => closed[k] ?? k === DM_KEY);
   const setAll = (value: boolean) => setClosed(Object.fromEntries(keys.map((k) => [k, value])));
-  const toggle = (k: string) => setClosed((c) => ({ ...c, [k]: !c[k] }));
+  const isClosed = (k: string) => closed[k] ?? k === DM_KEY; // DMs start closed
+  const toggle = (k: string) => setClosed((c) => ({ ...c, [k]: !isClosed(k) }));
   const online = new Set((presence?.people ?? []).map((p) => p.id));
   const live = useLiveStatus();
   const open = (r: Route) => {
@@ -97,7 +97,7 @@ export function Sidebar({
             )}
           </Pinned>
         </div>
-        <DMSection me={me} route={route} online={online} open={!closed[DM_KEY]} onToggle={() => toggle(DM_KEY)} onOpen={open} />
+        <DMSection me={me} route={route} online={online} open={!isClosed(DM_KEY)} onToggle={() => toggle(DM_KEY)} onOpen={open} />
         {projects.map((p) => (
           <ProjectSection
             key={p.id}
@@ -172,7 +172,7 @@ function SectionRow({
   );
 }
 
-/** DMSection is every DM the Person is in, people and Bots, across Projects. */
+/** DMSection is every DM the Person is in with other people. */
 function DMSection({
   me,
   route,
@@ -207,7 +207,18 @@ function DMSection({
             </button>
           )}
           {dms.map((d) => (
-            <DMItem key={d.id} dm={d} active={d.id === activeId} online={online} onClick={() => onOpen({ view: "channel", projectId: d.project_id, channelId: d.id })} />
+            <DMItem
+              key={d.id}
+              dm={d}
+              active={d.id === activeId}
+              online={online}
+              onClick={() => onOpen({ view: "channel", projectId: d.project_id, channelId: d.id })}
+              onClose={async () => {
+                await api.closeDM(d.id).catch(() => undefined);
+                reload();
+                if (d.id === activeId) onOpen({ view: "status" });
+              }}
+            />
           ))}
         </div>
       )}
@@ -219,6 +230,7 @@ function DMSection({
           onOpened={(c) => {
             reload();
             setAdding(false);
+            if (!open) onToggle();
             onOpen({ view: "channel", projectId: c.project_id, channelId: c.id });
           }}
         />
@@ -227,21 +239,25 @@ function DMSection({
   );
 }
 
-function DMItem({ dm, active, online, onClick }: { dm: DM; active: boolean; online: Set<string>; onClick: () => void }) {
+function DMItem({ dm, active, online, onClick, onClose }: { dm: DM; active: boolean; online: Set<string>; onClick: () => void; onClose: () => void }) {
   const first = dm.with[0];
-  const bot = first?.kind === "bot";
   const name = dm.with.map((w) => w.name).join(", ") || dm.name;
   return (
-    <Item active={active} count={active ? 0 : dm.unread} onClick={onClick}>
-      <Avatar
-        member={first && ({ id: first.member_id, project_id: dm.project_id, kind: first.kind, display_name: first.name, role: first.role } as Member)}
-        name={name}
-        size={16}
-        online={first?.person_id ? online.has(first.person_id) : undefined}
-      />
-      <span className="truncate">{name}</span>
-      {bot && dm.project_name && <span className="truncate text-[11.5px] font-normal text-bb-subtle">{dm.project_name}</span>}
-    </Item>
+    <div className="group/dm relative">
+      <Item active={active} count={active ? 0 : dm.unread} onClick={onClick}>
+        <Avatar name={name} size={16} online={first?.person_id ? online.has(first.person_id) : undefined} />
+        <span className="truncate pr-5">{name}</span>
+      </Item>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={`Close the DM with ${name}`}
+        title="Close (it comes back with a new message)"
+        className="absolute top-1/2 right-1 hidden h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[12px] text-bb-subtle group-focus-within/dm:flex group-hover/dm:flex hover:bg-bb-border/60 hover:text-bb-fg"
+      >
+        ✕
+      </button>
+    </div>
   );
 }
 
@@ -391,18 +407,19 @@ function NewChannel({ projectId, onClose, onDone }: { projectId: string; onClose
           }
         }}
       >
-        <Field label="Name" hint={err}>
-          <input id="channel-name" className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="releases" />
-        </Field>
-        <Button tone="primary" type="submit" disabled={!name.trim()}>
-          Create
-        </Button>
+        <input id="channel-name" className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="channel name" aria-label="Channel name" />
+        {err && <p className="text-[12px] text-bb-danger">{err}</p>}
+        <div className="flex justify-end">
+          <Button tone="primary" type="submit" disabled={!name.trim()}>
+            Create
+          </Button>
+        </div>
       </form>
     </Sheet>
   );
 }
 
-/** NewMessage starts a DM: with people anywhere on the Server, or with one Bot. */
+/** NewMessage starts a DM with people anywhere on the Server. */
 function NewMessage({ me, online, onClose, onOpened }: { me: Person; online: Set<string>; onClose: () => void; onOpened: (c: Channel) => void }) {
   const { data: roster } = useLoad<Roster>(() => api.roster(), []);
   const [filter, setFilter] = useState("");
@@ -410,11 +427,10 @@ function NewMessage({ me, online, onClose, onOpened }: { me: Person; online: Set
   const [err, setErr] = useState("");
   const f = filter.trim().toLowerCase();
   const people = (roster?.people ?? []).filter((p) => p.id !== me.id && p.name.toLowerCase().includes(f));
-  const bots = useMemo(() => (roster?.bots ?? []).filter((b) => `${b.display_name} ${b.role} ${b.project_name}`.toLowerCase().includes(f)), [roster, f]);
-  async function openWith(body: { person_ids?: string[]; member_id?: string }) {
+  async function open() {
     setErr("");
     try {
-      onOpened(await api.openDirect(body));
+      onOpened(await api.openDirect(picked));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -422,58 +438,41 @@ function NewMessage({ me, online, onClose, onOpened }: { me: Person; online: Set
   return (
     <Sheet title="New message" onClose={onClose}>
       <div className="space-y-3">
-        <input id="dm-filter" className={inputClass} autoFocus value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Name, bot or project" />
-        <div className="max-h-80 space-y-3 overflow-y-auto">
-          {people.length > 0 && (
-            <ul className="space-y-px">
-              {people.map((p) => {
-                const on = picked.includes(p.id);
-                return (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => setPicked((ids) => (on ? ids.filter((x) => x !== p.id) : [...ids, p.id]))}
-                      className={cx("flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-bb-hover", on && "bg-bb-accent-soft")}
-                    >
-                      <Avatar name={p.name} size={24} online={online.has(p.id)} />
-                      <span className="text-[13.5px] font-medium">{p.name}</span>
-                      <span className="ml-auto text-[13px] text-bb-accent">{on ? "✓" : ""}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {bots.length > 0 && (
-            <ul className="space-y-px">
-              <li className="px-2 pb-0.5 text-[12px] font-semibold tracking-wide text-bb-subtle uppercase">Bots</li>
-              {bots.map((b) => (
-                <li key={b.id}>
-                  <button type="button" onClick={() => void openWith({ member_id: b.id })} className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-bb-hover">
-                    <Avatar member={b} size={24} />
-                    <span className="text-[13.5px] font-medium">{b.display_name}</span>
-                    <span className="text-[12px] text-bb-subtle">{b.project_name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {roster && people.length === 0 && bots.length === 0 && <p className="px-2 text-[13px] text-bb-subtle">No one matches.</p>}
+        <input id="dm-filter" className={inputClass} autoFocus value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="name" aria-label="Find people" />
+        <ul className="max-h-80 space-y-px overflow-y-auto">
+          {people.map((p) => {
+            const on = picked.includes(p.id);
+            return (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setPicked((ids) => (on ? ids.filter((x) => x !== p.id) : [...ids, p.id]))}
+                  className={cx("flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-bb-hover", on && "bg-bb-accent-soft")}
+                >
+                  <Avatar name={p.name} size={24} online={online.has(p.id)} />
+                  <span className="text-[13.5px] font-medium">{p.name}</span>
+                  <span className="ml-auto text-[13px] text-bb-accent">{on ? "✓" : ""}</span>
+                </button>
+              </li>
+            );
+          })}
+          {roster && people.length === 0 && <li className="px-2 text-[13px] text-bb-subtle">{f ? "No one matches." : "No one else here yet. Invite people from # status."}</li>}
+        </ul>
+        {err && <p className="text-[12px] text-bb-danger">{err}</p>}
+        <div className="flex justify-end">
+          <Button tone="primary" disabled={picked.length === 0} onClick={() => void open()}>
+            Message
+          </Button>
         </div>
-        <p className="text-[12px] text-bb-danger">{err}</p>
-        <Button tone="primary" disabled={picked.length === 0} onClick={() => void openWith({ person_ids: picked })}>
-          Message
-        </Button>
       </div>
     </Sheet>
   );
 }
 
-/** NewProject creates a Project; its Bots run the chosen agent. */
+/** NewProject creates a Project: you, and its #tasks. */
 export function NewProject({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
-  const [agent, setAgent] = useState("");
   const [err, setErr] = useState("");
   return (
     <Sheet title="New Project" onClose={onClose}>
@@ -482,7 +481,7 @@ export function NewProject({ onClose }: { onClose: () => void }) {
         onSubmit={async (e) => {
           e.preventDefault();
           try {
-            const p = await api.createProject(name.trim(), agent);
+            const p = await api.createProject(name.trim());
             onClose();
             go({ view: "channel", projectId: p.id });
           } catch (e2) {
@@ -490,29 +489,14 @@ export function NewProject({ onClose }: { onClose: () => void }) {
           }
         }}
       >
-        <Field label="Name" hint={err}>
-          <input id="project-name" className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <AgentField value={agent} onChange={setAgent} />
-        <Button tone="primary" type="submit" disabled={!name.trim()}>
-          Create
-        </Button>
+        <input id="project-name" className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="project name" aria-label="Project name" />
+        {err && <p className="text-[12px] text-bb-danger">{err}</p>}
+        <div className="flex justify-end">
+          <Button tone="primary" type="submit" disabled={!name.trim()}>
+            Create
+          </Button>
+        </div>
       </form>
     </Sheet>
-  );
-}
-
-/** AgentField picks what a new Project's Bots run. */
-export function AgentField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <Field label="Bots use" hint="Change any Bot later in Settings.">
-      <select id="project-agent" className={cx(inputBase, "w-full")} value={value} onChange={(e) => onChange(e.target.value)}>
-        {agents.map((a) => (
-          <option key={a} value={a}>
-            {a || "Any agent"}
-          </option>
-        ))}
-      </select>
-    </Field>
   );
 }
