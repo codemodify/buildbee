@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"github.com/codemodify/buildbee/internal/blob"
 	"strings"
 	"sync"
 	"testing"
@@ -40,15 +41,18 @@ func (r *recorder) topic(prefix string) []Event {
 }
 
 type fixture struct {
-	t   *testing.T
-	ctx context.Context
-	s   *Service
-	pub *recorder
+	t     *testing.T
+	ctx   context.Context
+	s     *Service
+	pub   *recorder
+	blobs blob.Dir
 }
 
 func newFixture(t *testing.T) *fixture {
 	pub := &recorder{}
-	return &fixture{t: t, ctx: context.Background(), s: New(store.New(testdb.New(t)), pub, Options{}), pub: pub}
+	blobs := blob.Dir{Root: t.TempDir()}
+	return &fixture{t: t, ctx: context.Background(), s: New(store.New(testdb.New(t)), pub, Options{Blobs: blobs, MaxUploadBytes: 1 << 20}),
+		pub: pub, blobs: blobs}
 }
 
 func (f *fixture) person(name string) Actor {

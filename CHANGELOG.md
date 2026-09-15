@@ -12,6 +12,8 @@
 - New Projects start with you and `#tasks`, no Bots (`default_bots: true` on `POST /v1/projects` adds the autopilot's four)
 
 ### Added (chat)
+- Attachments: attach, paste or drop files in any composer (`POST /v1/channels/{id}/files`, `file_ids` on posts); images preview, other files download safely (`GET /v1/files/{id}`)
+- Files and large Artifacts live outside Postgres (migration 0004): `BUILDBEE_BLOB_DIR` by default, or an S3-compatible bucket (`BUILDBEE_S3_*`); `GET /v1/artifacts/{id}/raw` streams a whole log
 - Message search (`GET /v1/search`, migration 0003): words and prefixes across channels, threads and your DMs
 - Ctrl+K (or the magnifier) jumps to any channel, DM, person, Project settings or pinned place, or searches messages
 - Desktop notifications, from Your settings (browsers allow them on HTTPS or localhost)

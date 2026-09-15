@@ -49,13 +49,15 @@ docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
   pg_restore -U buildbee -d buildbee --clean --if-exists < buildbee-2026-09-15.dump
 ```
 
+## Files
+
+Attachments and large Artifacts (agent logs, diffs over 64 KiB) are kept outside Postgres, in the `server_data` volume (`BUILDBEE_BLOB_DIR=/data/blobs`). To keep them in an S3-compatible service instead (MinIO, Garage, SeaweedFS, AWS S3), set `BUILDBEE_S3_ENDPOINT`, `BUILDBEE_S3_ACCESS_KEY` and `BUILDBEE_S3_SECRET_KEY` (and `BUILDBEE_S3_BUCKET`, default `buildbee`, created at startup if missing). One attachment is at most `BUILDBEE_MAX_UPLOAD_BYTES` (25 MiB).
+
 ## Upgrades
 
-Until the first release, the schema is one baseline migration that is edited in place. When it changes, the Server refuses to start against an older database and says so. Recreate the database:
+Pull, rebuild and restart. The Server applies new migrations at startup, each in its own transaction, under a lock so two Servers cannot race. Released migrations never change; a database made by a newer BuildBee is refused rather than guessed at. Back up first (above).
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml down -v
+git pull
 docker compose -f deploy/compose/docker-compose.yml up -d --build
 ```
-
-After the first release every schema change is a new migration, applied automatically at startup under a lock.

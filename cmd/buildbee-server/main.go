@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/blob"
 	"github.com/codemodify/buildbee/internal/config"
 	"github.com/codemodify/buildbee/internal/core"
 	"github.com/codemodify/buildbee/internal/httpapi"
@@ -56,7 +57,12 @@ func run() error {
 	hub := ws.NewHub(func(ctx context.Context, topic string, after int64) ([]core.Event, error) {
 		return svc.Replay(ctx, topic, after)
 	}, nil)
-	svc = core.New(store.New(pool), hub, core.Options{GitHub: cfg.GitHub})
+	blobs, err := openBlobs(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	slog.Info("files stored in", "blobs", blobs.Name())
+	svc = core.New(store.New(pool), hub, core.Options{GitHub: cfg.GitHub, Blobs: blobs, MaxUploadBytes: cfg.MaxUploadBytes})
 
 	api := httpapi.NewServer(svc, hub, httpapi.Options{
 		GitHub:       cfg.GitHub,
@@ -82,6 +88,11 @@ func run() error {
 				return
 			case <-t.C:
 				svc.TickRoutines(ctx)
+				if n, err := svc.SweepUploads(ctx); err != nil {
+					slog.Error("sweep uploads", "err", err)
+				} else if n > 0 {
+					slog.Info("deleted uploads never posted", "files", n)
+				}
 				if n, err := svc.ReapRuns(ctx); err != nil {
 					slog.Error("reap runs", "err", err)
 				} else if n > 0 {
@@ -153,6 +164,25 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+// openBlobs returns where attachments and large Artifacts go: the S3
+// bucket when one is configured (created if missing), else a directory.
+func openBlobs(ctx context.Context, cfg config.Server) (blob.Store, error) {
+	if cfg.S3.Endpoint != "" {
+		st := &blob.S3{Endpoint: cfg.S3.Endpoint, Bucket: cfg.S3.Bucket, Region: cfg.S3.Region,
+			AccessKey: cfg.S3.AccessKey, SecretKey: cfg.S3.SecretKey}
+		bctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		if err := st.EnsureBucket(bctx); err != nil {
+			return nil, fmt.Errorf("S3 bucket %s: %w", cfg.S3.Bucket, err)
+		}
+		return st, nil
+	}
+	if err := os.MkdirAll(cfg.BlobDir, 0o750); err != nil {
+		return nil, fmt.Errorf("BUILDBEE_BLOB_DIR: %w", err)
+	}
+	return blob.Dir{Root: cfg.BlobDir}, nil
 }
 
 // startLocal prepares the Server's own worker: agents in containers when

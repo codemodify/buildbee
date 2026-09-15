@@ -307,24 +307,30 @@ func (s *Store) ListRunEvents(ctx context.Context, runID string, after, limit in
 // --- artifacts ---
 
 func (s *Store) InsertArtifact(ctx context.Context, a models.Artifact) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO artifacts (id, project_id, task_id, run_id, kind, name, body, url, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		a.ID, a.ProjectID, a.TaskID, nullID(a.RunID), a.Kind, a.Name, a.Body, a.URL, a.CreatedAt)
+	blobSize := 0
+	if a.BlobKey != "" {
+		blobSize = a.Size
+	}
+	_, err := s.q.Exec(ctx, `INSERT INTO artifacts (id, project_id, task_id, run_id, kind, name, body, url, blob_key, blob_size, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		a.ID, a.ProjectID, a.TaskID, nullID(a.RunID), a.Kind, a.Name, a.Body, a.URL, a.BlobKey, blobSize, a.CreatedAt)
 	return mapErr(err)
 }
 
 // GetArtifact returns one Artifact including its Body.
 func (s *Store) GetArtifact(ctx context.Context, id string) (*models.Artifact, error) {
 	var a models.Artifact
-	err := s.q.QueryRow(ctx, `SELECT id, project_id, task_id, COALESCE(run_id::text, ''), kind, name, body, octet_length(body), url, created_at
+	err := s.q.QueryRow(ctx, `SELECT id, project_id, task_id, COALESCE(run_id::text, ''), kind, name, body,
+			CASE WHEN blob_key <> '' THEN blob_size ELSE octet_length(body) END, url, blob_key, created_at
 		FROM artifacts WHERE id=$1`, id).
-		Scan(&a.ID, &a.ProjectID, &a.TaskID, &a.RunID, &a.Kind, &a.Name, &a.Body, &a.Size, &a.URL, &a.CreatedAt)
+		Scan(&a.ID, &a.ProjectID, &a.TaskID, &a.RunID, &a.Kind, &a.Name, &a.Body, &a.Size, &a.URL, &a.BlobKey, &a.CreatedAt)
 	return &a, mapErr(err)
 }
 
 // ListArtifacts returns a Task's Artifacts without their bodies, newest first.
 func (s *Store) ListArtifacts(ctx context.Context, taskID string) ([]models.Artifact, error) {
-	rows, err := s.q.Query(ctx, `SELECT id, project_id, task_id, COALESCE(run_id::text, ''), kind, name, octet_length(body), url, created_at
+	rows, err := s.q.Query(ctx, `SELECT id, project_id, task_id, COALESCE(run_id::text, ''), kind, name,
+			CASE WHEN blob_key <> '' THEN blob_size ELSE octet_length(body) END, url, created_at
 		FROM artifacts WHERE task_id=$1 ORDER BY created_at DESC, id`, taskID)
 	if err != nil {
 		return nil, mapErr(err)

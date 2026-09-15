@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/codemodify/buildbee/internal/blob"
 	"github.com/codemodify/buildbee/internal/config"
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/store"
@@ -78,6 +79,10 @@ type Options struct {
 	GitHub config.GitHub
 	Logger *slog.Logger
 	Now    func() time.Time
+	// Blobs keeps attachments and large Artifact bodies; without it
+	// uploads are refused and Artifacts stay in Postgres.
+	Blobs          blob.Store
+	MaxUploadBytes int64 // one attachment (default 25 MiB)
 }
 
 // Service implements BuildBee's operations over a Store.
@@ -89,6 +94,8 @@ type Service struct {
 	github   config.GitHub
 	queue    *signal // closed and replaced whenever a Run is queued
 	presence *presence
+	blobs    blob.Store
+	maxFile  int64
 }
 
 // New returns a Service. A nil Publisher drops events.
@@ -96,7 +103,11 @@ func New(st *store.Store, pub Publisher, opts Options) *Service {
 	if pub == nil {
 		pub = nopPublisher{}
 	}
-	s := &Service{st: st, pub: pub, log: opts.Logger, now: opts.Now, github: opts.GitHub, queue: newSignal(), presence: newPresence()}
+	s := &Service{st: st, pub: pub, log: opts.Logger, now: opts.Now, github: opts.GitHub, queue: newSignal(), presence: newPresence(),
+		blobs: opts.Blobs, maxFile: opts.MaxUploadBytes}
+	if s.maxFile <= 0 {
+		s.maxFile = 25 << 20
+	}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -118,6 +129,7 @@ type work struct {
 	lastRun *models.Run // Run started by the latest handoff, if any
 	queued  bool        // a Run entered the queue; wake waiting workers after commit
 	load    bool        // a Run started or stopped; the agents' load changed
+	gone    []string    // blob keys to delete once the transaction commits
 }
 
 func (s *Service) tx(ctx context.Context, fn func(w *work) error) error {
@@ -138,6 +150,7 @@ func (s *Service) tx(ctx context.Context, fn func(w *work) error) error {
 	if w.queued || w.load {
 		s.presenceChanged()
 	}
+	s.dropBlobs(w.gone)
 	return nil
 }
 

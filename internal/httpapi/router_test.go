@@ -338,3 +338,45 @@ func TestUsageWithNoRunsIsEmptyNotNull(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestFilesDownloadSafely(t *testing.T) {
+	s := newStack(t, Options{})
+	p := s.project("Ada", "Files")
+	ch := p.Channels[0].ID
+	upload := func(name, body string) string {
+		req := httptest.NewRequest(http.MethodPost, "/v1/channels/"+ch+"/files?name="+name, strings.NewReader(body))
+		req.Header.Set(asHeader, "Ada")
+		rec := httptest.NewRecorder()
+		s.h.ServeHTTP(rec, req)
+		return ok[obj](t, rec, http.StatusCreated)["id"].(string)
+	}
+	page := upload("evil.html", "<html><script>alert(1)</script></html>")
+	img := upload("dot.gif", "GIF89a\x01\x00\x01\x00\x00\x00\x00;")
+	ok[obj](t, s.call(http.MethodPost, "/v1/channels/"+ch+"/messages", "Ada", obj{"body": "look", "file_ids": []string{page, img}}), http.StatusCreated)
+
+	rec := s.call(http.MethodGet, "/v1/files/"+page, "Bob", nil)
+	h := rec.Header()
+	if rec.Code != 200 || h.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(h.Get("Content-Disposition"), "attachment;") ||
+		h.Get("X-Content-Type-Options") != "nosniff" || !strings.Contains(h.Get("Content-Security-Policy"), "sandbox") {
+		t.Fatalf("html is a download: %d %v", rec.Code, h)
+	}
+	rec = s.call(http.MethodGet, "/v1/files/"+img, "Bob", nil)
+	if rec.Header().Get("Content-Type") != "image/gif" || !strings.HasPrefix(rec.Header().Get("Content-Disposition"), "inline;") {
+		t.Fatalf("an image shows inline: %v", rec.Header())
+	}
+	again := httptest.NewRequest(http.MethodGet, "/v1/files/"+img, nil)
+	again.Header.Set("If-None-Match", rec.Header().Get("ETag"))
+	rec = httptest.NewRecorder()
+	s.h.ServeHTTP(rec, again)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("cached: %d", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/channels/"+ch+"/files?name=x", strings.NewReader("x"))
+	req.ContentLength = -1
+	req.Header.Set(asHeader, "Ada")
+	rec = httptest.NewRecorder()
+	s.h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusLengthRequired {
+		t.Fatalf("no length: %d", rec.Code)
+	}
+}

@@ -26,7 +26,19 @@ func (s *Service) Messages(ctx context.Context, a Actor, channelID string, p sto
 	if err := s.canSee(ctx, a, ch); err != nil {
 		return nil, false, err
 	}
-	return s.st.ListMessages(ctx, channelID, p)
+	msgs, more, err := s.st.ListMessages(ctx, channelID, p)
+	if err != nil {
+		return nil, false, err
+	}
+	return msgs, more, s.withFiles(ctx, pointers(msgs)...)
+}
+
+func pointers(msgs []models.Message) []*models.Message {
+	out := make([]*models.Message, len(msgs))
+	for i := range msgs {
+		out[i] = &msgs[i]
+	}
+	return out
 }
 
 // Thread is a root message and one page of its replies.
@@ -58,6 +70,9 @@ func (s *Service) Thread(ctx context.Context, a Actor, messageID string, p store
 	if err != nil {
 		return nil, err
 	}
+	if err := s.withFiles(ctx, append(pointers(replies), root)...); err != nil {
+		return nil, err
+	}
 	return &Thread{Root: *root, Replies: replies, HasMore: more}, nil
 }
 
@@ -87,13 +102,14 @@ type Posted struct {
 	Root *models.Message `json:"root,omitempty"`
 }
 
-// PostMessage posts a root message to a Channel as the acting Person.
-func (s *Service) PostMessage(ctx context.Context, a Actor, channelID, body string) (*Posted, error) {
-	return s.send(ctx, a, channelID, "", body)
+// PostMessage posts a root message to a Channel as the acting Person, with
+// files they uploaded there (UploadFile) attached.
+func (s *Service) PostMessage(ctx context.Context, a Actor, channelID, body string, fileIDs ...string) (*Posted, error) {
+	return s.send(ctx, a, channelID, "", body, fileIDs)
 }
 
 // Reply posts to the thread of messageID (or of the thread it is in).
-func (s *Service) Reply(ctx context.Context, a Actor, messageID, body string) (*Posted, error) {
+func (s *Service) Reply(ctx context.Context, a Actor, messageID, body string, fileIDs ...string) (*Posted, error) {
 	m, err := s.st.GetMessage(ctx, messageID)
 	if err != nil {
 		return nil, err
@@ -102,11 +118,14 @@ func (s *Service) Reply(ctx context.Context, a Actor, messageID, body string) (*
 	if m.ThreadID != "" {
 		root = m.ThreadID
 	}
-	return s.send(ctx, a, m.ChannelID, root, body)
+	return s.send(ctx, a, m.ChannelID, root, body, fileIDs)
 }
 
-func (s *Service) send(ctx context.Context, a Actor, channelID, threadID, body string) (*Posted, error) {
-	b, err := text("body", body, true, 32000)
+func (s *Service) send(ctx context.Context, a Actor, channelID, threadID, body string, fileIDs []string) (*Posted, error) {
+	if len(fileIDs) > 20 {
+		return nil, invalid("at most 20 files per message")
+	}
+	b, err := text("body", body, len(fileIDs) == 0, 32000)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +149,11 @@ func (s *Service) send(ctx context.Context, a Actor, channelID, threadID, body s
 		if !ch.Allows(author.ID) {
 			return store.ErrNotFound
 		}
-		out, err = w.post(ctx, proj, ch, author, a, b, threadID)
+		if out, err = w.post(ctx, proj, ch, author, a, b, threadID); err != nil {
+			return err
+		}
+		// The live event is this same value, published after commit.
+		out.Files, err = w.st.AttachFiles(ctx, fileIDs, out.ID, a.PersonID, ch.ID)
 		return err
 	})
 	return out, err
@@ -410,6 +433,11 @@ func (s *Service) DeleteMessage(ctx context.Context, a Actor, id string) error {
 		if err := w.st.DeleteMessage(ctx, m.ID, w.now); err != nil {
 			return err
 		}
+		keys, err := w.st.DeleteFilesOf(ctx, m.ID)
+		if err != nil {
+			return err
+		}
+		w.gone = append(w.gone, keys...)
 		out, err := w.st.GetMessage(ctx, m.ID)
 		if err != nil {
 			return err
@@ -550,9 +578,14 @@ func (s *Service) DeleteDM(ctx context.Context, a Actor, channelID string) error
 		if err != nil {
 			return err
 		}
+		keys, err := w.st.ChannelBlobKeys(ctx, ch.ID)
+		if err != nil {
+			return err
+		}
 		if err := w.st.DeleteChannel(ctx, ch.ID); err != nil {
 			return err
 		}
+		w.gone = append(w.gone, keys...)
 		for i := range members {
 			m := &members[i]
 			if m.ID == me.ID || !ch.Allows(m.ID) {

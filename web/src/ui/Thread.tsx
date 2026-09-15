@@ -52,7 +52,8 @@ export function ThreadPanel({ rootId, onClose }: { rootId: string; onClose: () =
           members={data.members}
           placeholder="Reply"
           hint={taskId ? "Reaches the agent while it works · @Bot hands it on" : undefined}
-          onSend={async (body) => add(await api.reply(rootId, body))}
+          channelId={thread?.root.channel_id}
+          onSend={async (body, fileIds) => add(await api.reply(rootId, body, fileIds))}
         />
       </div>
     </aside>

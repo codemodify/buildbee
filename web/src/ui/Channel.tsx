@@ -85,9 +85,10 @@ export function ChannelView({
           members={data.members}
           placeholder={placeholder}
           autoFocus
-          onSend={async (body) => {
+          channelId={channel.id}
+          onSend={async (body, fileIds) => {
             atBottom.current = true;
-            add(await api.postMessage(channel.id, body));
+            add(await api.postMessage(channel.id, body, fileIds));
           }}
           hint={hint}
         />

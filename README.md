@@ -67,6 +67,9 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_ADDR` | server | `:8080` | listen address |
 | `BUILDBEE_WEB_DIR` | server | embedded UI | serve the UI from a directory instead |
 | `BUILDBEE_MAX_BODY_BYTES` | server | 32 MiB | request body limit |
+| `BUILDBEE_BLOB_DIR` | server | `~/.local/share/buildbee/blobs` | attachments and large Artifacts ([deploy](deploy/README.md#files)) |
+| `BUILDBEE_S3_ENDPOINT`, `_BUCKET`, `_REGION`, `_ACCESS_KEY`, `_SECRET_KEY` | server | unset | keep them in an S3-compatible bucket instead |
+| `BUILDBEE_MAX_UPLOAD_BYTES` | server | 25 MiB | one attachment |
 | `BUILDBEE_LOCAL_WORKER` | server | `auto` | run agents on the Server's machine: `auto`, `on` or `off` ([workers.md](docs/workers.md)) |
 | `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | Issue sync; without them it answers 503. Workers open PRs with their own `gh` login |
 | `GITHUB_WEBHOOK_SECRET` | server | unset | require `X-Hub-Signature-256` on webhooks |

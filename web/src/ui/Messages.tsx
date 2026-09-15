@@ -2,7 +2,8 @@ import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { go, parse } from "../route";
 import { Markdown, ago, clock } from "../text";
-import type { Message } from "../types";
+import type { FileRef, Message } from "../types";
+import { bytes } from "./Composer";
 import { mentionNames, useCtx } from "./context";
 import { Avatar, Button, Confirm, Pill, cx, inputClass, taskLabel, taskTone } from "./kit";
 
@@ -105,6 +106,7 @@ export function MessageItem({
             )}
           </div>
         )}
+        {!m.deleted_at && m.files && m.files.length > 0 && <Attachments files={m.files} />}
         {task && <TaskCard taskId={task.id} />}
         {!compactThread && (m.reply_count ?? 0) > 0 && onOpenThread && (
           <button
@@ -128,6 +130,34 @@ export function MessageItem({
         <Confirm title="Delete message" action="Delete" onClose={() => setDeleting(false)} onConfirm={() => api.deleteMessage(m.id).then(() => undefined)}>
           It is deleted for everyone. Replies to it stay.
         </Confirm>
+      )}
+    </div>
+  );
+}
+
+const inlineTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** Attachments shows images as previews and other files as downloads. */
+function Attachments({ files }: { files: FileRef[] }) {
+  return (
+    <div className="mt-1.5 flex flex-wrap items-start gap-2">
+      {files.map((f) =>
+        inlineTypes.has(f.content_type) ? (
+          <a key={f.id} href={f.url} target="_blank" rel="noreferrer noopener" title={f.name} className="block">
+            <img src={f.url} alt={f.name} loading="lazy" className="max-h-60 max-w-full rounded-md border border-bb-border object-contain sm:max-w-sm" />
+          </a>
+        ) : (
+          <a
+            key={f.id}
+            href={f.url}
+            download={f.name}
+            className="flex max-w-72 items-center gap-2 rounded-md border border-bb-border bg-bb-surface px-2.5 py-1.5 text-[12.5px] hover:border-bb-accent-strong/60"
+          >
+            <span className="text-bb-subtle">⬇</span>
+            <span className="truncate font-medium">{f.name}</span>
+            <span className="shrink-0 text-bb-subtle">{bytes(f.size)}</span>
+          </a>
+        ),
       )}
     </div>
   );

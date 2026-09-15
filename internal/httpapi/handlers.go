@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -158,12 +159,13 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) postReply(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Body string `json:"body"`
+		Body    string   `json:"body"`
+		FileIDs []string `json:"file_ids"`
 	}
 	if !s.decode(w, r, &in) {
 		return
 	}
-	m, err := s.core.Reply(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Body)
+	m, err := s.core.Reply(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Body, in.FileIDs...)
 	respond(s, w, http.StatusCreated, m, err)
 }
 
@@ -256,12 +258,13 @@ func (s *Server) markChannelRead(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Body string `json:"body"`
+		Body    string   `json:"body"`
+		FileIDs []string `json:"file_ids"`
 	}
 	if !s.decode(w, r, &in) {
 		return
 	}
-	m, err := s.core.PostMessage(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Body)
+	m, err := s.core.PostMessage(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Body, in.FileIDs...)
 	respond(s, w, http.StatusCreated, m, err)
 }
 
@@ -498,6 +501,72 @@ func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request) {
 	a, err := s.core.Artifact(r.Context(), r.PathValue("id"))
 	respond(s, w, http.StatusOK, a, err)
+}
+
+// rawArtifact streams an Artifact's whole body as plain text.
+func (s *Server) rawArtifact(w http.ResponseWriter, r *http.Request) {
+	a, err := s.core.Artifact(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	rc, err := s.core.ArtifactRaw(r.Context(), a)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer rc.Close()
+	safeDownload(w.Header())
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(a.Size))
+	_, _ = io.Copy(w, rc)
+}
+
+// uploadFile takes one file as the raw request body: ?name= names it, and
+// the length must be known.
+func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
+	if r.ContentLength < 0 {
+		writeJSON(w, http.StatusLengthRequired, map[string]string{"error": "send the file with a Content-Length"})
+		return
+	}
+	f, err := s.core.UploadFile(r.Context(), actorFrom(r.Context()), r.PathValue("id"), r.URL.Query().Get("name"), r.ContentLength, r.Body)
+	respond(s, w, http.StatusCreated, f, err)
+}
+
+// getFile serves an attachment. Only raster images are shown inline;
+// anything else downloads, so a file can never run as a page of this site.
+func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
+	f, rc, err := s.core.OpenFile(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer rc.Close()
+	h := w.Header()
+	safeDownload(h)
+	h.Set("ETag", `"`+f.SHA256+`"`)
+	h.Set("Cache-Control", "private, max-age=86400")
+	if match := r.Header.Get("If-None-Match"); match != "" && match == `"`+f.SHA256+`"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	disposition := "attachment"
+	if f.InlineImage() {
+		h.Set("Content-Type", f.ContentType)
+		disposition = "inline"
+	} else {
+		h.Set("Content-Type", "application/octet-stream")
+	}
+	h.Set("Content-Disposition", disposition+"; filename*=UTF-8''"+url.PathEscape(f.Name))
+	h.Set("Content-Length", strconv.FormatInt(f.Size, 10))
+	_, _ = io.Copy(w, rc)
+}
+
+// safeDownload marks a response as a file, never a page: no sniffing, and a
+// sandbox with nothing allowed if a browser renders it anyway.
+func safeDownload(h http.Header) {
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
 }
 
 func (s *Server) listPipelines(w http.ResponseWriter, r *http.Request) {

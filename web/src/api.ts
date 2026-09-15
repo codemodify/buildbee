@@ -5,6 +5,7 @@ import type {
   Channel,
   Decision,
   DM,
+  FileRef,
   Member,
   Message,
   Notification,
@@ -102,12 +103,19 @@ export const api = {
 
   messages: (channelId: string, before?: number) =>
     request<Page<Message>>(`/v1/channels/${channelId}/messages${q({ before, limit: 100 })}`),
-  postMessage: (channelId: string, body: string) =>
-    request<Posted>(`/v1/channels/${channelId}/messages`, post({ body })),
+  postMessage: (channelId: string, body: string, fileIds: string[] = []) =>
+    request<Posted>(`/v1/channels/${channelId}/messages`, post({ body, file_ids: fileIds })),
+  uploadFile: (channelId: string, file: File) =>
+    request<FileRef>(`/v1/channels/${channelId}/files?name=${encodeURIComponent(file.name || "pasted")}`, {
+      method: "POST",
+      body: file,
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+    }),
   thread: (messageId: string) => request<Thread>(`/v1/messages/${messageId}/thread${q({ limit: 500 })}`),
   editMessage: (id: string, body: string) => request<Message>(`/v1/messages/${id}`, patch({ body })),
   deleteMessage: (id: string) => request<unknown>(`/v1/messages/${id}`, { method: "DELETE" }),
-  reply: (messageId: string, body: string) => request<Posted>(`/v1/messages/${messageId}/replies`, post({ body })),
+  reply: (messageId: string, body: string, fileIds: string[] = []) =>
+    request<Posted>(`/v1/messages/${messageId}/replies`, post({ body, file_ids: fileIds })),
 
   tasks: (projectId: string) => request<Items<Task>>(`/v1/projects/${projectId}/tasks`),
   createTask: (

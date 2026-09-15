@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/codemodify/buildbee/internal/blob"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +32,7 @@ func newStack(t *testing.T, opts Options) *stack {
 	hub := ws.NewHub(func(ctx context.Context, topic string, after int64) ([]core.Event, error) {
 		return svc.Replay(ctx, topic, after)
 	}, nil)
-	svc = core.New(store.New(pool), hub, core.Options{GitHub: opts.GitHub})
+	svc = core.New(store.New(pool), hub, core.Options{GitHub: opts.GitHub, Blobs: blob.Dir{Root: t.TempDir()}})
 	t.Cleanup(hub.Close)
 	return &stack{t: t, h: NewServer(svc, hub, opts).Handler(), pool: pool}
 }

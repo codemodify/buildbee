@@ -2,9 +2,12 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
+	"github.com/codemodify/buildbee/internal/blob"
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/google/uuid"
@@ -401,9 +404,14 @@ type NewArtifact struct {
 	RunID string `json:"run_id"`
 }
 
-// maxArtifactBody caps Artifacts stored in Postgres; larger outputs belong in
-// object storage (roadmap).
-const maxArtifactBody = 16 << 20
+// maxArtifactBody caps one Artifact; bodies over inlineArtifact go to the
+// blob store when there is one, and reads return their first artifactHead
+// bytes (the rest from GET /v1/artifacts/{id}/raw).
+const (
+	maxArtifactBody = 16 << 20
+	inlineArtifact  = 64 << 10
+	artifactHead    = 1 << 20
+)
 
 // CreateArtifact attaches an output to a Task (and optionally one of its Runs).
 func (s *Service) CreateArtifact(ctx context.Context, a Actor, taskID string, in NewArtifact) (*models.Artifact, error) {
@@ -435,7 +443,15 @@ func (s *Service) CreateArtifact(ctx context.Context, a Actor, taskID string, in
 		}
 		out = &models.Artifact{ID: uuid.NewString(), ProjectID: task.ProjectID, TaskID: taskID, RunID: in.RunID,
 			Kind: kind, Name: n, Body: in.Body, Size: len(in.Body), URL: strings.TrimSpace(in.URL), CreatedAt: w.now}
-		if err := w.st.InsertArtifact(ctx, *out); err != nil {
+		row := *out
+		if s.blobs != nil && len(in.Body) > inlineArtifact {
+			row.BlobKey, row.Body = "artifacts/"+out.ID[:2]+"/"+out.ID, ""
+			if err := s.blobs.Put(ctx, row.BlobKey, strings.NewReader(in.Body), int64(len(in.Body)), "text/plain; charset=utf-8"); err != nil {
+				return fmt.Errorf("storing %s: %w", n, err)
+			}
+		}
+		if err := w.st.InsertArtifact(ctx, row); err != nil {
+			s.dropBlobs([]string{row.BlobKey})
 			return err
 		}
 		by := w.artifactActor(ctx, a, task, in.RunID)
@@ -455,9 +471,39 @@ func (w *work) artifactActor(ctx context.Context, a Actor, task *models.Task, ru
 	return whoOf(m, a)
 }
 
-// Artifact returns one Artifact including its Body.
+// Artifact returns one Artifact with its body, or the first MiB of a body
+// in the blob store (Truncated, with RawURL for all of it).
 func (s *Service) Artifact(ctx context.Context, id string) (*models.Artifact, error) {
-	return s.st.GetArtifact(ctx, id)
+	a, err := s.st.GetArtifact(ctx, id)
+	if err != nil || a.BlobKey == "" {
+		return a, err
+	}
+	rc, err := s.ArtifactRaw(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	head, err := io.ReadAll(io.LimitReader(rc, artifactHead))
+	if err != nil {
+		return nil, err
+	}
+	a.Body, a.Truncated, a.RawURL = string(head), a.Size > len(head), "/v1/artifacts/"+a.ID+"/raw"
+	return a, nil
+}
+
+// ArtifactRaw returns all of an Artifact's body.
+func (s *Service) ArtifactRaw(ctx context.Context, a *models.Artifact) (io.ReadCloser, error) {
+	if a.BlobKey == "" {
+		return io.NopCloser(strings.NewReader(a.Body)), nil
+	}
+	if s.blobs == nil {
+		return nil, ErrNoStorage
+	}
+	rc, _, err := s.blobs.Get(ctx, a.BlobKey)
+	if errors.Is(err, blob.ErrNotFound) {
+		return nil, store.ErrNotFound
+	}
+	return rc, err
 }
 
 // Artifacts lists a Task's Artifacts without bodies.

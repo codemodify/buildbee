@@ -240,11 +240,16 @@ export function TaskPage({ taskId, header, onOpenThread }: { taskId: string; hea
 
 function ArtifactView({ artifact, title, collapsed }: { artifact: Artifact; title: string; collapsed?: boolean }) {
   const [body, setBody] = useState<string | undefined>(artifact.body);
+  const [raw, setRaw] = useState<string | undefined>(artifact.truncated ? artifact.raw_url : undefined);
   const [open, setOpen] = useState(!collapsed);
   useEffect(() => {
     if (!open || body !== undefined) return;
     let alive = true;
-    void api.artifact(artifact.id).then((a) => alive && setBody(a.body ?? ""));
+    void api.artifact(artifact.id).then((a) => {
+      if (!alive) return;
+      setBody(a.body ?? "");
+      if (a.truncated) setRaw(a.raw_url);
+    });
     return () => {
       alive = false;
     };
@@ -261,6 +266,14 @@ function ArtifactView({ artifact, title, collapsed }: { artifact: Artifact; titl
         <pre className="max-h-[32rem] overflow-auto border-t border-bb-border px-3 py-2 font-mono text-[12px] leading-relaxed">
           {body === undefined ? "Loading…" : artifact.kind === "diff" ? <DiffLines text={body} /> : body}
         </pre>
+      )}
+      {open && raw && (
+        <p className="border-t border-bb-border px-3 py-1.5 text-[12px] text-bb-subtle">
+          Showing the first 1 MB.{" "}
+          <a className="text-bb-accent hover:underline" href={raw} target="_blank" rel="noreferrer noopener">
+            All of it
+          </a>
+        </p>
       )}
     </div>
   );

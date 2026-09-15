@@ -34,6 +34,8 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_REPO: ${GITHUB_REPO:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+    volumes:
+      - server_data:/data   # attachments and large Artifacts (BUILDBEE_BLOB_DIR)
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,3 +66,4 @@ services:
 
 volumes:
   postgres_data:
+  server_data:

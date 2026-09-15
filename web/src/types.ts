@@ -55,6 +55,16 @@ export type Message = {
   edited_at?: string;
   deleted_at?: string;
   created_at: string;
+  files?: FileRef[];
+};
+
+/** FileRef is an attachment; url downloads it. */
+export type FileRef = {
+  id: string;
+  name: string;
+  content_type: string;
+  size: number;
+  url: string;
 };
 
 export type Thread = {
@@ -152,6 +162,8 @@ export type Artifact = {
   url?: string;
   run_id?: string;
   created_at?: string;
+  truncated?: boolean;
+  raw_url?: string;
 };
 
 export type Pipeline = {

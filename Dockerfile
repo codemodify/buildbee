@@ -17,9 +17,10 @@ COPY --from=web /web/dist ./internal/webui/dist
 RUN go build -trimpath -o /out/buildbee-server ./cmd/buildbee-server
 
 FROM alpine:3.24
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates && mkdir -p /data/blobs && chown -R nobody /data
 COPY --from=build /out/buildbee-server /usr/local/bin/buildbee-server
 EXPOSE 8080
-ENV BUILDBEE_ADDR=:8080
+ENV BUILDBEE_ADDR=:8080 BUILDBEE_BLOB_DIR=/data/blobs
+VOLUME /data
 USER nobody
 CMD ["buildbee-server"]

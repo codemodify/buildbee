@@ -33,10 +33,24 @@ type Server struct {
 	WebDir       string // BUILDBEE_WEB_DIR: serve the UI from disk instead of the embed
 	MaxBodyBytes int64  // BUILDBEE_MAX_BODY_BYTES
 	GitHub       GitHub
+	// Blobs is where attachments and large Artifacts go: BlobDir, or an
+	// S3-compatible bucket when S3.Endpoint is set.
+	BlobDir        string // BUILDBEE_BLOB_DIR (default ~/.local/share/buildbee/blobs)
+	S3             S3
+	MaxUploadBytes int64 // BUILDBEE_MAX_UPLOAD_BYTES: one attachment (default 25 MiB)
 	// LocalWorker is whether the Server runs agents itself
 	// (BUILDBEE_LOCAL_WORKER): auto (default) when this machine can,
 	// on (refuse to start if it cannot) or off.
 	LocalWorker string
+}
+
+// S3 is an S3-compatible bucket for blobs.
+type S3 struct {
+	Endpoint  string // BUILDBEE_S3_ENDPOINT, e.g. http://minio.lan:9000
+	Bucket    string // BUILDBEE_S3_BUCKET (default buildbee)
+	Region    string // BUILDBEE_S3_REGION (default us-east-1)
+	AccessKey string // BUILDBEE_S3_ACCESS_KEY
+	SecretKey string // BUILDBEE_S3_SECRET_KEY
 }
 
 // Local worker modes.
@@ -59,6 +73,15 @@ func LoadServer(getenv Getenv) (Server, error) {
 		WebDir:       value(getenv, "BUILDBEE_WEB_DIR", ""),
 		MaxBodyBytes: defaultMaxBodyBytes,
 		LocalWorker:  strings.ToLower(value(getenv, "BUILDBEE_LOCAL_WORKER", LocalAuto)),
+		BlobDir:      value(getenv, "BUILDBEE_BLOB_DIR", defaultBlobDir()),
+		S3: S3{
+			Endpoint:  strings.TrimRight(value(getenv, "BUILDBEE_S3_ENDPOINT", ""), "/"),
+			Bucket:    value(getenv, "BUILDBEE_S3_BUCKET", "buildbee"),
+			Region:    value(getenv, "BUILDBEE_S3_REGION", "us-east-1"),
+			AccessKey: value(getenv, "BUILDBEE_S3_ACCESS_KEY", ""),
+			SecretKey: value(getenv, "BUILDBEE_S3_SECRET_KEY", ""),
+		},
+		MaxUploadBytes: 25 << 20,
 		GitHub: GitHub{
 			Token:         value(getenv, "GITHUB_TOKEN", ""),
 			Repo:          value(getenv, "GITHUB_REPO", ""),
@@ -82,10 +105,42 @@ func LoadServer(getenv Getenv) (Server, error) {
 	if c.GitHub.Repo != "" && !validRepo(c.GitHub.Repo) {
 		errs = append(errs, fmt.Errorf("GITHUB_REPO must be owner/name, got %q", c.GitHub.Repo))
 	}
+	if v := value(getenv, "BUILDBEE_MAX_UPLOAD_BYTES", ""); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 1<<10 {
+			errs = append(errs, fmt.Errorf("BUILDBEE_MAX_UPLOAD_BYTES must be an integer >= 1024, got %q", v))
+		} else {
+			c.MaxUploadBytes = n
+		}
+	}
+	if c.MaxUploadBytes > c.MaxBodyBytes {
+		errs = append(errs, fmt.Errorf("BUILDBEE_MAX_UPLOAD_BYTES (%d) must not exceed BUILDBEE_MAX_BODY_BYTES (%d)", c.MaxUploadBytes, c.MaxBodyBytes))
+	}
+	if c.S3.Endpoint != "" {
+		if u, err := url.Parse(c.S3.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, fmt.Errorf("BUILDBEE_S3_ENDPOINT must be an http(s) URL, got %q", c.S3.Endpoint))
+		}
+		if c.S3.AccessKey == "" || c.S3.SecretKey == "" {
+			errs = append(errs, errors.New("BUILDBEE_S3_ACCESS_KEY and BUILDBEE_S3_SECRET_KEY are required with BUILDBEE_S3_ENDPOINT"))
+		}
+	} else if c.BlobDir == "" {
+		errs = append(errs, errors.New("BUILDBEE_BLOB_DIR is required (no home directory to default to)"))
+	}
 	if !slices.Contains([]string{LocalAuto, LocalOn, LocalOff}, c.LocalWorker) {
 		errs = append(errs, fmt.Errorf("BUILDBEE_LOCAL_WORKER must be auto, on or off, got %q", c.LocalWorker))
 	}
 	return c, errors.Join(errs...)
+}
+
+// defaultBlobDir is ~/.local/share/buildbee/blobs, or "" without a home.
+func defaultBlobDir() string {
+	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+		return filepath.Join(d, "buildbee", "blobs")
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(h, ".local", "share", "buildbee", "blobs")
+	}
+	return ""
 }
 
 // LocalWorker is the configuration of the Server's own worker: the

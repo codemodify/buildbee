@@ -35,7 +35,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `DELETE /v1/members/{id}` | remove a person or Bot from its Project (`left_at`); messages keep the name. A removed Bot's queued and running Runs are canceled and it takes no more work; a removed person comes back by writing |
 | `GET/POST /v1/projects/{id}/channels`, `PATCH /v1/channels/{id}` | Channels; `{name, archived}`. Every Project starts with `#tasks` (`locked`: first, cannot be renamed or archived), where every Task's thread lives |
 | `GET/POST /v1/channels/{id}/messages` | page root messages (each with `reply_count`, `task_id`) / post `{body}`; `@Bot` opens a Task handed to it, with this message as its thread, and starts the Bot's Run; `@Person` notifies them |
-| `GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies` | a thread `{root, replies, has_more}` / reply `{body}`. In a Task's thread, `@Bot` hands that Task on, and any other reply reaches the agent working on it |
+| `GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies` | a thread `{root, replies, has_more}` / reply `{body, file_ids}`; messages carry their `files`. In a Task's thread, `@Bot` hands that Task on, and any other reply reaches the agent working on it |
 | `PATCH /v1/messages/{id}`, `DELETE /v1/messages/{id}` | edit `{body}` / delete your own message (409 for anyone else's). An edit sets `edited_at` and starts nothing; a delete empties `body`, sets `deleted_at` and keeps the thread. Both reach viewers live as `message_edited` / `message_deleted` on `channel:<id>` (no cursor: not replayed) |
 | `GET/POST /v1/dms` | DMs are between people. Every DM you are in and have not closed, newest first, with `with` (the others) and `unread` / open one with `{person_ids}`: one conversation per set of people, whichever Projects they share. Writing in a DM notifies the others in it; Bots are asked in channels |
 | `DELETE /v1/dms/{id}` | delete a DM and its messages for everyone in it; the others are notified |
@@ -59,7 +59,10 @@ DELETE /v1/me                            → forget this browser's Person
 | `GET/POST /v1/runs/{id}/events` | `?after=<seq>&limit=` / append `{kind, payload}` (`409` once finished) |
 | `POST /v1/worker/claim` | workers: `{agents, wait_seconds ≤ 30}` → `200 {run, task, project, bot, handoffs}` or `204` |
 | `POST /v1/runs/{id}/heartbeat` | workers: renew the 60 s lease; returns the Run (status `canceled` means stop) |
-| `GET/POST /v1/tasks/{id}/artifacts`, `GET /v1/artifacts/{id}` | listings carry `size`; fetch one for its `body` |
+| `GET/POST /v1/tasks/{id}/artifacts`, `GET /v1/artifacts/{id}` | listings carry `size`; fetch one for its `body`. Bodies over 64 KiB live in the blob store: then `body` is the first MiB, with `truncated` and `raw_url` |
+| `GET /v1/artifacts/{id}/raw` | all of an Artifact's body, as text |
+| `POST /v1/channels/{id}/files?name=` | upload one file as the raw body (Content-Length required, up to `BUILDBEE_MAX_UPLOAD_BYTES`) → `{id, name, content_type, size, sha256, url}`. Its type is sniffed from its bytes. Attach it by passing `file_ids` when posting a message or reply there; unposted uploads are yours alone and are deleted after a day |
+| `GET /v1/files/{id}` | download an attachment you can read. PNG, JPEG, GIF and WebP are served inline; everything else as `application/octet-stream` with `Content-Disposition: attachment`, `nosniff` and a sandboxing CSP. Deleting the message deletes its files |
 | `GET /v1/usage?days=30`, `GET /v1/projects/{id}/usage?days=30` | Runs, cost (by currency) and context tokens, by agent and by Project, as agents reported them |
 | `GET/POST /v1/tasks/{id}/pipelines`, `PATCH /v1/pipelines/{id}` | CI checks; a failure notifies every Person |
 | `POST /v1/projects/{id}/issues/sync` | import open Issues as Tasks (`503` without GitHub) |

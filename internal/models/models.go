@@ -396,6 +396,33 @@ type Message struct {
 	EditedAt    *time.Time `json:"edited_at,omitempty"`
 	DeletedAt   *time.Time `json:"deleted_at,omitempty"` // the body is gone
 	CreatedAt   time.Time  `json:"created_at"`
+	Files       []File     `json:"files,omitempty"`
+}
+
+// File is an attachment: uploaded to a Channel, then attached to one
+// message. Its bytes are in the blob store under BlobKey.
+type File struct {
+	ID               string    `json:"id"`
+	ChannelID        string    `json:"channel_id"`
+	MessageID        string    `json:"message_id,omitempty"`
+	UploaderPersonID string    `json:"-"`
+	Name             string    `json:"name"`
+	ContentType      string    `json:"content_type"`
+	Size             int64     `json:"size"`
+	SHA256           string    `json:"sha256"`
+	BlobKey          string    `json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+	URL              string    `json:"url"` // where to download it
+}
+
+// InlineImage reports whether a browser may show the file as an image:
+// raster types only, never SVG (it can carry script).
+func (f File) InlineImage() bool {
+	switch f.ContentType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	}
+	return false
 }
 
 // SearchHit is a message found by search, with where it is.
@@ -590,6 +617,11 @@ type Artifact struct {
 	Size      int       `json:"size"`
 	URL       string    `json:"url,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// BlobKey is set when the body is in the blob store; the API then
+	// returns its first MiB (Truncated if there is more) and RawURL.
+	BlobKey   string `json:"-"`
+	Truncated bool   `json:"truncated,omitempty"`
+	RawURL    string `json:"raw_url,omitempty"`
 }
 
 // Pipeline is a CI check recorded on a Task.

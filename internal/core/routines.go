@@ -382,6 +382,9 @@ func (s *Service) Replay(ctx context.Context, topic string, after int64) ([]Even
 		if err != nil {
 			return nil, err
 		}
+		if err := s.withFiles(ctx, pointers(msgs)...); err != nil {
+			return nil, err
+		}
 		for _, m := range msgs {
 			out = append(out, Event{Topic: topic, Cursor: m.Seq, Type: "message", Data: Posted{Message: m}})
 		}
