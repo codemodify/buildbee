@@ -21,7 +21,7 @@ That starts Postgres and the Server with the web UI. Add a demo worker (fake age
 docker compose -f deploy/compose/docker-compose.yml --profile worker up --build
 ```
 
-Real agents run on machines where their CLIs are logged in; see [docs/workers.md](docs/workers.md). Turn on [autopilot](docs/autopilot.md) and a Project's Bots take Tasks from plan to merged code by themselves. [deploy/README.md](deploy/README.md) covers configuration, backups and upgrades.
+Real agents run on machines where their CLIs are logged in; see [docs/workers.md](docs/workers.md). Turn on [autopilot](docs/autopilot.md) and a Project's Bots take Tasks from plan to merged code by themselves. In the web app, ask for work by mentioning a Bot (`@Builder add rate limiting`) and follow it in the Task's thread, live. [deploy/README.md](deploy/README.md) covers configuration, backups and upgrades.
 
 ## Develop
 

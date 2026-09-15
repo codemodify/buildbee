@@ -42,6 +42,7 @@ export type Message = {
   id: string;
   seq: number;
   channel_id: string;
+  project_id?: string;
   member_id: string;
   body: string;
   thread_id?: string;
@@ -51,21 +52,29 @@ export type Message = {
   created_at: string;
 };
 
+export type Thread = {
+  root: Message;
+  replies: Message[];
+  has_more: boolean;
+};
+
 export type Task = {
   id: string;
   project_id: string;
   title: string;
   body?: string;
-  status: string;
+  status: "open" | "in_progress" | "done" | "canceled" | string;
   assignee_member_id?: string;
   created_by_member_id?: string;
   issue_number?: number;
   issue_url?: string;
   branch?: string;
+  head_commit?: string;
   pr_url?: string;
   merged_at?: string;
   thread_id?: string;
-  head_commit?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type Handoff = {
@@ -89,17 +98,23 @@ export type Decision = {
   reused?: boolean;
   assignee_id?: string;
   action?: string;
+  commit?: string;
+  created_at?: string;
 };
+
+export type RunKind = "plan" | "build" | "review" | "merge";
 
 export type Run = {
   id: string;
   task_id: string;
+  project_id?: string;
   bot_member_id?: string;
-  status: string;
-  kind?: "plan" | "build" | "review" | "merge" | string;
+  status: "pending" | "running" | "succeeded" | "failed" | "canceled" | string;
+  kind?: RunKind | string;
   detail: string;
   summary?: string;
   branch?: string;
+  commit?: string;
   pr_url?: string;
   verdict?: string;
   context_tokens?: number;
@@ -109,6 +124,7 @@ export type Run = {
   agent?: string;
   worker?: string;
   attempts?: number;
+  created_at?: string;
   started_at?: string;
   finished_at?: string;
 };
@@ -130,12 +146,14 @@ export type Artifact = {
   size: number;
   url?: string;
   run_id?: string;
+  created_at?: string;
 };
 
 export type Pipeline = {
   id: string;
   name: string;
   status: string;
+  commit?: string;
   external_url?: string;
 };
 
@@ -156,10 +174,11 @@ export type Routine = {
   id: string;
   name: string;
   prompt?: string;
-  bot_member_id?: string;
-  last_task_id?: string;
   schedule: string;
   enabled: boolean;
+  bot_member_id?: string;
+  last_run_at?: string;
+  last_task_id?: string;
 };
 
 export type Activity = {
@@ -184,4 +203,50 @@ export type Notification = {
   href?: string;
   read_at?: string | null;
   created_at: string;
+};
+
+export type Unread = {
+  channel_id: string;
+  unread: number;
+  last_seq: number;
+};
+
+export type WorkerSeen = {
+  name: string;
+  agents: string[];
+  last_seen: string;
+};
+
+export type Presence = {
+  people: Person[];
+  workers: WorkerSeen[];
+};
+
+export type UsageRow = {
+  key: string;
+  name?: string;
+  runs: number;
+  cost: Record<string, number>;
+  context_tokens: number;
+};
+
+export type Usage = {
+  since: string;
+  runs: number;
+  cost: Record<string, number>;
+  by_agent: UsageRow[];
+  by_project?: UsageRow[];
+};
+
+/** A message as posted, with what its mentions set in motion. */
+export type Posted = Message & {
+  tasks?: Task[];
+};
+
+/** A frame on the multi-topic WebSocket. */
+export type Frame = {
+  topic: string;
+  cursor: number;
+  type: "message" | "run_event" | "activity" | "notification" | "presence" | string;
+  data: unknown;
 };

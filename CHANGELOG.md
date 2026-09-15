@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — Phase 2a (chat backend)
+## Unreleased — Phase 2b (chat client)
+
+### Changed
+- The web client is rewritten around one live WebSocket: Channels, DMs, threads, Task threads with the live Run, board, Task pages, Decisions, settings, usage, notifications; light and dark; phone layouts
+- `POST /v1/projects/{id}/tasks` takes `autorun` to start the receiving Bot's Run at once
+- Reply events carry their updated thread root (`root`)
+
+## Phase 2a (chat backend)
 
 ### Added
 - Threads (`GET /v1/messages/{id}/thread`, `POST /v1/messages/{id}/replies`); Channels list root messages with `reply_count`

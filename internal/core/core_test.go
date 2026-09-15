@@ -270,8 +270,13 @@ func TestCreateTaskHandsToScoutByDefault(t *testing.T) {
 	p := f.project(ada, "T")
 	tc, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Ship it", Body: "details"})
 	f.must(err)
-	if tc.Handoff == nil || tc.Handoff.ToMemberID != bot(p, models.RoleScout).ID || tc.Status != models.TaskInProgress {
+	if tc.Handoff == nil || tc.Handoff.ToMemberID != bot(p, models.RoleScout).ID || tc.Status != models.TaskInProgress || tc.Run != nil {
 		t.Fatalf("task: %+v", tc)
+	}
+	now, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Plan it now", AutoRun: true})
+	f.must(err)
+	if now.Run == nil || now.Run.Kind != models.RunPlan {
+		t.Fatalf("autorun starts Scout's Run: %+v", now.Run)
 	}
 	none, err := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "Later", HandoffRole: "none"})
 	f.must(err)

@@ -85,11 +85,18 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Workers follow each Run's WebSocket from the claim's cursor, so messages arrive live and never twice
 - Per-Project `max_runs`, and claims serve the Project with the fewest Runs going first
 
-## Phase 2 — Chat UX
+## Phase 2b — Chat client (done)
 
-- A client state layer fed by the single WebSocket, replacing polling loops
-- Slack-like layout: Projects, Channels, DMs with unread badges; threads beside the channel; Task threads with the live Run (reply, plan, tools, diff, PR) inline
-- Board, Decisions inbox, autopilot and Routine settings, usage, workers online
+- One WebSocket feeds the whole client, resubscribing from the last cursor after a reconnect; no polling
+- Projects, Channels and DMs with unread badges and presence; threads beside the channel (full screen on phones); `@` autocomplete
+- A Task's thread shows its state and its live Run: the agent's reply as it streams, plan, tool calls, reasoning and log, with messages to the agent, interrupt and cancel
+- Board, Task page (Runs, diff, transcripts, CI, Handoffs), Decisions, settings (autopilot, merge policy, parallel Runs, repo, instructions, each Bot's agent, Routines), usage, notifications, workers online
+- Light and dark themes; phone-sized layouts, ready for the Phase 6 apps
+
+## Phase 2 — Chat UX, remaining
+
+- Message search; editing and deleting messages; file and image attachments
+- Keyboard navigation between Channels; desktop notifications from the browser
 
 ## Phase 3 — Agent harness, remaining
 

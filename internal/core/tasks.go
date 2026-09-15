@@ -83,6 +83,8 @@ type NewTask struct {
 	ChannelID        string `json:"channel_id"` // where its thread starts; default the first Channel
 	HandoffRole      string `json:"handoff_role"`
 	HandoffNote      string `json:"handoff_note"`
+	// AutoRun starts the receiving Bot's Run now, even without autopilot.
+	AutoRun bool `json:"autorun"`
 }
 
 // TaskCreated is a new Task and the Handoff made with it, if any.
@@ -146,7 +148,7 @@ func (s *Service) CreateTask(ctx context.Context, a Actor, projectID string, in 
 		if note == "" {
 			note = "Please take this."
 		}
-		h, t, err := w.handoff(ctx, proj, task, m, to, a, note, false)
+		h, t, err := w.handoff(ctx, proj, task, m, to, a, note, in.AutoRun)
 		if err != nil {
 			return err
 		}

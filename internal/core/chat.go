@@ -81,6 +81,10 @@ type Posted struct {
 	Mentions []models.Member  `json:"mentions"`
 	Tasks    []models.Task    `json:"tasks"`
 	Handoffs []models.Handoff `json:"handoffs"`
+	// Root is a reply's thread root as it stands now (reply count
+	// included), so clients need not count replies themselves. Live
+	// events only.
+	Root *models.Message `json:"root,omitempty"`
 }
 
 // PostMessage posts a root message to a Channel as the acting Person.
@@ -223,6 +227,11 @@ func (w *work) post(ctx context.Context, proj *models.Project, ch *models.Channe
 			out.Tasks = append(out.Tasks, *task)
 		}
 	}
+	if root != nil {
+		if r, err := w.st.GetMessage(ctx, root.ID); err == nil {
+			out.Root = r
+		}
+	}
 	w.emit("channel:"+ch.ID, msg.Seq, "message", out)
 	return out, nil
 }
@@ -283,7 +292,11 @@ func (w *work) note(ctx context.Context, task *models.Task, author *models.Membe
 	if err != nil {
 		return err
 	}
-	w.emit("channel:"+root.ChannelID, msg.Seq, "message", &Posted{Message: *msg, Mentions: []models.Member{}, Tasks: []models.Task{}, Handoffs: []models.Handoff{}})
+	if r, err := w.st.GetMessage(ctx, root.ID); err == nil {
+		root = r
+	}
+	w.emit("channel:"+root.ChannelID, msg.Seq, "message", &Posted{Message: *msg, Mentions: []models.Member{}, Tasks: []models.Task{},
+		Handoffs: []models.Handoff{}, Root: root})
 	return nil
 }
 
