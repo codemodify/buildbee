@@ -42,6 +42,10 @@ func run() error {
 		engine = sandbox.DockerEngine{}
 	}
 	sup := worker.NewSupervisor(cfg.ServerURL, engine)
+	sup.AllowHostAgents = cfg.AllowHostAgents
+	if cfg.AllowHostAgents {
+		slog.Warn("BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1: agent CLIs run on this host with its credentials")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

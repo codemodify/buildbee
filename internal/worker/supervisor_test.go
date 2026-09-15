@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -83,5 +84,23 @@ func TestExecuteFakeACP(t *testing.T) {
 	}
 	if out.Run.Status != "succeeded" {
 		t.Fatalf("status %q", out.Run.Status)
+	}
+}
+
+func TestRealAgentsAreRefusedUnlessTheWorkerOptsIn(t *testing.T) {
+	var status string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			var in map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			status = in["status"]
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "r1", "task_id": "t1", "status": status})
+	}))
+	defer srv.Close()
+	sup := NewSupervisor(srv.URL, sandbox.FakeEngine{})
+	_, err := sup.Execute(context.Background(), Request{TaskID: "t1", RunID: "r1", ACP: true, Agent: "claude", Title: "x"})
+	if !errors.Is(err, ErrHostAgentsDisabled) || status != "failed" {
+		t.Fatalf("got err=%v status=%q", err, status)
 	}
 }

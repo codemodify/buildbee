@@ -6,7 +6,10 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/codemodify/buildbee/internal/worker/acp"
 	"github.com/codemodify/buildbee/internal/worker/notify"
@@ -28,7 +31,16 @@ const (
 type Supervisor struct {
 	Engine sandbox.Engine
 	Server *notify.Client
+	// AllowHostAgents lets ACP Runs start a real agent CLI on this host.
+	// Until Runs execute in per-Run containers, an agent started here acts
+	// with this host's files and credentials, so it is off by default.
+	AllowHostAgents bool
 }
+
+// ErrHostAgentsDisabled refuses a real agent on a worker that has not opted in.
+var ErrHostAgentsDisabled = errors.New("real agents would run directly on this worker host; " +
+	"set BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1 to allow it (each Run gets an empty temporary directory), " +
+	"or use agent \"fake\"")
 
 // NewSupervisor reports to the Server at serverURL; a nil engine means Docker.
 func NewSupervisor(serverURL string, engine sandbox.Engine) *Supervisor {
@@ -150,7 +162,21 @@ func (s *Supervisor) executeACP(ctx context.Context, req Request, run *notify.Ru
 	if req.Fake && agent == "" {
 		agent = "fake"
 	}
-	name, logs, err := acp.Stream(ctx, acp.Config{Agent: agent}, prompt, func(ev acp.Event) error {
+	workDir := ""
+	if !strings.EqualFold(strings.TrimSpace(agent), "fake") {
+		if !s.AllowHostAgents {
+			_, _ = s.Server.UpdateRun(run.ID, string(StatusFailed), ErrHostAgentsDisabled.Error())
+			return nil, ErrHostAgentsDisabled
+		}
+		dir, err := os.MkdirTemp("", "buildbee-run-*")
+		if err != nil {
+			_, _ = s.Server.UpdateRun(run.ID, string(StatusFailed), err.Error())
+			return nil, err
+		}
+		defer os.RemoveAll(dir)
+		workDir = dir
+	}
+	name, logs, err := acp.Stream(ctx, acp.Config{Agent: agent, WorkDir: workDir}, prompt, func(ev acp.Event) error {
 		_, perr := s.Server.PostRunEvent(run.ID, ev.Kind, ev.Payload)
 		return perr
 	})
