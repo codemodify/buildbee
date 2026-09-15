@@ -93,23 +93,27 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Board, Task page (Runs, diff, transcripts, CI, Handoffs), Decisions, settings (autopilot, merge policy, parallel Runs, repo, instructions, each Bot's agent, Routines), usage, notifications, workers online
 - Light and dark themes; phone-sized layouts, ready for the Phase 6 apps
 
+## Phase 2c — Client feedback (done)
+
+- Pinned `# status` (agents and their load, every Project's Tasks, people with invites, Bots, usage) and `# decisions`; DMs between people across the Server, closable; your settings (name, theme, corners, notifications)
+- The Server runs agents itself when its machine can; new Projects start with no Bots, and Add bot offers the autopilot's four
+
 ## Phase 2 — Chat UX, remaining
 
 - Message search; editing and deleting messages; file and image attachments
-- Keyboard navigation between Channels; desktop notifications from the browser
+- Keyboard navigation (a quick switcher); desktop notifications from the browser
+- Managing what exists: rename and archive channels, remove Bots and people from a Project, archive Projects, delete a DM for everyone
 
 ## Phase 3 — Agent harness, remaining
 
 - Per-Project images
-- Permission requests as Decisions for Projects that want them, answers flowing back to the agent; mid-turn steering from chat
+- Permission requests as Decisions for Projects that want them (agents auto-approve today), answers flowing back to the agent
+- A sandbox for agents that run directly on a machine (no Docker)
 - Logs and large Artifacts in object storage
-
-## Phase 4 — Autonomy, remaining
-
-- Steering from chat threads (the API and CLI exist; the UI comes with Phase 2)
 
 ## Phase 5 — Scale and operations
 
+- Freeze the database baseline before the first real install; later changes ship as new migrations
 - Dashboard across all Projects and Runs, metrics, retention, backups, load test with dozens of concurrent Runs
 
 ## Phase 6 — Desktop and mobile apps
