@@ -62,6 +62,11 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Builds continue the Task's branch and push with a lease; merges use `gh pr merge` or `git merge`
 - Project `instructions` reach every agent; Runs report the agent's closing message as `summary`
 
+## Phase 4c — Routines that do work (done)
+
+- A Routine has a prompt; each firing opens a Task with it and hands it to Scout (or a chosen Bot), which starts a Run
+- A Routine skips while the Task it opened last is still open; Projects no longer get a do-nothing Routine seeded
+
 ## Phase 4b — Steering and fair scheduling (done)
 
 - People message a working agent: queued Runs get it in their prompt; running agents get it as their next turn over ACP, or at once with `interrupt` (the turn is canceled first)
@@ -84,7 +89,6 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 ## Phase 4 — Autonomy, remaining
 
 - Steering from chat threads (the API and CLI exist; the UI comes with Phase 2)
-- Scheduled Routines that open Tasks (backlog grooming, dependency updates, failing-CI sweeps)
 - Token and cost tracking from `usage` events
 
 ## Phase 5 — Scale and operations

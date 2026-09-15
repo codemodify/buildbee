@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 4b (steering, fair scheduling)
+## Unreleased — LAN rebuild, Phase 4c (Routines)
+
+### Changed
+- Routines take a `prompt`: each firing opens a Task with it, handed to Scout (or `bot_member_id`), which starts a Run; a Routine skips while its last Task is open
+- New Projects no longer get a disabled `morning-digest` Routine
+- `buildbee routine create`
+
+## LAN rebuild, Phase 4b (steering, fair scheduling)
 
 ### Added
 - `POST /v1/runs/{id}/steer` and `buildbee run steer`: message the agent working on a Run, queued or with `interrupt`

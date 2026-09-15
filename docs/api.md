@@ -51,7 +51,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `POST /v1/tasks/{id}/pr` | draft PR on the configured Repo (`503` without `GITHUB_TOKEN`/`GITHUB_REPO`) |
 | `GET/POST /v1/tasks/{id}/pipelines`, `PATCH /v1/pipelines/{id}` | CI checks; a failure notifies every Person |
 | `POST /v1/projects/{id}/issues/sync` | import open Issues as Tasks (`503` without GitHub) |
-| `GET/POST /v1/projects/{id}/routines`, `PATCH /v1/routines/{id}`, `POST /v1/routines/{id}/run` | Routines; enable, reschedule, fire now |
+| `GET/POST /v1/projects/{id}/routines`, `PATCH /v1/routines/{id}`, `POST /v1/routines/{id}/run` | Routines `{name, prompt, schedule, enabled, bot_member_id}`: each firing opens a Task with `prompt` for the Bot ([autopilot.md](autopilot.md#routines)); fire now |
 | `GET /v1/me/notifications`, `POST /v1/me/notifications/read-all`, `POST /v1/notifications/{id}/read` | the acting Person's inbox across Projects |
 | `GET/PATCH /v1/me/preferences` | `{mute_mentions, mute_routines}` |
 | `POST /v1/pipelines/webhook`, `POST /v1/issues/webhook?project_id=` | GitHub webhooks; signed when `GITHUB_WEBHOOK_SECRET` is set. CI results take `{task_id \| branch, name, status, external_url}` or a GitHub `check_run` event, matched to the Task by branch |

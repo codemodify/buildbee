@@ -29,6 +29,17 @@ Every prompt starts with the Project's `instructions` (standing guidance for all
 
 CI counts only when it reports on the Task's latest push, through `POST /v1/pipelines/webhook`. GitHub `check_run` events are matched to the Task by their branch. A Task with no CI reports merges on Sentry's approval alone. A failed check goes back to the Builder with the check's name and link; a pending one holds the merge until it finishes.
 
+## Routines
+
+A Routine opens a Task on a schedule and hands it to a Bot, which starts working at once: "update dependencies" every week, "look for flaky tests" every night.
+
+```bash
+buildbee routine create --project ID --name "Update dependencies" --schedule 168h --enabled \
+  --prompt "Update dependencies to their latest compatible versions, fix what breaks, keep the change small."
+```
+
+The Task goes to Scout unless the Routine names another Bot (`bot_member_id`, Scout, Builder or Sentry). Pulse posts a line in the first channel and people get a notification (muted with `mute_routines`). While the Task a Routine opened last is still open, the Routine skips its turn, so work never piles up.
+
 ## Limits
 
 - The Builder gets 3 attempts per Task. After the third, a person decides with a `merge` Decision (recommended answer: stop).

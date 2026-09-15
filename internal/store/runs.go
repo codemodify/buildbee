@@ -265,16 +265,18 @@ func (s *Store) ListPipelines(ctx context.Context, taskID string) ([]models.Pipe
 
 // --- routines ---
 
-const routineCols = `id, project_id, COALESCE(bot_member_id::text, ''), name, schedule, enabled, last_run_at, created_at`
+const routineCols = `id, project_id, COALESCE(bot_member_id::text, ''), name, prompt, schedule, enabled, last_run_at,
+	COALESCE(last_task_id::text, ''), created_at`
 
 func scanRoutine(row interface{ Scan(...any) error }, r *models.Routine) error {
-	return row.Scan(&r.ID, &r.ProjectID, &r.BotMemberID, &r.Name, &r.Schedule, &r.Enabled, &r.LastRunAt, &r.CreatedAt)
+	return row.Scan(&r.ID, &r.ProjectID, &r.BotMemberID, &r.Name, &r.Prompt, &r.Schedule, &r.Enabled, &r.LastRunAt,
+		&r.LastTaskID, &r.CreatedAt)
 }
 
 func (s *Store) InsertRoutine(ctx context.Context, r models.Routine) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO routines (id, project_id, bot_member_id, name, schedule, enabled, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		r.ID, r.ProjectID, nullID(r.BotMemberID), r.Name, r.Schedule, r.Enabled, r.CreatedAt)
+	_, err := s.q.Exec(ctx, `INSERT INTO routines (id, project_id, bot_member_id, name, prompt, schedule, enabled, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		r.ID, r.ProjectID, nullID(r.BotMemberID), r.Name, r.Prompt, r.Schedule, r.Enabled, r.CreatedAt)
 	return mapErr(err)
 }
 
@@ -291,9 +293,8 @@ func (s *Store) ListRoutines(ctx context.Context, projectID string) ([]models.Ro
 
 // ListEnabledRoutines returns enabled Routines of Projects that are not archived.
 func (s *Store) ListEnabledRoutines(ctx context.Context) ([]models.Routine, error) {
-	return s.routines(ctx, `SELECT r.id, r.project_id, COALESCE(r.bot_member_id::text, ''), r.name, r.schedule, r.enabled, r.last_run_at, r.created_at
-		FROM routines r JOIN projects p ON p.id = r.project_id
-		WHERE r.enabled AND p.archived_at IS NULL ORDER BY r.created_at, r.id`)
+	return s.routines(ctx, `SELECT `+routineCols+` FROM routines r WHERE r.enabled
+		AND EXISTS (SELECT 1 FROM projects p WHERE p.id = r.project_id AND p.archived_at IS NULL) ORDER BY r.created_at, r.id`)
 }
 
 func (s *Store) routines(ctx context.Context, sql string, args ...any) ([]models.Routine, error) {
@@ -313,10 +314,10 @@ func (s *Store) routines(ctx context.Context, sql string, args ...any) ([]models
 	return out, rows.Err()
 }
 
-// UpdateRoutine writes name, schedule, enabled and bot.
+// UpdateRoutine writes name, prompt, schedule, enabled, bot and last Task.
 func (s *Store) UpdateRoutine(ctx context.Context, r models.Routine) error {
-	return one(s.q.Exec(ctx, `UPDATE routines SET name=$2, schedule=$3, enabled=$4, bot_member_id=$5 WHERE id=$1`,
-		r.ID, r.Name, r.Schedule, r.Enabled, nullID(r.BotMemberID)))
+	return one(s.q.Exec(ctx, `UPDATE routines SET name=$2, schedule=$3, enabled=$4, bot_member_id=$5, prompt=$6, last_task_id=$7 WHERE id=$1`,
+		r.ID, r.Name, r.Schedule, r.Enabled, nullID(r.BotMemberID), r.Prompt, nullID(r.LastTaskID)))
 }
 
 // ClaimRoutine moves last_run_at from prev to at if nobody else has fired

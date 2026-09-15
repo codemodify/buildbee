@@ -128,9 +128,11 @@ func (s *Service) Routines(ctx context.Context, projectID string) ([]models.Rout
 	return s.st.ListRoutines(ctx, projectID)
 }
 
-// NewRoutine describes a Routine to create.
+// NewRoutine describes a Routine to create. Prompt is what the Task it
+// opens asks for; BotMemberID is who gets the Task (default Scout).
 type NewRoutine struct {
 	Name        string `json:"name"`
+	Prompt      string `json:"prompt"`
 	Schedule    string `json:"schedule"`
 	Enabled     bool   `json:"enabled"`
 	BotMemberID string `json:"bot_member_id"`
@@ -139,6 +141,10 @@ type NewRoutine struct {
 // CreateRoutine adds a Routine to a Project.
 func (s *Service) CreateRoutine(ctx context.Context, a Actor, projectID string, in NewRoutine) (*models.Routine, error) {
 	n, err := text("name", in.Name, true, 100)
+	if err != nil {
+		return nil, err
+	}
+	prompt, err := text("prompt", in.Prompt, true, 16000)
 	if err != nil {
 		return nil, err
 	}
@@ -158,11 +164,11 @@ func (s *Service) CreateRoutine(ctx context.Context, a Actor, projectID string, 
 			return err
 		}
 		if in.BotMemberID != "" {
-			if err := w.sameProject(ctx, projectID, in.BotMemberID); err != nil {
+			if err := w.routineBot(ctx, projectID, in.BotMemberID); err != nil {
 				return err
 			}
 		}
-		r := models.Routine{ID: uuid.NewString(), ProjectID: projectID, BotMemberID: in.BotMemberID, Name: n,
+		r := models.Routine{ID: uuid.NewString(), ProjectID: projectID, BotMemberID: in.BotMemberID, Name: n, Prompt: prompt,
 			Schedule: strings.TrimSpace(in.Schedule), Enabled: in.Enabled, CreatedAt: w.now}
 		if err := w.st.InsertRoutine(ctx, r); err != nil {
 			return err
@@ -176,9 +182,21 @@ func (s *Service) CreateRoutine(ctx context.Context, a Actor, projectID string, 
 
 // RoutinePatch changes only the fields that are set.
 type RoutinePatch struct {
-	Name     *string `json:"name"`
-	Schedule *string `json:"schedule"`
-	Enabled  *bool   `json:"enabled"`
+	Name        *string `json:"name"`
+	Prompt      *string `json:"prompt"`
+	Schedule    *string `json:"schedule"`
+	Enabled     *bool   `json:"enabled"`
+	BotMemberID *string `json:"bot_member_id"`
+}
+
+// routineBot checks that a Routine's Tasks go to a Bot of the Project
+// that works on Tasks.
+func (w *work) routineBot(ctx context.Context, projectID, memberID string) error {
+	m, err := w.st.GetMember(ctx, memberID)
+	if err != nil || m.ProjectID != projectID || m.Kind != models.KindBot || !worksOnTasks(m.Role) {
+		return invalid("bot_member_id must be this Project's Scout, Builder or Sentry")
+	}
+	return nil
 }
 
 // UpdateRoutine renames, reschedules, enables or disables a Routine.
@@ -202,6 +220,21 @@ func (s *Service) UpdateRoutine(ctx context.Context, a Actor, id string, patch R
 				return err
 			}
 			changes["name"] = r.Name
+		}
+		if patch.Prompt != nil {
+			if r.Prompt, err = text("prompt", *patch.Prompt, true, 16000); err != nil {
+				return err
+			}
+			changes["prompt"] = true
+		}
+		if patch.BotMemberID != nil {
+			if id := strings.TrimSpace(*patch.BotMemberID); id != "" {
+				if err := w.routineBot(ctx, r.ProjectID, id); err != nil {
+					return err
+				}
+			}
+			r.BotMemberID = strings.TrimSpace(*patch.BotMemberID)
+			changes["bot_member_id"] = r.BotMemberID
 		}
 		if patch.Schedule != nil {
 			if _, err := ParseInterval(*patch.Schedule); err != nil {
@@ -258,9 +291,10 @@ func (s *Service) TickRoutines(ctx context.Context) {
 	}
 }
 
-// fire claims the Routine and posts its digest as the Routine's Bot, opens a
-// Task for it, and notifies every Person. Returns false if another process
-// claimed this firing first.
+// fire claims the Routine and opens its Task: Pulse hands it to the
+// Routine's Bot (Scout by default), which starts a Run. While the previous
+// firing's Task is still open the Routine skips, so work does not pile up.
+// Returns false if another process claimed this firing first.
 func (s *Service) fire(ctx context.Context, a Actor, r *models.Routine) (bool, error) {
 	fired := false
 	err := s.tx(ctx, func(w *work) error {
@@ -275,52 +309,55 @@ func (s *Service) fire(ctx context.Context, a Actor, r *models.Routine) (bool, e
 		if err != nil {
 			return err
 		}
-		var bot *models.Member
+		pulse := models.MemberByRole(members, models.RolePulse)
+		by := whoOf(pulse, a)
+		if r.LastTaskID != "" {
+			if prev, err := w.st.GetTask(ctx, r.LastTaskID, false); err == nil && prev.Status != models.TaskDone && prev.Status != models.TaskCanceled {
+				return w.activity(ctx, r.ProjectID, by, models.TypeRoutine, "skipped", r.ID,
+					map[string]any{"name": r.Name, "open_task_id": prev.ID})
+			}
+		}
+		var to *models.Member
 		for i := range members {
 			if members[i].ID == r.BotMemberID {
-				bot = &members[i]
+				to = &members[i]
 			}
 		}
-		if bot == nil {
-			bot = models.MemberByRole(members, models.RolePulse)
+		if to == nil {
+			to = models.MemberByRole(members, models.RoleScout)
 		}
-		m, err := w.member(ctx, a, r.ProjectID, false)
+		from := pulse
+		if from == nil {
+			from = to
+		}
+		if to == nil {
+			return invalid("the Project has no Bot to give the Routine's Task to")
+		}
+		title := r.Name + " (" + w.now.Format("2006-01-02") + ")"
+		task, err := w.createTask(ctx, proj, from, a, newTask{title: title, body: r.Prompt})
 		if err != nil {
 			return err
 		}
-		by := whoOf(m, a)
-		if bot != nil {
-			by = whoOf(bot, a)
-			channels, err := w.st.ListChannels(ctx, r.ProjectID, false)
-			if err != nil {
+		if _, _, err := w.handoff(ctx, proj, task, from, to, a, "Scheduled by Routine "+r.Name+".", true); err != nil {
+			return err
+		}
+		r.LastTaskID = task.ID
+		if err := w.st.UpdateRoutine(ctx, *r); err != nil {
+			return err
+		}
+		if channels, err := w.st.ListChannels(ctx, r.ProjectID, false); err == nil && len(channels) > 0 && from != nil {
+			if _, err := w.post(ctx, proj, &channels[0], from, a, "Routine "+r.Name+" opened Task \""+title+"\" for "+to.DisplayName+"."); err != nil {
 				return err
 			}
-			if len(channels) > 0 {
-				if _, err := w.post(ctx, proj, &channels[0], bot, a, "Routine "+r.Name+" fired."); err != nil {
-					return err
-				}
-			}
-		}
-		title := "Routine: " + r.Name + " (" + w.now.Format("2006-01-02 15:04") + ")"
-		task, err := w.createTask(ctx, proj, bot, a, newTask{title: title, assignee: botID(bot)})
-		if err != nil {
-			return err
 		}
 		if err := w.activity(ctx, r.ProjectID, by, models.TypeRoutine, "fired", r.ID,
 			map[string]any{"name": r.Name, "task_id": task.ID, "by": a.Name}); err != nil {
 			return err
 		}
 		return w.notifyPeople(ctx, r.ProjectID, nil, notice{projectID: r.ProjectID, kind: "routine",
-			title: "Routine fired: " + r.Name, body: r.Name, href: href(r.ProjectID, "tasks", task.ID)})
+			title: "Routine " + r.Name + " opened a Task", body: title, href: href(r.ProjectID, "tasks", task.ID)})
 	})
 	return fired, err
-}
-
-func botID(m *models.Member) string {
-	if m == nil {
-		return ""
-	}
-	return m.ID
 }
 
 // --- replay ---

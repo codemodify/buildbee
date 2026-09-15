@@ -233,34 +233,42 @@ func printEvent(out, info io.Writer, ev client.RunEvent) {
 	}
 }
 
+const routineUsage = "usage: buildbee routine list --project ID | routine create --project ID --name NAME --prompt TEXT " +
+	"[--schedule 24h] [--bot MEMBER_ID] [--enabled] | routine run --id ID"
+
 func runRoutine(args []string, c *client.Client) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: buildbee routine list --project ID | routine run --id ID")
+		return errors.New(routineUsage)
 	}
+	var out map[string]any
+	var err error
 	switch args[0] {
 	case "list":
 		projectID := flagValue(args[1:], "project")
 		if projectID == "" {
-			return fmt.Errorf("usage: buildbee routine list --project ID")
+			return errors.New(routineUsage)
 		}
-		out, err := c.ListRoutines(projectID)
-		if err != nil {
-			return err
+		out, err = c.ListRoutines(projectID)
+	case "create":
+		projectID, name, prompt := flagValue(args[1:], "project"), flagValue(args[1:], "name"), flagValue(args[1:], "prompt")
+		if projectID == "" || name == "" || prompt == "" {
+			return errors.New(routineUsage)
 		}
-		return c.PrintJSON(out)
+		out, err = c.CreateRoutine(projectID, map[string]any{"name": name, "prompt": prompt, "schedule": flagValue(args[1:], "schedule"),
+			"bot_member_id": flagValue(args[1:], "bot"), "enabled": hasFlag(args[1:], "enabled")})
 	case "run":
 		id := flagValue(args[1:], "id")
 		if id == "" {
-			return fmt.Errorf("usage: buildbee routine run --id ID")
+			return errors.New(routineUsage)
 		}
-		out, err := c.RunRoutine(id)
-		if err != nil {
-			return err
-		}
-		return c.PrintJSON(out)
+		out, err = c.RunRoutine(id)
 	default:
-		return fmt.Errorf("usage: buildbee routine list --project ID | routine run --id ID")
+		return errors.New(routineUsage)
 	}
+	if err != nil {
+		return err
+	}
+	return c.PrintJSON(out)
 }
 
 func hasFlag(args []string, name string) bool {
@@ -317,6 +325,7 @@ Usage:
   buildbee run cancel --id ID
   buildbee run steer --id ID --text TEXT [--interrupt]
   buildbee routine list --project ID
+  buildbee routine create --project ID --name NAME --prompt TEXT [--schedule 24h] [--bot MEMBER_ID] [--enabled]
   buildbee routine run --id ID
 
 Environment:

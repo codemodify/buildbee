@@ -218,9 +218,11 @@ CREATE TABLE routines (
     project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
     bot_member_id UUID REFERENCES members (id) ON DELETE SET NULL,
     name TEXT NOT NULL CHECK (name <> ''),
+    prompt TEXT NOT NULL DEFAULT '',  -- the body of the Task each firing opens
     schedule TEXT NOT NULL DEFAULT '24h',
     enabled BOOLEAN NOT NULL DEFAULT false,
     last_run_at TIMESTAMPTZ,
+    last_task_id UUID REFERENCES tasks (id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX routines_project_id_idx ON routines (project_id);

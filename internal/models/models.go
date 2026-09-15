@@ -220,7 +220,7 @@ func DefaultBots() []BotSeed {
 		{Name: "Scout", Role: RoleScout, Instructions: "You are Scout. You turn Tasks into clear, small plans and say when a Task is unclear."},
 		{Name: "Builder", Role: RoleBuilder, Instructions: "You are Builder. You make focused, tested changes."},
 		{Name: "Sentry", Role: RoleSentry, Instructions: "You are Sentry. You review changes for correctness, tests and security, and say exactly what must change."},
-		{Name: "Pulse", Role: RolePulse, Instructions: "Run Routines: morning digests, Activity summaries, and Channel nudges."},
+		{Name: "Pulse", Role: RolePulse, Instructions: "You are Pulse. You open the Tasks a Project's Routines schedule."},
 	}
 }
 
@@ -524,15 +524,18 @@ type TaskDetail struct {
 	Pipelines []Pipeline `json:"pipelines"`
 }
 
-// Routine is a repeatable Project workflow on an interval schedule.
+// Routine opens a Task on a schedule, such as "update dependencies" every
+// week, and hands it to a Bot, which starts working on it.
 type Routine struct {
 	ID          string     `json:"id"`
 	ProjectID   string     `json:"project_id"`
-	BotMemberID string     `json:"bot_member_id,omitempty"`
+	BotMemberID string     `json:"bot_member_id,omitempty"` // who gets the Task; default Scout
 	Name        string     `json:"name"`
+	Prompt      string     `json:"prompt"`
 	Schedule    string     `json:"schedule"` // Go duration like 24h, or "daily"
 	Enabled     bool       `json:"enabled"`
 	LastRunAt   *time.Time `json:"last_run_at,omitempty"`
+	LastTaskID  string     `json:"last_task_id,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 }
 

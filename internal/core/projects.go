@@ -52,13 +52,6 @@ func (s *Service) CreateProject(ctx context.Context, a Actor, projectName string
 		if err := w.st.InsertChannel(ctx, ch); err != nil {
 			return err
 		}
-		routine := models.Routine{ID: uuid.NewString(), ProjectID: p.ID, Name: "morning-digest", Schedule: "24h", CreatedAt: w.now}
-		if pulse := models.MemberByRole(members, models.RolePulse); pulse != nil {
-			routine.BotMemberID = pulse.ID
-		}
-		if err := w.st.InsertRoutine(ctx, routine); err != nil {
-			return err
-		}
 		if err := w.activity(ctx, p.ID, whoOf(owner, a), models.TypeProject, "created", p.ID,
 			map[string]any{"name": p.Name, "auto_run": p.AutoRun}); err != nil {
 			return err

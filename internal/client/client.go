@@ -225,6 +225,13 @@ func (c *Client) ListRoutines(projectID string) (map[string]any, error) {
 	return out, err
 }
 
+// CreateRoutine schedules a Routine in a Project.
+func (c *Client) CreateRoutine(projectID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	err := c.do(http.MethodPost, "/v1/projects/"+projectID+"/routines", body, &out)
+	return out, err
+}
+
 func (c *Client) RunRoutine(id string) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodPost, "/v1/routines/"+id+"/run", map[string]string{}, &out)

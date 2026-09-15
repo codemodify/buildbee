@@ -143,6 +143,9 @@ export type Preferences = {
 export type Routine = {
   id: string;
   name: string;
+  prompt?: string;
+  bot_member_id?: string;
+  last_task_id?: string;
   schedule: string;
   enabled: boolean;
 };

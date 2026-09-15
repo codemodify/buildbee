@@ -117,7 +117,7 @@ func TestHelloIsCaseInsensitiveAndValidated(t *testing.T) {
 	}
 }
 
-func TestCreateProjectSeedsOwnerBotsChannelAndRoutine(t *testing.T) {
+func TestCreateProjectSeedsOwnerBotsAndChannel(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
 	p := f.project(ada, "Rocket")
@@ -132,10 +132,8 @@ func TestCreateProjectSeedsOwnerBotsChannelAndRoutine(t *testing.T) {
 	if len(p.Channels) != 1 || p.Channels[0].Name != "general" {
 		t.Fatalf("channels: %+v", p.Channels)
 	}
-	rs, err := f.s.Routines(f.ctx, p.ID)
-	f.must(err)
-	if len(rs) != 1 || rs[0].Enabled || rs[0].BotMemberID != bot(p, models.RolePulse).ID {
-		t.Fatalf("routines: %+v", rs)
+	if rs, err := f.s.Routines(f.ctx, p.ID); err != nil || len(rs) != 0 {
+		t.Fatalf("no Routines until someone schedules one: %+v %v", rs, err)
 	}
 	acts := f.activity(p.ID)
 	if len(acts) != 1 || acts[0].Action != "created" || acts[0].ActorMemberID != p.Members[0].ID || acts[0].Actor != "Ada" {
@@ -519,37 +517,63 @@ func TestIssueWebhookUpserts(t *testing.T) {
 	}
 }
 
-func TestRoutineFiresOnceAcrossConcurrentTicks(t *testing.T) {
+func TestRoutineOpensATaskOnceAcrossConcurrentTicks(t *testing.T) {
 	f := newFixture(t)
+	clock := time.Now().UTC()
+	var mu sync.Mutex
+	f.s.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
 	ada := f.person("Ada")
 	p := f.project(ada, "Pulse")
-	rs, _ := f.s.Routines(f.ctx, p.ID)
-	enabled := true
-	_, err := f.s.UpdateRoutine(f.ctx, ada, rs[0].ID, RoutinePatch{Enabled: &enabled})
+	r, err := f.s.CreateRoutine(f.ctx, ada, p.ID, NewRoutine{Name: "Update dependencies", Schedule: "24h", Enabled: true,
+		Prompt: "Update dependencies to their latest compatible versions and fix what breaks."})
 	f.must(err)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); f.s.TickRoutines(f.ctx) }()
+	for range 5 {
+		wg.Go(func() { f.s.TickRoutines(f.ctx) })
 	}
 	wg.Wait()
 	tasks, _ := f.s.Tasks(f.ctx, p.ID)
-	if len(tasks) != 1 || !strings.HasPrefix(tasks[0].Title, "Routine: morning-digest") ||
-		tasks[0].AssigneeMemberID != bot(p, models.RolePulse).ID {
-		t.Fatalf("concurrent ticks fired %d times: %+v", len(tasks), tasks)
+	if len(tasks) != 1 || !strings.HasPrefix(tasks[0].Title, "Update dependencies (") ||
+		!strings.Contains(tasks[0].Body, "latest compatible versions") || tasks[0].AssigneeMemberID != bot(p, models.RoleScout).ID {
+		t.Fatalf("concurrent ticks opened %d Tasks: %+v", len(tasks), tasks)
+	}
+	runs, _ := f.s.Runs(f.ctx, tasks[0].ID)
+	if len(runs) != 1 || runs[0].Kind != models.RunPlan {
+		t.Fatalf("Scout starts on it: %+v", runs)
 	}
 	msgs, _, _ := f.s.Messages(f.ctx, p.Channels[0].ID, store.Page{})
-	if len(msgs) != 1 || msgs[0].MemberID != bot(p, models.RolePulse).ID {
-		t.Fatalf("digest message: %+v", msgs)
+	if len(msgs) != 1 || msgs[0].MemberID != bot(p, models.RolePulse).ID || !strings.Contains(msgs[0].Body, "for Scout") {
+		t.Fatalf("Pulse says so in #general: %+v", msgs)
 	}
 	if n := f.inbox(ada); len(n) != 1 || n[0].Kind != "routine" {
 		t.Fatalf("inbox: %+v", n)
 	}
+
 	f.s.TickRoutines(f.ctx) // not due again for 24h
-	tasks, _ = f.s.Tasks(f.ctx, p.ID)
-	if len(tasks) != 1 {
-		t.Fatal("fired before its interval")
+	mu.Lock()
+	clock = clock.Add(25 * time.Hour)
+	mu.Unlock()
+	f.s.TickRoutines(f.ctx) // due, but the last Task is still open
+	if tasks, _ = f.s.Tasks(f.ctx, p.ID); len(tasks) != 1 {
+		t.Fatalf("a Routine waits for its open Task: %d Tasks", len(tasks))
+	}
+	done := "done"
+	_, err = f.s.UpdateTask(f.ctx, ada, tasks[0].ID, TaskPatch{Status: &done})
+	f.must(err)
+	mu.Lock()
+	clock = clock.Add(25 * time.Hour)
+	mu.Unlock()
+	f.s.TickRoutines(f.ctx)
+	if tasks, _ = f.s.Tasks(f.ctx, p.ID); len(tasks) != 2 {
+		t.Fatalf("fires again once the Task is done: %d Tasks", len(tasks))
+	}
+	if _, err := f.s.CreateRoutine(f.ctx, ada, p.ID, NewRoutine{Name: "x"}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("a Routine needs a prompt: %v", err)
+	}
+	pulse := bot(p, models.RolePulse).ID
+	if _, err := f.s.UpdateRoutine(f.ctx, ada, r.ID, RoutinePatch{BotMemberID: &pulse}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("Routine Tasks go to a Bot that works on Tasks: %v", err)
 	}
 }
 
@@ -557,7 +581,7 @@ func TestRoutineScheduleValidation(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
 	p := f.project(ada, "S")
-	if _, err := f.s.CreateRoutine(f.ctx, ada, p.ID, NewRoutine{Name: "x", Schedule: "5s"}); !errors.Is(err, store.ErrInvalid) {
+	if _, err := f.s.CreateRoutine(f.ctx, ada, p.ID, NewRoutine{Name: "x", Prompt: "y", Schedule: "5s"}); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("sub-minute schedule: %v", err)
 	}
 	if !Due(models.Routine{Enabled: true}, time.Now()) {
