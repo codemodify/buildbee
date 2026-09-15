@@ -5,12 +5,8 @@ export GOTOOLCHAIN="${GOTOOLCHAIN:-local}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "== go test server =="
-(cd server && go test ./...)
-echo "== go test cli =="
-(cd cli && go test ./...)
-echo "== go test runtime =="
-(cd runtime && go test ./...)
+echo "== go test =="
+go test ./...
 echo "== web build =="
 (cd web && npm ci && npm run build)
 
@@ -24,7 +20,7 @@ fi
 echo "== e2e (memory Server) =="
 need_stop=0
 if ! curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
-  (cd server && go run ./cmd/server) >/tmp/buildbee-server-ci.log 2>&1 &
+  go run ./cmd/buildbee-server >/tmp/buildbee-server-ci.log 2>&1 &
   echo $! > /tmp/buildbee-server-ci.pid
   need_stop=1
   for i in $(seq 1 45); do

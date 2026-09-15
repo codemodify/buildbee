@@ -16,8 +16,8 @@ desktop/src-tauri/target/
 desktop/src-tauri/gen/
 
 # Embedded UI (keep .gitkeep so go:embed compiles)
-server/internal/webui/dist/*
-!server/internal/webui/dist/.gitkeep
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
 
 # Env and secrets
 .env

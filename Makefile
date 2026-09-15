@@ -1,31 +1,36 @@
 export GOTOOLCHAIN ?= local
-ROOT := $(CURDIR)
 
-.PHONY: web embed-web server build run test desktop-check
+BIN := bin
+
+.PHONY: all web embed-web build run test vet clean
+
+all: build
 
 web:
 	cd web && npm ci && npm run build
 
-# Copy Vite dist into the go:embed directory used by the Server binary.
+# Copy the Vite build into the go:embed directory served by the Server.
 embed-web: web
-	rm -rf server/internal/webui/dist
-	mkdir -p server/internal/webui/dist
-	cp -a web/dist/. server/internal/webui/dist/
-	touch server/internal/webui/dist/.gitkeep
+	find internal/webui/dist -mindepth 1 ! -name .gitkeep -delete
+	cp -a web/dist/. internal/webui/dist/
 
-server: embed-web
-	mkdir -p bin
-	cd server && go build -o $(ROOT)/bin/buildbee-server ./cmd/server
+build: embed-web
+	mkdir -p $(BIN)
+	go build -trimpath -o $(BIN)/buildbee-server ./cmd/buildbee-server
+	go build -trimpath -o $(BIN)/buildbee-worker ./cmd/buildbee-worker
+	go build -trimpath -o $(BIN)/buildbee ./cmd/buildbee
 
-build: server
-
-# Dev: Vite dist on disk, no embed required.
+# Dev: serve the Vite build from disk instead of the embed.
 run: web
-	cd server && BUILDBEE_WEB_DIR=$(ROOT)/web/dist go run ./cmd/server
+	BUILDBEE_WEB_DIR=$(CURDIR)/web/dist go run ./cmd/buildbee-server
 
-test:
-	./scripts/ci-local.sh
+vet:
+	go vet ./...
 
-# Compiles the Tauri host without bundling installers (needs WebKit/GTK on Linux).
-desktop-check:
-	cd desktop/src-tauri && cargo check && cargo test
+test: vet
+	go test ./...
+	cd web && npm ci && npm run build
+
+clean:
+	rm -rf $(BIN) web/dist
+	find internal/webui/dist -mindepth 1 ! -name .gitkeep -delete

@@ -17,7 +17,7 @@ tid=$(printf '%s' "$task" | json "['id']")
 echo "project=$pid task=$tid"
 
 export BUILDBEE_URL="$BASE"
-(cd "$ROOT/cli" && GOTOOLCHAIN=local go run ./cmd/buildbee run start --task "$tid" --acp --agent fake) \
+(cd "$ROOT" && GOTOOLCHAIN=local go run ./cmd/buildbee run start --task "$tid" --acp --agent fake) \
   >/tmp/buildbee-acp-stream-out.json 2>/tmp/buildbee-acp-stream-err.log &
 clipid=$!
 

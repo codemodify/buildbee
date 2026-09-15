@@ -54,7 +54,7 @@ ho=$(curl -fsS -X POST "$BASE/v1/tasks/$tid/handoffs?autorun=1" -H 'Content-Type
 printf '%s' "$ho" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d.get('run'), d; print('builder autorun', d['run']['id'])"
 
 export BUILDBEE_URL="$BASE"
-(cd "$ROOT/cli" && GOTOOLCHAIN=local go run ./cmd/buildbee run start --task "$tid" --acp --agent fake) | python3 -c "
+(cd "$ROOT" && GOTOOLCHAIN=local go run ./cmd/buildbee run start --task "$tid" --acp --agent fake) | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
 art=d.get('artifact') or {}

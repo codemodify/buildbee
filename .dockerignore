@@ -1,0 +1,11 @@
+.git
+.github
+bin
+desktop
+docs
+scripts
+**/node_modules
+web/dist
+**/*.log
+**/.env
+**/.env.*

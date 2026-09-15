@@ -40,8 +40,8 @@ services:
   runtime:
     profiles: ["runtime"]
     build:
-      context: ../../runtime
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: Dockerfile.worker
     ports:
       - "8090:8090"
     environment:
