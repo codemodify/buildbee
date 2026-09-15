@@ -340,6 +340,18 @@ func (s *Server) claimRun(w http.ResponseWriter, r *http.Request) {
 	respond(s, w, http.StatusOK, c, err)
 }
 
+func (s *Server) steerRun(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Text      string `json:"text"`
+		Interrupt bool   `json:"interrupt"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	ev, err := s.core.SteerRun(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Text, in.Interrupt)
+	respond(s, w, http.StatusCreated, ev, err)
+}
+
 func (s *Server) heartbeatRun(w http.ResponseWriter, r *http.Request) {
 	run, err := s.core.Heartbeat(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
 	respond(s, w, http.StatusOK, run, err)

@@ -255,3 +255,40 @@ func TestRepoURLValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestClaimsShareWorkersAcrossProjects(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	busy, quiet := f.project(ada, "Busy"), f.project(ada, "Quiet")
+	one := 1
+	_, err := f.s.UpdateProject(f.ctx, ada, busy.ID, ProjectPatch{MaxRuns: &one})
+	f.must(err)
+	for i := range 3 {
+		f.queue(ada, busy.ID, "busy "+string(rune('a'+i)), NewRun{Agent: "fake"})
+	}
+	late := f.queue(ada, quiet.ID, "quiet", NewRun{Agent: "fake"})
+
+	w := WorkerActor("w1")
+	first, err := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0)
+	f.must(err)
+	if first == nil || first.Run.ProjectID != busy.ID {
+		t.Fatalf("the oldest Run goes first: %+v", first)
+	}
+	second, err := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0)
+	f.must(err)
+	if second == nil || second.Run.ID != late.ID {
+		t.Fatalf("a Project at its max_runs waits, so the other Project's Run goes next: %+v", second)
+	}
+	if c, _ := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0); c != nil {
+		t.Fatalf("Busy is at max_runs=1: %+v", c.Run)
+	}
+	_, err = f.s.ReportRun(f.ctx, w, first.Run.ID, RunReport{Status: "succeeded"})
+	f.must(err)
+	if c, _ := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0); c == nil || c.Run.ProjectID != busy.ID {
+		t.Fatalf("a finished Run frees Busy's slot: %+v", c)
+	}
+	bad := -1
+	if _, err := f.s.UpdateProject(f.ctx, ada, busy.ID, ProjectPatch{MaxRuns: &bad}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("negative max_runs: %v", err)
+	}
+}

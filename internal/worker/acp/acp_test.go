@@ -171,6 +171,50 @@ func TestCancelStopsTheTurn(t *testing.T) {
 	}
 }
 
+// steerOnFirstToken sends msg to the agent when its first reply arrives.
+func steerOnFirstToken(msg Steer) (chan Steer, Handler, *recorder) {
+	steer := make(chan Steer, 1)
+	var once sync.Once
+	rec := &recorder{}
+	return steer, func(ev Event) error {
+		if ev.Kind == "token" {
+			once.Do(func() { steer <- msg })
+		}
+		return rec.emit(ev)
+	}, rec
+}
+
+func TestSteeringQueuesATurnAfterTheCurrentOne(t *testing.T) {
+	prev := StreamStep
+	StreamStep = 20 * time.Millisecond
+	t.Cleanup(func() { StreamStep = prev })
+	steer, emit, rec := steerOnFirstToken(Steer{By: "Ada", Text: "Use the standard library."})
+	out, err := Run(context.Background(), Config{Agent: "fake", Steer: steer}, "Task: x", emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out, "Done.") != 2 || !strings.Contains(out, "[Ada] Use the standard library.") {
+		t.Fatalf("two full turns with the message between: %q", out)
+	}
+	if rec.find("log", hasText("message from Ada")) == nil {
+		t.Fatal("the message is logged on the Run")
+	}
+}
+
+func TestSteeringInterruptCancelsTheTurn(t *testing.T) {
+	prev := StreamStep
+	StreamStep = 20 * time.Millisecond
+	t.Cleanup(func() { StreamStep = prev })
+	steer, emit, _ := steerOnFirstToken(Steer{By: "Ada", Text: "Stop, wrong file.", Interrupt: true})
+	out, err := Run(context.Background(), Config{Agent: "fake", Steer: steer}, "Task: x", emit)
+	if err != nil {
+		t.Fatalf("an interrupted turn is not a failure: %v", err)
+	}
+	if strings.Count(out, "Done.") != 1 || !strings.Contains(out, "[Ada] Stop, wrong file.") {
+		t.Fatalf("the first turn stops, the second finishes: %q", out)
+	}
+}
+
 func TestEmitFailureStopsTheRun(t *testing.T) {
 	refused := errors.New("server refused the event")
 	_, err := Run(context.Background(), Config{Agent: "fake"}, "Task: x", func(ev Event) error {

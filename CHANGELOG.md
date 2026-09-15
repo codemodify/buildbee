@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 4a (autopilot)
+## Unreleased — LAN rebuild, Phase 4b (steering, fair scheduling)
+
+### Added
+- `POST /v1/runs/{id}/steer` and `buildbee run steer`: message the agent working on a Run, queued or with `interrupt`
+- Project `max_runs`; claims serve the Project with the fewest Runs going first
+- RunEvent kind `steer`; recreate the database
+
+## LAN rebuild, Phase 4a (autopilot)
 
 ### Added
 - [Autopilot](docs/autopilot.md): with `auto_run`, Scout plans, Builder builds and pushes, Sentry reviews, and approved branches merge after CI; changes and CI failures go back to the Builder; after 3 builds a person decides

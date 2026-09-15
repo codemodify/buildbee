@@ -26,7 +26,7 @@ DELETE /v1/me                            → forget this browser's Person
 | Method and path | What it does |
 | --- | --- |
 | `GET/POST /v1/projects` | list (`?archived=1` includes archived) / create `{name, auto_run}` |
-| `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, merge_policy: auto\|approval, instructions, repo_url, default_branch, archived}`; `auto_run` is [autopilot](autopilot.md) |
+| `GET/PATCH /v1/projects/{id}` | Project with Members and Channels / `{name, auto_run, merge_policy: auto\|approval, max_runs, instructions, repo_url, default_branch, archived}`; `auto_run` is [autopilot](autopilot.md) |
 | `POST /v1/projects/{id}/join` | join as `member` |
 | `GET/POST /v1/projects/{id}/members` | list / add `{kind: human\|bot, display_name, role, instructions, agent}` |
 | `PATCH /v1/members/{id}` | `{display_name, instructions, agent}`; `agent` applies to Bots |
@@ -43,6 +43,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `GET /v1/projects/{id}/decisions/memories` | remembered answers |
 | `GET/POST /v1/tasks/{id}/runs` | list / queue `{agent, bot_member_id, kind: plan\|build\|review}`; all default from the Task's Bot |
 | `GET/PATCH /v1/runs/{id}` | Run / `{status, detail}`: `pending → running → succeeded\|failed\|canceled`; people may only cancel; workers also report `{summary, branch, pr_url}` |
+| `POST /v1/runs/{id}/steer` | people: `{text, interrupt}`; a message for the agent, folded into a queued Run's prompt or delivered as the running agent's next turn (`interrupt` cancels the current turn first) |
 | `GET/POST /v1/runs/{id}/events` | `?after=<seq>&limit=` / append `{kind, payload}` (`409` once finished) |
 | `POST /v1/worker/claim` | workers: `{agents, wait_seconds ≤ 30}` → `200 {run, task, project, bot, handoffs}` or `204` |
 | `POST /v1/runs/{id}/heartbeat` | workers: renew the 60 s lease; returns the Run (status `canceled` means stop) |

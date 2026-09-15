@@ -157,6 +157,13 @@ func (c *Client) UpdateRun(runID, status, detail string) (map[string]any, error)
 	return out, err
 }
 
+// SteerRun sends a message to the agent working on a Run.
+func (c *Client) SteerRun(runID, text string, interrupt bool) (map[string]any, error) {
+	var out map[string]any
+	err := c.do(http.MethodPost, "/v1/runs/"+runID+"/steer", map[string]any{"text": text, "interrupt": interrupt}, &out)
+	return out, err
+}
+
 // RunEvent is one event of a Run's stream.
 type RunEvent struct {
 	Seq     int            `json:"seq"`

@@ -67,6 +67,16 @@ type Config struct {
 	// CancelGrace is how long a canceled session may take to wind down
 	// before the agent is killed (default 10s).
 	CancelGrace time.Duration
+	// Steer delivers people's messages while the agent works (optional).
+	Steer <-chan Steer
+}
+
+// Steer is a person's message to the working agent. It is sent as the next
+// turn once the current one ends; Interrupt cancels the current turn first.
+type Steer struct {
+	By        string
+	Text      string
+	Interrupt bool
 }
 
 // ErrNoAgent means the agent's command is not installed on this machine.
@@ -268,34 +278,79 @@ func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 		}
 	}
 
-	ch, err := c.start("session/prompt", map[string]any{
-		"sessionId": s.id,
-		"prompt":    []map[string]string{{"type": "text", "text": prompt}},
-	})
+	send := func(text string) (<-chan response, error) {
+		return c.start("session/prompt", map[string]any{
+			"sessionId": s.id,
+			"prompt":    []map[string]string{{"type": "text", "text": text}},
+		})
+	}
+	ch, err := send(prompt)
 	if err != nil {
 		return err
 	}
-	var out struct {
-		StopReason string `json:"stopReason"`
-	}
-	select {
-	case r := <-ch:
-		if err := decode("session/prompt", r, &out); err != nil {
-			return s.explain(ctx, err)
+	steer := s.cfg.Steer
+	var pending []Steer
+	interrupted := false
+	for {
+		var out struct {
+			StopReason string `json:"stopReason"`
 		}
-	case <-ctx.Done():
-		// Ask the agent to stop, give it a moment to wrap up, then give up.
-		_ = c.notify("session/cancel", map[string]string{"sessionId": s.id})
 		select {
-		case <-ch:
-		case <-c.done:
-		case <-time.After(s.cfg.CancelGrace):
+		case st, ok := <-steer:
+			if !ok {
+				steer = nil
+				continue
+			}
+			pending = append(pending, st)
+			s.write("\n[" + st.By + "] " + st.Text + "\n")
+			s.emitLog(fmt.Sprintf("message from %s for the agent%s\n", st.By, map[bool]string{true: " (interrupting)", false: ""}[st.Interrupt]))
+			if st.Interrupt && !interrupted {
+				interrupted = true
+				_ = c.notify("session/cancel", map[string]string{"sessionId": s.id})
+			}
+			continue
+		case r := <-ch:
+			if err := decode("session/prompt", r, &out); err != nil {
+				return s.explain(ctx, err)
+			}
+		case <-ctx.Done():
+			// Ask the agent to stop, give it a moment to wrap up, then give up.
+			_ = c.notify("session/cancel", map[string]string{"sessionId": s.id})
+			select {
+			case <-ch:
+			case <-c.done:
+			case <-time.After(s.cfg.CancelGrace):
+			}
+			return context.Cause(ctx)
 		}
-		return context.Cause(ctx)
+		if out.StopReason == "end_turn" || (out.StopReason == "cancelled" && interrupted && len(pending) > 0) {
+			if len(pending) == 0 {
+				return nil
+			}
+			ch, err = send(steerPrompt(pending))
+			if err != nil {
+				return err
+			}
+			pending, interrupted = nil, false
+			continue
+		}
+		return stopError(ctx, out.StopReason)
 	}
-	switch out.StopReason {
-	case "end_turn":
-		return nil
+}
+
+// steerPrompt turns people's messages into the agent's next turn.
+func steerPrompt(msgs []Steer) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		fmt.Fprintf(&b, "Message from %s, who is watching your work:\n%s\n\n", m.By, m.Text)
+	}
+	b.WriteString("Take this into account and carry on with the Task. End with a short summary as before.")
+	return b.String()
+}
+
+// stopError explains why the agent stopped before finishing its turn.
+func stopError(ctx context.Context, reason string) error {
+	switch reason {
 	case "cancelled":
 		if err := context.Cause(ctx); err != nil {
 			return err
@@ -308,7 +363,7 @@ func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 	case "refusal":
 		return errors.New("the agent refused the task")
 	default:
-		return fmt.Errorf("the agent stopped: %q", out.StopReason)
+		return fmt.Errorf("the agent stopped: %q", reason)
 	}
 }
 

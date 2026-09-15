@@ -62,6 +62,12 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Builds continue the Task's branch and push with a lease; merges use `gh pr merge` or `git merge`
 - Project `instructions` reach every agent; Runs report the agent's closing message as `summary`
 
+## Phase 4b — Steering and fair scheduling (done)
+
+- People message a working agent: queued Runs get it in their prompt; running agents get it as their next turn over ACP, or at once with `interrupt` (the turn is canceled first)
+- Workers follow each Run's WebSocket from the claim's cursor, so messages arrive live and never twice
+- Per-Project `max_runs`, and claims serve the Project with the fewest Runs going first
+
 ## Phase 2 — Chat UX
 
 - Channels, threads, direct messages, @people and @agents, unread counts, presence
@@ -77,9 +83,9 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 
 ## Phase 4 — Autonomy, remaining
 
-- Steering a running agent from chat (ACP prompt queueing where the agent supports it)
+- Steering from chat threads (the API and CLI exist; the UI comes with Phase 2)
 - Scheduled Routines that open Tasks (backlog grooming, dependency updates, failing-CI sweeps)
-- Token and cost tracking from `usage` events; per-Project limits on parallel Runs
+- Token and cost tracking from `usage` events
 
 ## Phase 5 — Scale and operations
 

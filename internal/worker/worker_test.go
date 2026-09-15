@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -295,4 +296,73 @@ func TestFinalReply(t *testing.T) {
 			t.Errorf("finalReply(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+func TestSteeringReachesTheAgent(t *testing.T) {
+	prev := acp.StreamStep
+	acp.StreamStep = 30 * time.Millisecond
+	t.Cleanup(func() { acp.StreamStep = prev })
+	s := newStack(t)
+
+	// A message to a queued Run goes into its prompt.
+	early := s.queue("Early word")
+	if _, err := s.svc.SteerRun(s.ctx, s.ada, early.ID, "Prefer small commits.", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.svc.SteerRun(s.ctx, core.WorkerActor("w9"), early.ID, "hi", false); err == nil {
+		t.Fatal("only people steer")
+	}
+	s.start(Config{})
+	got := s.wait(early.ID, finished)
+	if !strings.Contains(got.Prompt, "Message from Ada: Prefer small commits.") {
+		t.Fatalf("prompt: %q", got.Prompt)
+	}
+	if transcript := s.transcript(got); strings.Count(transcript, "Done.") != 1 {
+		t.Fatalf("a message already in the prompt is not sent again: %q", transcript)
+	}
+
+	// A message to a running Run reaches the agent as its next turn.
+	live := s.queue("Live word")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		evs, _, _ := s.svc.RunEvents(s.ctx, live.ID, 0, 0)
+		if slices.ContainsFunc(evs, func(e models.RunEvent) bool { return e.Kind == "token" }) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the agent never replied")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := s.svc.SteerRun(s.ctx, s.ada, live.ID, "Also update the README.", false); err != nil {
+		t.Fatal(err)
+	}
+	got = s.wait(live.ID, finished)
+	transcript := s.transcript(got)
+	if got.Status != models.RunSucceeded || !strings.Contains(transcript, "[Ada] Also update the README.") || strings.Count(transcript, "Done.") != 2 {
+		t.Fatalf("run %s, transcript %q", got.Status, transcript)
+	}
+	if _, err := s.svc.SteerRun(s.ctx, s.ada, live.ID, "too late", false); err == nil {
+		t.Fatal("a finished Run takes no messages")
+	}
+}
+
+// transcript returns the Run's transcript Artifact.
+func (s *stack) transcript(r *models.Run) string {
+	s.t.Helper()
+	arts, err := s.svc.Artifacts(s.ctx, r.TaskID)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	for _, a := range arts {
+		if a.RunID == r.ID && a.Kind == "log" {
+			full, err := s.svc.Artifact(s.ctx, a.ID)
+			if err != nil {
+				s.t.Fatal(err)
+			}
+			return full.Body
+		}
+	}
+	s.t.Fatalf("run %s has no transcript", r.ID)
+	return ""
 }

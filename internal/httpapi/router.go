@@ -98,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{id}", s.getRun)
 	mux.HandleFunc("PATCH /v1/runs/{id}", s.patchRun)
 	mux.HandleFunc("POST /v1/runs/{id}/heartbeat", s.heartbeatRun)
+	mux.HandleFunc("POST /v1/runs/{id}/steer", s.steerRun)
 	mux.HandleFunc("POST /v1/worker/claim", s.claimRun)
 	mux.HandleFunc("GET /v1/runs/{id}/events", s.listRunEvents)
 	mux.HandleFunc("POST /v1/runs/{id}/events", s.createRunEvent)

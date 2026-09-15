@@ -40,15 +40,17 @@ const (
 	RunEventUsage      = "usage"
 	RunEventStatus     = "status"
 	RunEventLog        = "log"
+	RunEventSteer      = "steer" // a person's message to the working agent
 )
 
-// NormalizeRunEventKind returns the canonical kind, or "" if unknown.
+// NormalizeRunEventKind returns the canonical kind of an event a worker may
+// append, or "" if it is unknown or not a worker's to write.
 func NormalizeRunEventKind(kind string) string {
 	k := strings.ToLower(strings.TrimSpace(kind))
 	switch k {
 	case RunEventToken, RunEventThought, RunEventPlan, RunEventToolCall, RunEventToolResult, RunEventUsage, RunEventStatus, RunEventLog:
 		return k
-	default:
+	default: // including steer, which only SteerRun records
 		return ""
 	}
 }
@@ -177,6 +179,7 @@ type Project struct {
 	Name          string     `json:"name"`
 	AutoRun       bool       `json:"auto_run"` // autopilot
 	MergePolicy   string     `json:"merge_policy"`
+	MaxRuns       int        `json:"max_runs"` // Runs at once; 0 = no limit
 	Instructions  string     `json:"instructions,omitempty"`
 	RepoURL       string     `json:"repo_url,omitempty"`
 	DefaultBranch string     `json:"default_branch,omitempty"`
@@ -571,4 +574,7 @@ type Claim struct {
 	Project Project   `json:"project"`
 	Bot     *Member   `json:"bot,omitempty"`
 	Notes   []Handoff `json:"handoffs"`
+	// Seq is the Run's last event when it was claimed; steering messages
+	// after it are for the worker to pass on.
+	Seq int `json:"seq"`
 }

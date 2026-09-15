@@ -10,7 +10,9 @@ A worker is a process that executes Runs. It pulls queued Runs from the Server, 
 4. When the agent finishes, the worker uploads `<agent>.log` and marks the Run `succeeded` or `failed`.
 5. If a worker stops heartbeating (crash, power loss, network), the Server fails its Runs once the lease runs out. Agent work is not safe to repeat blindly, so nothing is retried automatically; queue the Run again.
 
-Only the worker that claimed a Run can write to it. People can still cancel any Run.
+Only the worker that claimed a Run can write to it. People can still cancel any Run, and message the agent working on it (`POST /v1/runs/{id}/steer`, `buildbee run steer`): the worker follows the Run's event stream and gives the message to the agent as its next turn, or at once with `interrupt`.
+
+Projects share the workers. A Project with `max_runs` set never has more Runs going at once; among the rest, the Project with the fewest Runs going is served first, then the oldest Run.
 
 ## Which Runs a worker takes
 

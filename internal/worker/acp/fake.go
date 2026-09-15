@@ -48,18 +48,17 @@ var fakeOptions struct {
 // calls one tool (asking permission unless told to skip prompts), and
 // replies. It serves one connection until r ends.
 func ServeFake(r io.Reader, w io.Writer) {
-	f := &fakeAgent{cancel: make(chan struct{})}
+	f := &fakeAgent{}
 	f.conn = newConn(w, f.handle)
 	<-f.conn.listen(r).done
 }
 
 type fakeAgent struct {
-	conn       *conn
-	mu         sync.Mutex
-	bypass     bool
-	authed     bool
-	cancelOnce sync.Once
-	cancel     chan struct{}
+	conn   *conn
+	mu     sync.Mutex
+	bypass bool
+	authed bool
+	cancel chan struct{} // closed to cancel the current turn
 }
 
 func (f *fakeAgent) handle(method string, params json.RawMessage) (any, *RPCError) {
@@ -99,7 +98,12 @@ func (f *fakeAgent) handle(method string, params json.RawMessage) (any, *RPCErro
 		f.mu.Unlock()
 		return map[string]any{}, nil
 	case "session/cancel":
-		f.cancelOnce.Do(func() { close(f.cancel) })
+		f.mu.Lock()
+		if f.cancel != nil {
+			close(f.cancel)
+			f.cancel = nil
+		}
+		f.mu.Unlock()
 		return nil, nil
 	case "session/prompt":
 		var p struct {
@@ -119,6 +123,10 @@ func (f *fakeAgent) handle(method string, params json.RawMessage) (any, *RPCErro
 }
 
 func (f *fakeAgent) work(prompt string) any {
+	cancel := make(chan struct{})
+	f.mu.Lock()
+	f.cancel = cancel
+	f.mu.Unlock()
 	task := ""
 	for _, line := range strings.Split(prompt, "\n") {
 		if t, ok := strings.CutPrefix(line, "Task: "); ok {
@@ -128,7 +136,7 @@ func (f *fakeAgent) work(prompt string) any {
 	}
 	update := func(u map[string]any) bool {
 		select {
-		case <-f.cancel:
+		case <-cancel:
 			return false
 		case <-time.After(StreamStep):
 		}

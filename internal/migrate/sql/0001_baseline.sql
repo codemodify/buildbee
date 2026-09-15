@@ -29,6 +29,7 @@ CREATE TABLE projects (
     name TEXT NOT NULL CHECK (name <> ''),
     auto_run BOOLEAN NOT NULL DEFAULT false,  -- autopilot: Bots hand Tasks on and start Runs by themselves
     merge_policy TEXT NOT NULL DEFAULT 'auto' CHECK (merge_policy IN ('auto', 'approval')),
+    max_runs INT NOT NULL DEFAULT 0 CHECK (max_runs >= 0),  -- Runs at once across workers; 0 = no limit
     instructions TEXT NOT NULL DEFAULT '',   -- standing guidance every agent in the Project gets
     repo_url TEXT NOT NULL DEFAULT '',
     default_branch TEXT NOT NULL DEFAULT '',
@@ -180,7 +181,7 @@ CREATE TABLE run_events (
     id UUID PRIMARY KEY,
     run_id UUID NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
     seq INTEGER NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('token', 'thought', 'plan', 'tool_call', 'tool_result', 'usage', 'status', 'log')),
+    kind TEXT NOT NULL CHECK (kind IN ('token', 'thought', 'plan', 'tool_call', 'tool_result', 'usage', 'status', 'log', 'steer')),
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (run_id, seq)

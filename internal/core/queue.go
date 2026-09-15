@@ -119,10 +119,13 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 				return err
 			}
 		}
-		if err := w.runEvent(ctx, r.ID, models.RunEventStatus,
-			map[string]any{"status": r.Status, "detail": "claimed by worker " + a.Worker}); err != nil {
+		ev, err := w.st.AppendRunEvent(ctx, r.ID, models.RunEventStatus,
+			map[string]any{"status": r.Status, "detail": "claimed by worker " + a.Worker}, w.now)
+		if err != nil {
 			return err
 		}
+		w.emit("run:"+r.ID, int64(ev.Seq), "run_event", ev)
+		c.Seq = ev.Seq
 		by := w.runActor(ctx, a, r)
 		if err := w.activity(ctx, r.ProjectID, by, models.TypeRun, "claimed", r.ID,
 			map[string]any{"task_id": r.TaskID, "worker": a.Worker, "attempt": r.Attempts}); err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/codemodify/buildbee/internal/client"
@@ -51,7 +52,7 @@ func run(args []string, c *client.Client) error {
 }
 
 const projectUsage = "usage: buildbee project create --name NAME | project update --id ID [--autopilot on|off] " +
-	"[--merge-policy auto|approval] [--repo URL] [--branch NAME] [--instructions TEXT]"
+	"[--merge-policy auto|approval] [--max-runs N] [--repo URL] [--branch NAME] [--instructions TEXT]"
 
 func runProject(args []string, c *client.Client) error {
 	if len(args) == 0 {
@@ -74,6 +75,13 @@ func runProject(args []string, c *client.Client) error {
 			return errors.New(projectUsage)
 		}
 		patch := map[string]any{}
+		if v := flagValue(args[1:], "max-runs"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return errors.New(projectUsage)
+			}
+			patch["max_runs"] = n
+		}
 		switch v := flagValue(args[1:], "autopilot"); v {
 		case "":
 		case "on", "off":
@@ -147,7 +155,8 @@ func runHandoff(args []string, c *client.Client) error {
 	return c.PrintJSON(out)
 }
 
-const runUsage = "usage: buildbee run start --task ID [--agent AGENT] [--bot MEMBER_ID] [--follow] | run show --id ID | run cancel --id ID"
+const runUsage = "usage: buildbee run start --task ID [--agent AGENT] [--bot MEMBER_ID] [--follow] | run show --id ID | " +
+	"run cancel --id ID | run steer --id ID --text TEXT [--interrupt]"
 
 func runRun(args []string, c *client.Client) error {
 	if len(args) == 0 {
@@ -176,6 +185,16 @@ func runRun(args []string, c *client.Client) error {
 			return fmt.Errorf("run %s %s", id, status)
 		}
 		return nil
+	case "steer":
+		id, text := flagValue(args[1:], "id"), flagValue(args[1:], "text")
+		if id == "" || text == "" {
+			return errors.New(runUsage)
+		}
+		out, err := c.SteerRun(id, text, hasFlag(args[1:], "interrupt"))
+		if err != nil {
+			return err
+		}
+		return c.PrintJSON(out)
 	case "show", "cancel":
 		id := flagValue(args[1:], "id")
 		if id == "" {
@@ -209,6 +228,8 @@ func printEvent(out, info io.Writer, ev client.RunEvent) {
 		fmt.Fprintf(info, "[%v] %v\n", ev.Payload["status"], ev.Payload["detail"])
 	case "tool_call":
 		fmt.Fprintf(info, "[tool] %v\n", ev.Payload["name"])
+	case "steer":
+		fmt.Fprintf(info, "[%v] %v\n", ev.Payload["by"], ev.Payload["text"])
 	}
 }
 
@@ -287,13 +308,14 @@ Usage:
   buildbee version
   buildbee project create --name NAME
   buildbee project update --id ID [--autopilot on|off] [--merge-policy auto|approval]
-                          [--repo URL] [--branch NAME] [--instructions TEXT]
+                          [--max-runs N] [--repo URL] [--branch NAME] [--instructions TEXT]
   buildbee task list --project ID
   buildbee task create --project ID --title TITLE [--body TEXT] [--to ROLE|none]
   buildbee handoff create --task ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]
   buildbee run start --task ID [--agent AGENT] [--bot MEMBER_ID] [--follow]
   buildbee run show --id ID
   buildbee run cancel --id ID
+  buildbee run steer --id ID --text TEXT [--interrupt]
   buildbee routine list --project ID
   buildbee routine run --id ID
 

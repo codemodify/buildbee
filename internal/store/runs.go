@@ -34,17 +34,28 @@ func (s *Store) InsertRun(ctx context.Context, r models.Run) error {
 // fake agent only takes Runs that ask for it. Merge Runs need no agent and
 // go to any worker. ErrNotFound means the queue has nothing for this worker.
 func (s *Store) ClaimRun(ctx context.Context, worker string, agents []string, now, until time.Time) (*models.Run, error) {
+	// Projects share the workers: a Project at its max_runs waits, and the
+	// Project with the fewest Runs going is served first, then the oldest Run.
 	var r models.Run
 	err := scanRun(s.q.QueryRow(ctx, `UPDATE runs SET status='running', worker=$1, lease_until=$4, attempts=attempts+1,
 			started_at=COALESCE(started_at, $3), updated_at=$3
 		WHERE id = (
-			SELECT r.id FROM runs r JOIN projects p ON p.id = r.project_id
-			WHERE r.status = 'pending' AND p.archived_at IS NULL AND (r.kind = 'merge' OR r.agent = ANY($2) OR (r.agent = '' AND EXISTS (SELECT 1 FROM unnest($2::text[]) a WHERE a <> 'fake')))
-			ORDER BY r.created_at, r.id
+			SELECT r.id FROM runs r
+			JOIN projects p ON p.id = r.project_id
+			LEFT JOIN LATERAL (SELECT count(*) AS n FROM runs x WHERE x.project_id = r.project_id AND x.status = 'running') busy ON true
+			WHERE r.status = 'pending' AND p.archived_at IS NULL
+				AND (r.kind = 'merge' OR r.agent = ANY($2) OR (r.agent = '' AND EXISTS (SELECT 1 FROM unnest($2::text[]) a WHERE a <> 'fake')))
+				AND (p.max_runs = 0 OR busy.n < p.max_runs)
+			ORDER BY busy.n, r.created_at, r.id
 			FOR UPDATE OF r SKIP LOCKED
 			LIMIT 1)
 		RETURNING `+runCols, worker, agents, now, until), &r)
 	return &r, mapErr(err)
+}
+
+// UpdateRunPrompt rewrites a queued Run's prompt.
+func (s *Store) UpdateRunPrompt(ctx context.Context, id, prompt string) error {
+	return one(s.q.Exec(ctx, `UPDATE runs SET prompt=$2 WHERE id=$1 AND status='pending'`, id, prompt))
 }
 
 // ExtendLease renews the claim of the worker running a Run. It returns the

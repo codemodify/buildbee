@@ -6,10 +6,10 @@ import (
 	"github.com/codemodify/buildbee/internal/models"
 )
 
-const projectCols = `id, name, auto_run, merge_policy, instructions, repo_url, default_branch, archived_at, created_at`
+const projectCols = `id, name, auto_run, merge_policy, max_runs, instructions, repo_url, default_branch, archived_at, created_at`
 
 func scanProject(row interface{ Scan(...any) error }, p *models.Project) error {
-	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.MergePolicy, &p.Instructions, &p.RepoURL, &p.DefaultBranch, &p.ArchivedAt, &p.CreatedAt)
+	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.MergePolicy, &p.MaxRuns, &p.Instructions, &p.RepoURL, &p.DefaultBranch, &p.ArchivedAt, &p.CreatedAt)
 }
 
 func (s *Store) InsertProject(ctx context.Context, p models.Project) error {
@@ -50,8 +50,8 @@ func (s *Store) ListProjects(ctx context.Context, includeArchived bool) ([]model
 // UpdateProject writes the Project's settings and archived_at.
 func (s *Store) UpdateProject(ctx context.Context, p models.Project) error {
 	return one(s.q.Exec(ctx, `UPDATE projects SET name=$2, auto_run=$3, merge_policy=$4, instructions=$5, repo_url=$6,
-		default_branch=$7, archived_at=$8 WHERE id=$1`,
-		p.ID, p.Name, p.AutoRun, p.MergePolicy, p.Instructions, p.RepoURL, p.DefaultBranch, p.ArchivedAt))
+		default_branch=$7, archived_at=$8, max_runs=$9 WHERE id=$1`,
+		p.ID, p.Name, p.AutoRun, p.MergePolicy, p.Instructions, p.RepoURL, p.DefaultBranch, p.ArchivedAt, p.MaxRuns))
 }
 
 // --- members ---

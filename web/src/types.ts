@@ -27,6 +27,7 @@ export type Project = {
   name: string;
   auto_run?: boolean;
   merge_policy?: "auto" | "approval" | string;
+  max_runs?: number;
   instructions?: string;
   repo_url?: string;
   default_branch?: string;
@@ -104,7 +105,7 @@ export type RunEvent = {
   id: string;
   run_id: string;
   seq: number;
-  kind: "token" | "thought" | "plan" | "tool_call" | "tool_result" | "usage" | "status" | "log" | string;
+  kind: "token" | "thought" | "plan" | "tool_call" | "tool_result" | "usage" | "status" | "log" | "steer" | string;
   payload: Record<string, unknown>;
   created_at: string;
 };

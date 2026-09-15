@@ -277,6 +277,49 @@ func (s *Service) AppendRunEvent(ctx context.Context, a Actor, runID, kind strin
 	return out, err
 }
 
+// SteerRun passes a person's message to the agent working on a Run. A
+// queued Run gets it in its prompt; a running one from its worker, after
+// the agent's current turn, or at once with interrupt (the agent stops
+// what it is doing and reads the message).
+func (s *Service) SteerRun(ctx context.Context, a Actor, runID, message string, interrupt bool) (*models.RunEvent, error) {
+	msg, err := text("text", message, true, 8000)
+	if err != nil {
+		return nil, err
+	}
+	var out *models.RunEvent
+	err = s.tx(ctx, func(w *work) error {
+		r, err := w.st.GetRun(ctx, runID, true)
+		if err != nil {
+			return err
+		}
+		m, err := w.requireMember(ctx, a, r.ProjectID)
+		if err != nil {
+			return err
+		}
+		if r.Status.Terminal() {
+			return fmt.Errorf("%w: run already finished (%s)", store.ErrConflict, r.Status)
+		}
+		if r.Kind == models.RunMerge {
+			return invalid("a merge Run has no agent to talk to")
+		}
+		if r.Status == models.RunPending {
+			if err := w.st.UpdateRunPrompt(ctx, r.ID, r.Prompt+"\n\nMessage from "+m.DisplayName+": "+msg+"\n"); err != nil {
+				return err
+			}
+		}
+		ev, err := w.st.AppendRunEvent(ctx, r.ID, models.RunEventSteer,
+			map[string]any{"text": msg, "by": m.DisplayName, "interrupt": interrupt, "queued": r.Status == models.RunPending}, w.now)
+		if err != nil {
+			return err
+		}
+		out = ev
+		w.emit("run:"+r.ID, int64(ev.Seq), "run_event", ev)
+		return w.activity(ctx, r.ProjectID, whoOf(m, a), models.TypeRun, "steered", r.ID,
+			map[string]any{"task_id": r.TaskID, "text": truncate(msg, 300), "interrupt": interrupt})
+	})
+	return out, err
+}
+
 // RunEvents returns a Run's events after seq `after`.
 func (s *Service) RunEvents(ctx context.Context, runID string, after, limit int) ([]models.RunEvent, bool, error) {
 	if _, err := s.st.GetRun(ctx, runID, false); err != nil {

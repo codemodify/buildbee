@@ -30,6 +30,7 @@ type Job struct {
 	Dir    string // where the agent works; "" for the fake agent without a repo
 	GitDir string // the repo mirror Dir's checkout belongs to, if any
 	Prompt string
+	Steer  <-chan acp.Steer // people's messages while the agent works
 }
 
 // Exec runs a Job, calling emit for each piece of output, and returns the
@@ -133,7 +134,7 @@ func New(cfg Config) (*Worker, error) {
 					return "", err
 				}
 			}
-			return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: argv, WorkDir: job.Dir}, job.Prompt, emit)
+			return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: argv, WorkDir: job.Dir, Steer: job.Steer}, job.Prompt, emit)
 		}
 	}
 	if cfg.Log == nil {
@@ -289,7 +290,11 @@ func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit a
 		defer os.RemoveAll(dir)
 		workDir = dir
 	}
-	job := Job{RunID: run.ID, Agent: agent, Dir: workDir, Prompt: run.Prompt}
+	steer := make(chan acp.Steer, 16)
+	listenCtx, stopListening := context.WithCancel(ctx)
+	defer stopListening()
+	go w.listen(listenCtx, run.ID, c.Seq, steer)
+	job := Job{RunID: run.ID, Agent: agent, Dir: workDir, Prompt: run.Prompt, Steer: steer}
 	if ws != nil {
 		job.GitDir = ws.mirror
 	}

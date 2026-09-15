@@ -96,6 +96,7 @@ type ProjectPatch struct {
 	Name          *string `json:"name"`
 	AutoRun       *bool   `json:"auto_run"`
 	MergePolicy   *string `json:"merge_policy"`
+	MaxRuns       *int    `json:"max_runs"`
 	Instructions  *string `json:"instructions"`
 	RepoURL       *string `json:"repo_url"`
 	DefaultBranch *string `json:"default_branch"`
@@ -135,6 +136,12 @@ func (s *Service) UpdateProject(ctx context.Context, a Actor, id string, patch P
 				return invalid("merge_policy must be auto or approval")
 			}
 			changes["merge_policy"], p.MergePolicy = mp, mp
+		}
+		if patch.MaxRuns != nil {
+			if *patch.MaxRuns < 0 || *patch.MaxRuns > 1000 {
+				return invalid("max_runs must be 0 (no limit) to 1000")
+			}
+			changes["max_runs"], p.MaxRuns = *patch.MaxRuns, *patch.MaxRuns
 		}
 		if patch.Instructions != nil {
 			in, err := text("instructions", *patch.Instructions, false, 16000)

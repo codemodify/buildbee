@@ -95,6 +95,8 @@ export const api = {
   answerDecision: (id: string, answer: string) => request<Decision>(`/v1/decisions/${id}/answer`, post({ answer })),
 
   startRun: (taskId: string, agent = "") => request<Run>(`/v1/tasks/${taskId}/runs`, post({ agent })),
+  steerRun: (runId: string, text: string, interrupt = false) =>
+    request<RunEvent>(`/v1/runs/${runId}/steer`, post({ text, interrupt })),
   cancelRun: (runId: string) => request<Run>(`/v1/runs/${runId}`, patch({ status: "canceled", detail: "canceled" })),
   listRunEvents: (runId: string, after = 0) =>
     request<Page<RunEvent>>(`/v1/runs/${runId}/events${after > 0 ? `?after=${after}` : ""}`),
