@@ -36,15 +36,19 @@ func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", store.ErrInvalid, fmt.Sprintf(format, args...))
 }
 
-// Actor is who performs an action: a Person, or a named system process
-// (the Routines scheduler, a worker) when PersonID is empty.
+// Actor is who performs an action: a Person, a worker, or a named system
+// process (the Routines scheduler) when both IDs are empty.
 type Actor struct {
 	PersonID string
+	Worker   string // set for requests from a buildbee-worker
 	Name     string
 }
 
-// System returns a non-Person actor such as "routines" or "worker".
+// System returns a non-Person actor such as "routines" or "github".
 func System(name string) Actor { return Actor{Name: name} }
+
+// WorkerActor returns the actor for a worker called name.
+func WorkerActor(name string) Actor { return Actor{Worker: name, Name: "worker " + name} }
 
 // IsPerson reports whether a Person is acting.
 func (a Actor) IsPerson() bool { return a.PersonID != "" }
@@ -82,6 +86,7 @@ type Service struct {
 	log    *slog.Logger
 	now    func() time.Time
 	github config.GitHub
+	queue  *signal // closed and replaced whenever a Run is queued
 }
 
 // New returns a Service. A nil Publisher drops events.
@@ -89,7 +94,7 @@ func New(st *store.Store, pub Publisher, opts Options) *Service {
 	if pub == nil {
 		pub = nopPublisher{}
 	}
-	s := &Service{st: st, pub: pub, log: opts.Logger, now: opts.Now, github: opts.GitHub}
+	s := &Service{st: st, pub: pub, log: opts.Logger, now: opts.Now, github: opts.GitHub, queue: newSignal()}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -109,6 +114,7 @@ type work struct {
 	now     time.Time
 	events  []Event
 	lastRun *models.Run // Run started by the latest handoff, if any
+	queued  bool        // a Run entered the queue; wake waiting workers after commit
 }
 
 func (s *Service) tx(ctx context.Context, fn func(w *work) error) error {
@@ -122,6 +128,9 @@ func (s *Service) tx(ctx context.Context, fn func(w *work) error) error {
 	}
 	for _, e := range w.events {
 		s.pub.Publish(e)
+	}
+	if w.queued {
+		s.queue.notify()
 	}
 	return nil
 }

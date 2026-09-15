@@ -168,11 +168,13 @@ type Person struct {
 }
 
 type Project struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	AutoRun    bool       `json:"auto_run"`
-	ArchivedAt *time.Time `json:"archived_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	AutoRun       bool       `json:"auto_run"`
+	RepoURL       string     `json:"repo_url,omitempty"`
+	DefaultBranch string     `json:"default_branch,omitempty"`
+	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // ProjectBundle is a Project plus its Members and Channels.
@@ -191,6 +193,7 @@ type Member struct {
 	DisplayName  string    `json:"display_name"`
 	Role         string    `json:"role"`
 	Instructions string    `json:"instructions,omitempty"`
+	Agent        string    `json:"agent,omitempty"` // Bots: the agent CLI they run as
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -396,6 +399,11 @@ type Run struct {
 	BotMemberID string     `json:"bot_member_id,omitempty"`
 	Status      RunStatus  `json:"status"`
 	Detail      string     `json:"detail"`
+	Agent       string     `json:"agent,omitempty"`
+	Prompt      string     `json:"prompt,omitempty"`
+	Worker      string     `json:"worker,omitempty"`
+	LeaseUntil  *time.Time `json:"lease_until,omitempty"`
+	Attempts    int        `json:"attempts"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
@@ -473,4 +481,30 @@ type Notification struct {
 	Href      string     `json:"href,omitempty"`
 	ReadAt    *time.Time `json:"read_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
+}
+
+// Agents BuildBee can drive, and "fake" for tests and demos. A Bot's Agent
+// and a Run's Agent must be one of these (or empty: the worker's default).
+var Agents = []string{"claude", "grok", "codex", "opencode", "goose", "fake"}
+
+// ValidAgent reports whether a is empty or a known agent.
+func ValidAgent(a string) bool {
+	if a == "" {
+		return true
+	}
+	for _, k := range Agents {
+		if a == k {
+			return true
+		}
+	}
+	return false
+}
+
+// Claim is a Run handed to a worker, with what it needs to execute it.
+type Claim struct {
+	Run     Run       `json:"run"`
+	Task    Task      `json:"task"`
+	Project Project   `json:"project"`
+	Bot     *Member   `json:"bot,omitempty"`
+	Notes   []Handoff `json:"handoffs"`
 }

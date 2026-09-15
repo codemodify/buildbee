@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/codemodify/buildbee/internal/core"
 )
@@ -96,6 +97,15 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := s.core.AddMember(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
 	respond(s, w, http.StatusCreated, m, err)
+}
+
+func (s *Server) patchMember(w http.ResponseWriter, r *http.Request) {
+	var in core.MemberPatch
+	if !s.decode(w, r, &in) {
+		return
+	}
+	m, err := s.core.UpdateMember(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
+	respond(s, w, http.StatusOK, m, err)
 }
 
 func (s *Server) listChannels(w http.ResponseWriter, r *http.Request) {
@@ -258,13 +268,11 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		BotMemberID string `json:"bot_member_id"`
-	}
+	var in core.NewRun
 	if !s.decode(w, r, &in) {
 		return
 	}
-	run, err := s.core.CreateRun(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.BotMemberID)
+	run, err := s.core.CreateRun(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in)
 	respond(s, w, http.StatusCreated, run, err)
 }
 
@@ -309,8 +317,35 @@ func (s *Server) createRunEvent(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &in) {
 		return
 	}
-	ev, err := s.core.AppendRunEvent(r.Context(), r.PathValue("id"), in.Kind, in.Payload)
+	ev, err := s.core.AppendRunEvent(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.Kind, in.Payload)
 	respond(s, w, http.StatusCreated, ev, err)
+}
+
+// maxClaimWait bounds a worker's long-poll so proxies do not cut it off.
+const maxClaimWait = 30 * time.Second
+
+// claimRun hands the calling worker a queued Run (200) or nothing (204)
+// after waiting up to wait_seconds for one.
+func (s *Server) claimRun(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Agents      []string `json:"agents"`
+		WaitSeconds float64  `json:"wait_seconds"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	wait := min(max(time.Duration(in.WaitSeconds*float64(time.Second)), 0), maxClaimWait)
+	c, err := s.core.ClaimRun(r.Context(), actorFrom(r.Context()), in.Agents, wait)
+	if err == nil && c == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	respond(s, w, http.StatusOK, c, err)
+}
+
+func (s *Server) heartbeatRun(w http.ResponseWriter, r *http.Request) {
+	run, err := s.core.Heartbeat(r.Context(), actorFrom(r.Context()), r.PathValue("id"))
+	respond(s, w, http.StatusOK, run, err)
 }
 
 // --- artifacts, PRs, pipelines ---

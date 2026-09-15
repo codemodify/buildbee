@@ -434,7 +434,7 @@ func (w *work) handoff(ctx context.Context, proj *models.Project, task *models.T
 		return nil, nil, err
 	}
 	if to.Kind == models.KindBot && strings.EqualFold(to.Role, models.RoleBuilder) && (autorun || proj.AutoRun) {
-		run, err := w.createRun(ctx, &t, to.ID, by)
+		run, err := w.createRun(ctx, &t, to, "", by)
 		if err != nil {
 			return nil, nil, err
 		}

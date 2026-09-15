@@ -197,7 +197,24 @@ func TestRunSliceOverHTTP(t *testing.T) {
 		s.h.ServeHTTP(rec, req)
 		return rec
 	}
-	ok[obj](t, worker(http.MethodPatch, "/v1/runs/"+rid, obj{"status": "running", "detail": "sandbox up"}), http.StatusOK)
+	if rec := worker(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "token", "payload": obj{}}); rec.Code != http.StatusConflict {
+		t.Fatalf("writing to an unclaimed Run: %d", rec.Code)
+	}
+	if rec := worker(http.MethodPost, "/v1/worker/claim", obj{"agents": []string{"fake"}}); rec.Code != http.StatusNoContent {
+		t.Fatalf("a Run for any agent is not for the fake agent: %d %s", rec.Code, rec.Body)
+	}
+	claim := ok[obj](t, worker(http.MethodPost, "/v1/worker/claim", obj{"agents": []string{"claude"}, "wait_seconds": 1}), http.StatusOK)
+	if c := claim["run"].(obj); c["id"] != rid || c["status"] != "running" || c["worker"] != "w1" ||
+		!strings.Contains(c["prompt"].(string), "Add caching") || claim["bot"].(obj)["id"] != p.role("builder") {
+		t.Fatalf("claim: %v", claim)
+	}
+	hb := ok[obj](t, worker(http.MethodPost, "/v1/runs/"+rid+"/heartbeat", nil), http.StatusOK)
+	if hb["status"] != "running" {
+		t.Fatalf("heartbeat: %v", hb)
+	}
+	if rec := s.call(http.MethodPost, "/v1/runs/"+rid+"/heartbeat", "Ada", nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("people do not heartbeat: %d", rec.Code)
+	}
 	ok[obj](t, worker(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "token", "payload": obj{"text": "working"}}), http.StatusCreated)
 	ok[obj](t, worker(http.MethodPatch, "/v1/runs/"+rid, obj{"status": "succeeded", "detail": "exit 0"}), http.StatusOK)
 	art := ok[obj](t, worker(http.MethodPost, "/v1/tasks/"+tid+"/artifacts", obj{"kind": "log", "name": "acp.log", "body": "full log", "run_id": rid}), http.StatusCreated)
@@ -222,7 +239,7 @@ func TestRunSliceOverHTTP(t *testing.T) {
 		t.Fatalf("artifact body: %v", full)
 	}
 	events := ok[struct{ Items []obj }](t, s.call(http.MethodGet, "/v1/runs/"+rid+"/events", "", nil), http.StatusOK)
-	if len(events.Items) != 4 { // queued, running, token, succeeded
+	if len(events.Items) != 4 { // queued, claimed, token, succeeded
 		t.Fatalf("events: %+v", events.Items)
 	}
 }

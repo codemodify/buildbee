@@ -2,6 +2,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -97,58 +99,69 @@ func runHandoff(args []string, c *client.Client) error {
 	return c.PrintJSON(out)
 }
 
+const runUsage = "usage: buildbee run start --task ID [--agent AGENT] [--bot MEMBER_ID] [--follow] | run show --id ID | run cancel --id ID"
+
 func runRun(args []string, c *client.Client) error {
-	if len(args) == 0 || args[0] != "start" {
-		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake] [--acp] [--agent claude|codex|opencode|goose|fake]")
+	if len(args) == 0 {
+		return errors.New(runUsage)
 	}
-	task := flagValue(args[1:], "task")
-	if task == "" {
-		return fmt.Errorf("usage: buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake] [--acp] [--agent claude|codex|opencode|goose|fake]")
-	}
-	repo := flagValue(args[1:], "repo-url")
-	cmd := flagValue(args[1:], "cmd")
-	fake := hasFlag(args[1:], "fake")
-	acpMode := hasFlag(args[1:], "acp")
-	agent := flagValue(args[1:], "agent")
-	if acpMode && agent == "" {
-		agent = "auto"
-	}
-	if acpMode && (agent == "fake" || fake) {
-		out, err := c.FakeACPRun(task, agent)
+	switch args[0] {
+	case "start":
+		task := flagValue(args[1:], "task")
+		if task == "" {
+			return errors.New(runUsage)
+		}
+		run, err := c.CreateRun(task, flagValue(args[1:], "agent"), flagValue(args[1:], "bot"))
+		if err != nil {
+			return err
+		}
+		if !hasFlag(args[1:], "follow") {
+			return c.PrintJSON(run)
+		}
+		id, _ := run["id"].(string)
+		fmt.Fprintf(os.Stderr, "run %s queued\n", id)
+		status, err := c.Follow(context.Background(), id, func(ev client.RunEvent) { printEvent(c.Output, os.Stderr, ev) })
+		if err != nil {
+			return err
+		}
+		if status != "succeeded" {
+			return fmt.Errorf("run %s %s", id, status)
+		}
+		return nil
+	case "show", "cancel":
+		id := flagValue(args[1:], "id")
+		if id == "" {
+			return errors.New(runUsage)
+		}
+		var out map[string]any
+		var err error
+		if args[0] == "cancel" {
+			out, err = c.UpdateRun(id, "canceled", "canceled from the CLI")
+		} else {
+			out, err = c.GetRun(id)
+		}
 		if err != nil {
 			return err
 		}
 		return c.PrintJSON(out)
+	default:
+		return errors.New(runUsage)
 	}
-	if fake && !acpMode {
-		out, err := c.FakeStartRun(task, cmd, repo)
-		if err != nil {
-			return err
-		}
-		return c.PrintJSON(out)
+}
+
+// printEvent writes agent output to out and everything else to info.
+func printEvent(out, info io.Writer, ev client.RunEvent) {
+	text, _ := ev.Payload["text"].(string)
+	switch ev.Kind {
+	case "token":
+		fmt.Fprint(out, text)
+	case "log":
+		fmt.Fprint(info, text)
+	case "status":
+		fmt.Fprintf(info, "[%v] %v\n", ev.Payload["status"], ev.Payload["detail"])
+	case "tool_call":
+		fmt.Fprintf(info, "[tool] %v\n", ev.Payload["name"])
 	}
-	workerURL := os.Getenv("BUILDBEE_WORKER_URL")
-	if workerURL == "" {
-		workerURL = "http://127.0.0.1:8090"
-	}
-	run, err := c.CreateRun(task)
-	if err != nil {
-		return err
-	}
-	runID, _ := run["id"].(string)
-	title, notes := "", ""
-	if t, err := c.GetTask(task); err == nil {
-		title, _ = t["title"].(string)
-	}
-	out, err := c.WorkerStart(workerURL, task, runID, repo, cmd, fake, acpMode, agent, title, notes)
-	if err != nil {
-		// Record the truth: the Run did not execute. Never fall back to a fake success.
-		if _, uerr := c.UpdateRun(runID, "failed", "worker: "+err.Error()); uerr != nil {
-			fmt.Fprintf(os.Stderr, "also failed to mark run %s failed: %v\n", runID, uerr)
-		}
-		return fmt.Errorf("run %s failed: %w", runID, err)
-	}
-	return c.PrintJSON(out)
 }
 
 func runRoutine(args []string, c *client.Client) error {
@@ -213,13 +226,17 @@ Usage:
   buildbee project create --name NAME
   buildbee task list --project ID
   buildbee handoff create --task ID [--to ID | --to-role ROLE] [--note TEXT] [--autorun]
-  buildbee run start --task ID [--repo-url URL] [--cmd CMD] [--fake] [--acp] [--agent claude|codex|fake]
+  buildbee run start --task ID [--agent AGENT] [--bot MEMBER_ID] [--follow]
+  buildbee run show --id ID
+  buildbee run cancel --id ID
   buildbee routine list --project ID
   buildbee routine run --id ID
 
 Environment:
   BUILDBEE_URL           Server base URL (default http://127.0.0.1:8080)
   BUILDBEE_AS            your name in BuildBee (default: your login name)
-  BUILDBEE_WORKER_URL   Worker (default http://127.0.0.1:8090)
+
+Runs are queued on the Server and executed by any buildbee-worker that
+offers the agent. --follow streams the Run until it finishes.
 `)
 }

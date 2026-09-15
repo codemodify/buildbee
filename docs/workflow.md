@@ -24,7 +24,7 @@ A **Handoff** targets a Member or a Role (`to_role=builder`). Completing a Scout
 
 ## 5. Execute a Run
 
-The Bot starts a **Run** on a **Worker**. With `--acp` the Worker runs an ACP agent CLI (`claude` / `codex` / `opencode` / `goose`); otherwise it runs a command in a Docker **Sandbox**. Tokens, tool calls and logs stream to the Server as RunEvents (`GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`). The rolled-up transcript is stored as Artifact `acp.log` or `sandbox.log`. An agent that is not installed fails the Run; **FakeACP** runs only when agent `fake` is requested, for tests and demos.
+A **Run** is queued on the Server with an agent (`claude`, `codex`, …, from the request or the Bot's setting) and a prompt built from the Bot's instructions, the Task and its Handoff notes. Any **Worker** offering that agent claims it, runs the agent, and streams tokens, tool calls and logs to the Server as RunEvents (`GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`). The transcript is stored as Artifact `<agent>.log`. The `fake` agent runs only when asked for, for tests and demos. See [workers.md](workers.md).
 
 A Run may produce Artifacts (patches, logs, reports). Those Artifacts stay attached to the Task.
 
@@ -38,4 +38,4 @@ A **Routine** can reopen this loop on a schedule or a trigger (for example, a ne
 
 ## Not built yet
 
-See the [roadmap](roadmap.md). Notably: Runs queued and pulled by Workers, per-Run containers for ACP agents, bidirectional ACP (steering, permission requests as Decisions), agent-written diffs becoming PRs, and signed Activity.
+See the [roadmap](roadmap.md). Notably: per-Run containers for ACP agents, bidirectional ACP (steering, permission requests as Decisions), agent-written diffs becoming PRs, and signed Activity.

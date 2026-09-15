@@ -31,4 +31,4 @@ The owner's goal is different: a Slack/Discord-style workspace where people and 
 
 - Anyone on the LAN can read and change every Project. That is acceptable for the target deployment and must be revisited before BuildBee is exposed beyond a trusted network.
 - A pre-release database must be recreated when the baseline schema changes.
-- The worker's HTTP Run endpoint is temporary. It will be replaced by workers pulling Runs from a Postgres-backed queue (see the [roadmap](../roadmap.md)).
+- Workers pull Runs from a Postgres-backed queue with leases and heartbeats; they open no port (Phase 3a, [workers.md](../workers.md)).

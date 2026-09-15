@@ -410,35 +410,46 @@ func TestRunLifecycle(t *testing.T) {
 	ada := f.person("Ada")
 	p := f.project(ada, "Runs")
 	tc, _ := f.s.CreateTask(f.ctx, ada, p.ID, NewTask{Title: "x", HandoffRole: "builder"})
-	run, err := f.s.CreateRun(f.ctx, ada, tc.ID, "")
+	run, err := f.s.CreateRun(f.ctx, ada, tc.ID, NewRun{Agent: "fake"})
 	f.must(err)
-	if run.BotMemberID != bot(p, models.RoleBuilder).ID {
-		t.Fatalf("run defaults to the assigned Bot: %+v", run)
+	if run.BotMemberID != bot(p, models.RoleBuilder).ID || run.Agent != "fake" || !strings.Contains(run.Prompt, "Task: x") {
+		t.Fatalf("run defaults to the assigned Bot and carries its prompt: %+v", run)
 	}
-	worker := System("worker w1")
-	if _, err := f.s.UpdateRun(f.ctx, worker, run.ID, "succeeded", ""); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("pending -> succeeded skips running: %v", err)
+	w1, w2 := WorkerActor("w1"), WorkerActor("w2")
+	if _, err := f.s.UpdateRun(f.ctx, w1, run.ID, "running", ""); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("a worker must claim before writing: %v", err)
 	}
-	r, err := f.s.UpdateRun(f.ctx, worker, run.ID, "running", "sandbox up")
+	c, err := f.s.ClaimRun(f.ctx, w1, []string{"fake"}, 0)
 	f.must(err)
-	if r.StartedAt == nil {
-		t.Fatal("started_at")
+	if c == nil || c.Run.ID != run.ID || c.Run.Status != models.RunRunning || c.Run.Worker != "w1" ||
+		c.Run.StartedAt == nil || c.Run.LeaseUntil == nil || c.Bot == nil || c.Task.ID != tc.ID {
+		t.Fatalf("claim: %+v", c)
 	}
-	_, err = f.s.AppendRunEvent(f.ctx, run.ID, "token", map[string]any{"text": "hi"})
-	f.must(err)
-	r, err = f.s.UpdateRun(f.ctx, worker, run.ID, "succeeded", "exit 0")
-	f.must(err)
-	if r.FinishedAt == nil {
-		t.Fatal("finished_at")
+	if _, err := f.s.AppendRunEvent(f.ctx, w2, run.ID, "token", nil); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("another worker cannot write: %v", err)
 	}
-	if _, err := f.s.UpdateRun(f.ctx, worker, run.ID, "running", ""); !errors.Is(err, store.ErrConflict) {
+	_, err = f.s.AppendRunEvent(f.ctx, w1, run.ID, "token", map[string]any{"text": "hi"})
+	f.must(err)
+	r, err := f.s.UpdateRun(f.ctx, w1, run.ID, "succeeded", "exit 0")
+	f.must(err)
+	if r.FinishedAt == nil || r.LeaseUntil != nil {
+		t.Fatalf("finished_at set, lease cleared: %+v", r)
+	}
+	if _, err := f.s.UpdateRun(f.ctx, w1, run.ID, "running", ""); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("finished runs cannot change: %v", err)
 	}
-	if _, err := f.s.AppendRunEvent(f.ctx, run.ID, "token", nil); !errors.Is(err, store.ErrConflict) {
+	if _, err := f.s.AppendRunEvent(f.ctx, w1, run.ID, "token", nil); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("finished runs take no events: %v", err)
 	}
-	if _, err := f.s.UpdateRun(f.ctx, worker, run.ID, "finished", ""); !errors.Is(err, store.ErrInvalid) {
+	if _, err := f.s.UpdateRun(f.ctx, w1, run.ID, "finished", ""); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("unknown status: %v", err)
+	}
+	other := f.queue(ada, p.ID, "y", NewRun{Agent: "fake"})
+	if _, err := f.s.UpdateRun(f.ctx, ada, other.ID, "running", ""); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("people cannot start a Run: %v", err)
+	}
+	if r, err := f.s.UpdateRun(f.ctx, ada, other.ID, "canceled", "no"); err != nil || r.Status != models.RunCanceled {
+		t.Fatalf("people can cancel a queued Run: %+v %v", r, err)
 	}
 	evs, _, _ := f.s.RunEvents(f.ctx, run.ID, 0, 0)
 	for i, ev := range evs {

@@ -1,20 +1,32 @@
 #!/usr/bin/env bash
-# Build the images, start the compose stack on spare ports, check that the
-# Server answers and persists a Project, then tear everything down.
+# Build the images, start the compose stack on a spare port, check that the
+# Server answers and persists a Project, and that the compose worker claims
+# and finishes a Run. Then tear everything down.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-buildbee-smoke}"
 export BUILDBEE_PORT="${BUILDBEE_PORT:-18580}"
-export BUILDBEE_WORKER_PORT="${BUILDBEE_WORKER_PORT:-18590}"
-export BUILDBEE_FAKE_SANDBOX=1
 compose=(docker compose -f "$ROOT/deploy/compose/docker-compose.yml" --profile worker)
 trap '"${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
 
 "${compose[@]}" up -d --build --wait
 base="http://127.0.0.1:${BUILDBEE_PORT}"
+api() { curl -fsS -H 'Content-Type: application/json' -H 'X-BuildBee-As: smoke' "$@"; }
+field() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
+
 curl -fsS "$base/healthz"
 echo
-curl -fsS -X POST "$base/v1/projects" -H 'Content-Type: application/json' -H 'X-BuildBee-As: smoke' -d '{"name":"smoke"}' >/dev/null
-curl -fsS "$base/v1/projects" | grep -q '"smoke"'
-curl -fsS "http://127.0.0.1:${BUILDBEE_WORKER_PORT}/healthz" >/dev/null
+project=$(api -X POST "$base/v1/projects" -d '{"name":"smoke"}' | field "['id']")
+api "$base/v1/projects" | grep -q '"smoke"'
+task=$(api -X POST "$base/v1/projects/$project/tasks" -d '{"title":"smoke run","handoff_role":"none"}' | field "['id']")
+run=$(api -X POST "$base/v1/tasks/$task/runs" -d '{"agent":"fake"}' | field "['id']")
+for _ in $(seq 60); do
+  status=$(api "$base/v1/runs/$run" | field "['status']")
+  case "$status" in
+    succeeded) echo "run $run succeeded"; break ;;
+    failed|canceled) echo "run $run $status" >&2; exit 1 ;;
+  esac
+  sleep 0.5
+done
+[ "$status" = succeeded ] || { echo "run $run still $status" >&2; exit 1; }
 echo "smoke ok"

@@ -51,11 +51,16 @@ export const api = {
   listProjects: () => request<Items<Project>>("/v1/projects"),
   createProject: (name: string) => request<Project>("/v1/projects", post({ name })),
   getProject: (id: string) => request<Project>(`/v1/projects/${id}`),
-  updateProject: (id: string, body: { auto_run?: boolean; name?: string; archived?: boolean }) =>
+  updateProject: (
+    id: string,
+    body: { auto_run?: boolean; name?: string; archived?: boolean; repo_url?: string; default_branch?: string },
+  ) =>
     request<Project>(`/v1/projects/${id}`, patch(body)),
   listMembers: (projectId: string) => request<Items<Member>>(`/v1/projects/${projectId}/members`),
-  addMember: (projectId: string, body: { display_name: string; kind: string; role?: string }) =>
+  addMember: (projectId: string, body: { display_name: string; kind: string; role?: string; agent?: string }) =>
     request<Member>(`/v1/projects/${projectId}/members`, post(body)),
+  updateMember: (id: string, body: { display_name?: string; instructions?: string; agent?: string }) =>
+    request<Member>(`/v1/members/${id}`, patch(body)),
   listChannels: (projectId: string) => request<Items<Channel>>(`/v1/projects/${projectId}/channels`),
   createChannel: (projectId: string, name: string) =>
     request<Channel>(`/v1/projects/${projectId}/channels`, post({ name })),
@@ -89,7 +94,8 @@ export const api = {
     request<Decision>(`/v1/projects/${projectId}/decisions`, post(body)),
   answerDecision: (id: string, answer: string) => request<Decision>(`/v1/decisions/${id}/answer`, post({ answer })),
 
-  startRun: (taskId: string) => request<Run>(`/v1/tasks/${taskId}/runs`, post()),
+  startRun: (taskId: string, agent = "") => request<Run>(`/v1/tasks/${taskId}/runs`, post({ agent })),
+  cancelRun: (runId: string) => request<Run>(`/v1/runs/${runId}`, patch({ status: "canceled", detail: "canceled" })),
   listRunEvents: (runId: string, after = 0) =>
     request<Page<RunEvent>>(`/v1/runs/${runId}/events${after > 0 ? `?after=${after}` : ""}`),
   getTaskDetail: (taskId: string) => request<TaskDetail>(`/v1/tasks/${taskId}/detail`),

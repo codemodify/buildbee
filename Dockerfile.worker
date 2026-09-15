@@ -1,4 +1,4 @@
-# BuildBee worker: runs agent Runs next to a Docker daemon.
+# BuildBee worker: claims Runs from the Server and executes them.
 FROM golang:1.27-alpine AS build
 WORKDIR /src
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
@@ -9,8 +9,8 @@ COPY internal/ internal/
 RUN go build -trimpath -o /out/buildbee-worker ./cmd/buildbee-worker
 
 FROM alpine:3.24
-RUN apk add --no-cache ca-certificates docker-cli git
+RUN apk add --no-cache ca-certificates git \
+    && adduser -D -u 10001 buildbee
 COPY --from=build /out/buildbee-worker /usr/local/bin/buildbee-worker
-EXPOSE 8090
-ENV BUILDBEE_WORKER_ADDR=:8090
+USER buildbee
 CMD ["buildbee-worker"]

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -70,24 +72,42 @@ func LoadServer(getenv Getenv) (Server, error) {
 
 // Worker is the buildbee-worker configuration.
 type Worker struct {
-	Addr            string // BUILDBEE_WORKER_ADDR
-	ServerURL       string // BUILDBEE_URL
-	FakeSandbox     bool   // BUILDBEE_FAKE_SANDBOX=1: never touch Docker (tests, demos)
-	AllowHostAgents bool   // BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1: run real agent CLIs on this host
+	ServerURL       string   // BUILDBEE_URL
+	Name            string   // BUILDBEE_WORKER_NAME, default the hostname; unique per worker
+	Agents          []string // BUILDBEE_WORKER_AGENTS, comma-separated; empty = decided by the worker
+	Slots           int      // BUILDBEE_WORKER_SLOTS: Runs executed at once (default 4)
+	AllowHostAgents bool     // BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1: run real agent CLIs on this host
 }
 
 // LoadWorker reads the worker configuration.
 func LoadWorker(getenv Getenv) (Worker, error) {
+	host, _ := os.Hostname()
 	c := Worker{
-		Addr:            value(getenv, "BUILDBEE_WORKER_ADDR", "127.0.0.1:8090"),
 		ServerURL:       strings.TrimRight(value(getenv, "BUILDBEE_URL", "http://127.0.0.1:8080"), "/"),
-		FakeSandbox:     value(getenv, "BUILDBEE_FAKE_SANDBOX", "") == "1",
+		Name:            value(getenv, "BUILDBEE_WORKER_NAME", host),
+		Slots:           4,
 		AllowHostAgents: value(getenv, "BUILDBEE_WORKER_ALLOW_HOST_AGENTS", "") == "1",
 	}
+	var errs []error
 	if u, err := url.Parse(c.ServerURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return c, fmt.Errorf("BUILDBEE_URL must be an http(s) URL, got %q", c.ServerURL)
+		errs = append(errs, fmt.Errorf("BUILDBEE_URL must be an http(s) URL, got %q", c.ServerURL))
 	}
-	return c, nil
+	if c.Name == "" {
+		errs = append(errs, errors.New("BUILDBEE_WORKER_NAME is required (the hostname is unknown)"))
+	}
+	for _, a := range strings.Split(getenv("BUILDBEE_WORKER_AGENTS"), ",") {
+		if a = strings.ToLower(strings.TrimSpace(a)); a != "" && !slices.Contains(c.Agents, a) {
+			c.Agents = append(c.Agents, a)
+		}
+	}
+	if v := value(getenv, "BUILDBEE_WORKER_SLOTS", ""); v != "" {
+		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 256 {
+			errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_SLOTS must be 1-256, got %q", v))
+		} else {
+			c.Slots = n
+		}
+	}
+	return c, errors.Join(errs...)
 }
 
 func value(getenv Getenv, key, def string) string {

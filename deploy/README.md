@@ -25,15 +25,13 @@ Compose reads these from the environment or an `.env` file next to the compose f
 
 ## Workers
 
-A worker executes Runs next to a Docker daemon. On a machine dedicated to Runs:
+Workers pull Runs from the Server and open no port. The compose `worker` profile starts one that offers only the fake agent, for demos:
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml --profile worker up -d --build
 ```
 
-The worker mounts the Docker socket, which is root-equivalent on that host. Its Run endpoint is bound to `127.0.0.1` (`BUILDBEE_WORKER_PORT`, default 8090). `BUILDBEE_FAKE_SANDBOX=1` runs the fake engine instead of Docker, for demos and tests only.
-
-The worker currently receives Runs from the CLI (`buildbee run start`). Pulling Runs from a queue on the Server, so any number of workers can serve many Projects, is part of the [roadmap](../docs/roadmap.md).
+Workers that run real agents run on machines where the agent CLIs are installed and logged in. See [docs/workers.md](../docs/workers.md).
 
 ## Backups
 

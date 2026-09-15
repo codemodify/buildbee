@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/codemodify/buildbee/internal/httpapi"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/codemodify/buildbee/internal/testdb"
+	"github.com/codemodify/buildbee/internal/worker"
 	"github.com/codemodify/buildbee/internal/worker/acp"
 	"github.com/codemodify/buildbee/internal/ws"
 	"github.com/gorilla/websocket"
@@ -22,14 +24,15 @@ import (
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// TestFakeACPRunStreamsLive drives `buildbee run start --acp --agent fake`
-// against a real Server on Postgres and checks that RunEvents reach a
-// WebSocket subscriber while the Run is still running, then that the Run
-// ends succeeded with its acp.log Artifact.
-func TestFakeACPRunStreamsLive(t *testing.T) {
-	prev := acp.StreamStep
-	acp.StreamStep = 25 * time.Millisecond
-	t.Cleanup(func() { acp.StreamStep = prev })
+// TestRunThroughWorker drives `buildbee run start --follow` against a real
+// Server on Postgres with an in-process worker offering the fake agent. It
+// checks that the Run is claimed, that RunEvents reach a WebSocket
+// subscriber while the Run is still running, that --follow prints the
+// agent's output, and that the Run ends succeeded with its transcript.
+func TestRunThroughWorker(t *testing.T) {
+	prev, prevFollow := acp.StreamStep, client.FollowInterval
+	acp.StreamStep, client.FollowInterval = 25*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { acp.StreamStep, client.FollowInterval = prev, prevFollow })
 
 	var svc *core.Service
 	hub := ws.NewHub(func(ctx context.Context, topic string, after int64) ([]core.Event, error) {
@@ -39,26 +42,23 @@ func TestFakeACPRunStreamsLive(t *testing.T) {
 	srv := httptest.NewServer(httpapi.NewServer(svc, hub, httpapi.Options{}).Handler())
 	t.Cleanup(srv.Close)
 	t.Cleanup(hub.Close)
-	c := &client.Client{Base: srv.URL, As: "Ada", HTTP: srv.Client(), Output: &bytes.Buffer{}}
+	var out bytes.Buffer
+	c := &client.Client{Base: srv.URL, As: "Ada", HTTP: srv.Client(), Output: &out}
 
 	proj, err := c.CreateProject("Stream")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var task map[string]any
-	if err := doJSON(c, "POST", "/v1/projects/"+proj["id"].(string)+"/tasks?handoff=none", map[string]string{"title": "Stream the Run"}, &task); err != nil {
+	if err := doJSON(c, "POST", "/v1/projects/"+proj["id"].(string)+"/tasks", map[string]string{"title": "Stream the Run", "handoff_role": "none"}, &task); err != nil {
 		t.Fatal(err)
 	}
 	tid := task["id"].(string)
 
+	// Subscribe before the worker exists so no event can be missed.
 	var runErr error
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		runErr = run([]string{"run", "start", "--task", tid, "--acp", "--agent", "fake"}, c)
-	}()
-
+	wg.Go(func() { runErr = run([]string{"run", "start", "--task", tid, "--agent", "fake", "--follow"}, c) })
 	runID := waitForRun(t, c, tid)
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/v1/runs/"+runID+"/ws", nil)
 	if err != nil {
@@ -66,15 +66,27 @@ func TestFakeACPRunStreamsLive(t *testing.T) {
 	}
 	defer conn.Close()
 
-	live := 0
+	wk, err := worker.New(worker.Config{Server: srv.URL, Name: "test-worker", Agents: []string{"fake"}, Slots: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); wk.Run(ctx) }()
+	t.Cleanup(func() { stop(); <-workerDone })
+
+	live, claimed := 0, false
 	for {
-		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		var ev struct {
 			Kind    string         `json:"kind"`
 			Payload map[string]any `json:"payload"`
 		}
 		if err := conn.ReadJSON(&ev); err != nil {
 			t.Fatalf("stream ended before the Run finished (%d live events): %v", live, err)
+		}
+		if ev.Kind == "status" && strings.Contains(fmt.Sprint(ev.Payload["detail"]), "claimed by worker test-worker") {
+			claimed = true
 		}
 		if ev.Kind == "status" && (ev.Payload["status"] == "succeeded" || ev.Payload["status"] == "failed") {
 			if ev.Payload["status"] != "succeeded" {
@@ -90,26 +102,32 @@ func TestFakeACPRunStreamsLive(t *testing.T) {
 	if runErr != nil {
 		t.Fatal(runErr)
 	}
-	if live < 3 {
-		t.Fatalf("saw %d agent events before the Run finished, want >= 3", live)
+	if !claimed || live < 3 {
+		t.Fatalf("claimed=%v, saw %d agent events before the Run finished, want >= 3", claimed, live)
+	}
+	if !strings.Contains(out.String(), "Done.") {
+		t.Fatalf("--follow printed %q, want the agent's output", out.String())
 	}
 
 	var detail struct {
-		Runs      []struct{ Status string } `json:"runs"`
-		Artifacts []struct{ Name string }   `json:"artifacts"`
+		Runs []struct {
+			Status string `json:"status"`
+			Worker string `json:"worker"`
+		} `json:"runs"`
+		Artifacts []struct{ Name string } `json:"artifacts"`
 	}
 	if err := doJSON(c, "GET", "/v1/tasks/"+tid+"/detail", nil, &detail); err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Runs) != 1 || detail.Runs[0].Status != "succeeded" {
+	if len(detail.Runs) != 1 || detail.Runs[0].Status != "succeeded" || detail.Runs[0].Worker != "test-worker" {
 		t.Fatalf("runs: %+v", detail.Runs)
 	}
 	var names []string
 	for _, a := range detail.Artifacts {
 		names = append(names, a.Name)
 	}
-	if !contains(names, "acp.log") {
-		t.Fatalf("artifacts %v, want acp.log", names)
+	if !contains(names, "fake.log") {
+		t.Fatalf("artifacts %v, want fake.log", names)
 	}
 }
 

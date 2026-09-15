@@ -78,6 +78,17 @@ func Detect(preferred string) (string, error) {
 	return "", fmt.Errorf("%w: none of %s is on PATH", ErrNoAgent, strings.Join(KnownAgents, ", "))
 }
 
+// Installed lists the KnownAgents on PATH.
+func Installed() []string {
+	var out []string
+	for _, name := range KnownAgents {
+		if _, err := exec.LookPath(name); err == nil {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // Prompt builds the text sent to the agent from a Task + Handoff notes.
 func Prompt(title, body, notes string) string {
 	var b strings.Builder

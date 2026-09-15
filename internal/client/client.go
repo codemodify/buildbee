@@ -11,8 +11,6 @@ import (
 	"os/user"
 	"strings"
 	"time"
-
-	"github.com/codemodify/buildbee/internal/worker/acp"
 )
 
 // Client calls the Server as a Person: As is sent in X-BuildBee-As.
@@ -124,9 +122,16 @@ func (c *Client) CreateHandoff(taskID, toID, note, toRole string, autorun bool) 
 	return out, err
 }
 
-func (c *Client) CreateRun(taskID string) (map[string]any, error) {
+// CreateRun queues a Run of a Task. agent and botMemberID may be empty.
+func (c *Client) CreateRun(taskID, agent, botMemberID string) (map[string]any, error) {
 	var out map[string]any
-	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/runs", map[string]string{}, &out)
+	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/runs", map[string]string{"agent": agent, "bot_member_id": botMemberID}, &out)
+	return out, err
+}
+
+func (c *Client) GetRun(runID string) (map[string]any, error) {
+	var out map[string]any
+	err := c.do(http.MethodGet, "/v1/runs/"+runID, nil, &out)
 	return out, err
 }
 
@@ -136,57 +141,60 @@ func (c *Client) UpdateRun(runID, status, detail string) (map[string]any, error)
 	return out, err
 }
 
-func (c *Client) PostRunEvent(runID, kind string, payload map[string]any) (map[string]any, error) {
-	var out map[string]any
-	err := c.do(http.MethodPost, "/v1/runs/"+runID+"/events", map[string]any{"kind": kind, "payload": payload}, &out)
-	return out, err
+// RunEvent is one event of a Run's stream.
+type RunEvent struct {
+	Seq     int            `json:"seq"`
+	Kind    string         `json:"kind"`
+	Payload map[string]any `json:"payload"`
 }
 
-func (c *Client) ListRunEvents(runID string, after int) (map[string]any, error) {
-	var out map[string]any
-	path := "/v1/runs/" + runID + "/events"
-	if after > 0 {
-		path += "?after=" + fmt.Sprintf("%d", after)
+// RunEvents returns a Run's events after seq `after`.
+func (c *Client) RunEvents(runID string, after int) ([]RunEvent, bool, error) {
+	var out struct {
+		Items   []RunEvent `json:"items"`
+		HasMore bool       `json:"has_more"`
 	}
-	err := c.do(http.MethodGet, path, nil, &out)
-	return out, err
+	err := c.do(http.MethodGet, fmt.Sprintf("/v1/runs/%s/events?after=%d", runID, after), nil, &out)
+	return out.Items, out.HasMore, err
 }
 
-func (c *Client) CreateArtifact(taskID string, body any) (map[string]any, error) {
-	var out map[string]any
-	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/artifacts", body, &out)
-	return out, err
+// Follow calls each for every event of a Run until the Run finishes, and
+// returns its final status.
+func (c *Client) Follow(ctx context.Context, runID string, each func(RunEvent)) (string, error) {
+	after := 0
+	for {
+		evs, more, err := c.RunEvents(runID, after)
+		if err != nil {
+			return "", err
+		}
+		for _, ev := range evs {
+			after = ev.Seq
+			each(ev)
+		}
+		if more {
+			continue
+		}
+		run, err := c.GetRun(runID)
+		if err != nil {
+			return "", err
+		}
+		status, _ := run["status"].(string)
+		if status == "succeeded" || status == "failed" || status == "canceled" {
+			if evs, _, err := c.RunEvents(runID, after); err == nil && len(evs) > 0 {
+				continue // drain what arrived with the final status
+			}
+			return status, nil
+		}
+		select {
+		case <-ctx.Done():
+			return status, ctx.Err()
+		case <-time.After(FollowInterval):
+		}
+	}
 }
 
-func (c *Client) OpenPR(taskID string, fake bool, runID string) (map[string]any, error) {
-	var out map[string]any
-	err := c.do(http.MethodPost, "/v1/tasks/"+taskID+"/pr", map[string]any{"fake": fake, "run_id": runID}, &out)
-	return out, err
-}
-
-func (c *Client) FakeStartRun(taskID, cmd, repoURL string) (map[string]any, error) {
-	run, err := c.CreateRun(taskID)
-	if err != nil {
-		return nil, err
-	}
-	runID, _ := run["id"].(string)
-	if _, err := c.UpdateRun(runID, "running", "fake sandbox"); err != nil {
-		return nil, err
-	}
-	if _, err := c.UpdateRun(runID, "succeeded", "fake success"); err != nil {
-		return nil, err
-	}
-	logs := "fake sandbox cmd=" + cmd + " repo=" + repoURL + "\n"
-	art, err := c.CreateArtifact(taskID, map[string]string{"kind": "log", "name": "sandbox.log", "body": logs, "run_id": runID})
-	if err != nil {
-		return nil, err
-	}
-	pr, err := c.OpenPR(taskID, true, runID)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"run": run, "artifact": art, "pr": pr, "fake": true}, nil
-}
+// FollowInterval is how often Follow polls a Run for new events.
+var FollowInterval = 500 * time.Millisecond
 
 func (c *Client) ListRoutines(projectID string) (map[string]any, error) {
 	var out map[string]any
@@ -198,67 +206,4 @@ func (c *Client) RunRoutine(id string) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodPost, "/v1/routines/"+id+"/run", map[string]string{}, &out)
 	return out, err
-}
-
-// WorkerStart asks the worker at workerURL to execute an existing Run.
-func (c *Client) WorkerStart(workerURL, taskID, runID, repoURL, cmd string, fake, acpMode bool, agent, title, notes string) (map[string]any, error) {
-	wk := &Client{Base: strings.TrimRight(workerURL, "/"), HTTP: c.HTTP, Output: c.Output}
-	var out map[string]any
-	err := wk.do(http.MethodPost, "/runs", map[string]any{
-		"task_id": taskID, "run_id": runID, "repo_url": repoURL, "command": cmd,
-		"fake": fake, "fake_pr": fake, "acp": acpMode, "agent": agent, "title": title, "notes": notes,
-	}, &out)
-	return out, err
-}
-
-// FakeACPRun records a FakeACP Run end to end without a worker (--acp --agent fake).
-func (c *Client) FakeACPRun(taskID, agent string) (map[string]any, error) {
-	run, err := c.CreateRun(taskID)
-	if err != nil {
-		return nil, err
-	}
-	runID, _ := run["id"].(string)
-	return c.completeFakeACP(taskID, runID, agent)
-}
-
-func (c *Client) completeFakeACP(taskID, runID, agent string) (map[string]any, error) {
-	agent = "fake"
-	title := ""
-	if t, err := c.GetTask(taskID); err == nil {
-		title, _ = t["title"].(string)
-	}
-	if _, err := c.UpdateRun(runID, "running", "acp "+agent); err != nil {
-		return nil, err
-	}
-	prompt := acp.Prompt(title, "", "")
-	n := 0
-	_, logs, err := acp.Stream(context.Background(), acp.Config{Agent: agent}, prompt, func(ev acp.Event) error {
-		posted, perr := c.PostRunEvent(runID, ev.Kind, ev.Payload)
-		if perr != nil {
-			return perr
-		}
-		n++
-		seq, _ := posted["seq"].(float64)
-		fmt.Fprintf(os.Stderr, "run event seq=%v kind=%s\n", seq, ev.Kind)
-		return nil
-	})
-	if err != nil {
-		_, _ = c.UpdateRun(runID, "failed", err.Error())
-		return nil, err
-	}
-	if _, err := c.UpdateRun(runID, "succeeded", "acp "+agent+" ok"); err != nil {
-		return nil, err
-	}
-	art, err := c.CreateArtifact(taskID, map[string]string{"kind": "log", "name": "acp.log", "body": logs, "run_id": runID})
-	if err != nil {
-		return nil, err
-	}
-	pr, err := c.OpenPR(taskID, true, runID)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"run":      map[string]any{"id": runID, "task_id": taskID, "status": "succeeded"},
-		"artifact": art, "pr": pr, "fake": true, "acp_agent": agent, "streamed": n,
-	}, nil
 }

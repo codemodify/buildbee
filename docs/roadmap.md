@@ -25,6 +25,13 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 - Routines claim each firing, so concurrent schedulers fire once
 - Interim guard: workers refuse real agent CLIs on the host unless `BUILDBEE_WORKER_ALLOW_HOST_AGENTS=1`, and then give each Run an empty temporary directory
 
+## Phase 3a — Run queue (done)
+
+- Runs are a Postgres queue: workers long-poll `POST /v1/worker/claim`, one worker gets each Run (`FOR UPDATE SKIP LOCKED`), new Runs wake waiting workers at once
+- 60 s leases renewed by heartbeats; a canceled Run stops within one heartbeat; the Server fails Runs whose worker went silent (no blind retries)
+- Only the claiming worker writes to a Run; each Run carries its agent and prompt; Bots have an `agent`; Projects have `repo_url` and `default_branch`
+- Workers open no port and run N slots; the CLI queues Runs and `--follow`s them; the push-style worker endpoint and the command Sandbox are gone
+
 ## Phase 2 — Chat UX
 
 - Channels, threads, direct messages, @people and @agents, unread counts, presence
@@ -33,7 +40,6 @@ BuildBee is being rebuilt into a LAN harness where people and coding agents work
 
 ## Phase 3 — Agent harness
 
-- Postgres job queue with claims, leases, heartbeats, retries and a reaper; workers pull Runs
 - Per-Run container: repo worktree at a pinned commit, agent CLI inside, only the credentials that Run needs, no Docker socket, resource and output limits, process-group kill
 - ACP over stdio for `claude-agent-acp`, `goose acp` and `codex-acp`: tool events, permission requests become Decisions, answers flow back to the agent, mid-turn steering
 - Output: pushed branch, diff Artifact and PR; logs in object storage

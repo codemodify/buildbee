@@ -27,9 +27,21 @@ func (s *Service) Run(ctx context.Context, id string) (*models.Run, error) {
 	return s.st.GetRun(ctx, id, false)
 }
 
-// CreateRun queues a Run of a Task. botMemberID names the Bot that executes
-// it; empty means the Task's assignee if that is a Bot.
-func (s *Service) CreateRun(ctx context.Context, a Actor, taskID, botMemberID string) (*models.Run, error) {
+// NewRun describes a Run to queue. BotMemberID defaults to the Task's
+// assignee if that is a Bot; Agent defaults to the Bot's agent, and empty
+// means any agent the claiming worker offers.
+type NewRun struct {
+	BotMemberID string `json:"bot_member_id"`
+	Agent       string `json:"agent"`
+}
+
+// CreateRun queues a Run of a Task for a worker to claim.
+func (s *Service) CreateRun(ctx context.Context, a Actor, taskID string, in NewRun) (*models.Run, error) {
+	botMemberID := strings.TrimSpace(in.BotMemberID)
+	agent := strings.ToLower(strings.TrimSpace(in.Agent))
+	if !models.ValidAgent(agent) {
+		return nil, invalid("agent must be one of %s", strings.Join(models.Agents, ", "))
+	}
 	var out *models.Run
 	err := s.tx(ctx, func(w *work) error {
 		task, err := w.st.GetTask(ctx, taskID, false)
@@ -48,38 +60,57 @@ func (s *Service) CreateRun(ctx context.Context, a Actor, taskID, botMemberID st
 				botMemberID = assignee.ID
 			}
 		}
+		var bot *models.Member
 		if botMemberID != "" {
-			bot, err := w.st.GetMember(ctx, botMemberID)
+			bot, err = w.st.GetMember(ctx, botMemberID)
 			if err != nil || bot.ProjectID != task.ProjectID || bot.Kind != models.KindBot {
 				return invalid("bot_member_id is not a bot in this project")
 			}
 		}
-		out, err = w.createRun(ctx, task, botMemberID, whoOf(m, a))
+		out, err = w.createRun(ctx, task, bot, agent, whoOf(m, a))
 		return err
 	})
 	return out, err
 }
 
-func (w *work) createRun(ctx context.Context, task *models.Task, botMemberID string, by who) (*models.Run, error) {
-	r := models.Run{ID: uuid.NewString(), TaskID: task.ID, ProjectID: task.ProjectID, BotMemberID: botMemberID,
-		Status: models.RunPending, Detail: "queued", CreatedAt: w.now, UpdatedAt: w.now}
+// createRun queues a Run executed by bot (optional) with agent ("" = the
+// Bot's agent, else any), prompted with the Task and its handoff notes.
+func (w *work) createRun(ctx context.Context, task *models.Task, bot *models.Member, agent string, by who) (*models.Run, error) {
+	notes, err := w.st.ListHandoffs(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	r := models.Run{ID: uuid.NewString(), TaskID: task.ID, ProjectID: task.ProjectID,
+		Status: models.RunPending, Detail: "queued", Agent: agent, Prompt: runPrompt(bot, task, notes),
+		CreatedAt: w.now, UpdatedAt: w.now}
+	if bot != nil {
+		r.BotMemberID = bot.ID
+		if r.Agent == "" {
+			r.Agent = bot.Agent
+		}
+	}
 	if err := w.st.InsertRun(ctx, r); err != nil {
 		return nil, err
 	}
+	w.queued = true
 	if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
 		return nil, err
 	}
 	return &r, w.activity(ctx, task.ProjectID, by, models.TypeRun, "created", r.ID,
-		map[string]any{"task_id": task.ID, "bot_member_id": botMemberID})
+		map[string]any{"task_id": task.ID, "bot_member_id": r.BotMemberID, "agent": r.Agent})
 }
 
 // UpdateRun moves a Run through its lifecycle: pending → running →
 // succeeded | failed | canceled (or straight to failed/canceled). Finished
 // Runs cannot change. Repeating the current status only updates the detail.
+// Workers report progress; people can only cancel.
 func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail string) (*models.Run, error) {
 	next, ok := models.ParseRunStatus(status)
 	if !ok {
 		return nil, invalid("status must be pending, running, succeeded, failed or canceled")
+	}
+	if a.Worker == "" && next != models.RunCanceled {
+		return nil, invalid("a Run's progress is reported by the worker running it; people can only cancel it")
 	}
 	d, err := text("detail", detail, false, 2000)
 	if err != nil {
@@ -89,6 +120,9 @@ func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail str
 	err = s.tx(ctx, func(w *work) error {
 		r, err := w.st.GetRun(ctx, id, true)
 		if err != nil {
+			return err
+		}
+		if err := ownRun(a, r); err != nil {
 			return err
 		}
 		if next != r.Status && !r.Status.CanBecome(next) {
@@ -105,7 +139,7 @@ func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail str
 		}
 		if next.Terminal() {
 			t := w.now
-			r.FinishedAt = &t
+			r.FinishedAt, r.LeaseUntil = &t, nil
 		}
 		if err := w.st.UpdateRun(ctx, *r); err != nil {
 			return err
@@ -125,7 +159,7 @@ func (s *Service) UpdateRun(ctx context.Context, a Actor, id, status, detail str
 
 // runActor attributes worker-side changes to the Run's Bot.
 func (w *work) runActor(ctx context.Context, a Actor, r *models.Run) who {
-	if !a.IsPerson() && r.BotMemberID != "" {
+	if a.Worker != "" && r.BotMemberID != "" {
 		if bot, err := w.st.GetMember(ctx, r.BotMemberID); err == nil {
 			return whoOf(bot, a)
 		}
@@ -145,7 +179,7 @@ func (w *work) runEvent(ctx context.Context, runID, kind string, payload map[str
 
 // AppendRunEvent records one event of a running Run (agent tokens, tool
 // calls, logs). Finished Runs accept no more events.
-func (s *Service) AppendRunEvent(ctx context.Context, runID, kind string, payload map[string]any) (*models.RunEvent, error) {
+func (s *Service) AppendRunEvent(ctx context.Context, a Actor, runID, kind string, payload map[string]any) (*models.RunEvent, error) {
 	k := models.NormalizeRunEventKind(kind)
 	if k == "" {
 		return nil, invalid("kind must be token, tool_call, tool_result, status or log")
@@ -154,6 +188,9 @@ func (s *Service) AppendRunEvent(ctx context.Context, runID, kind string, payloa
 	err := s.tx(ctx, func(w *work) error {
 		r, err := w.st.GetRun(ctx, runID, false)
 		if err != nil {
+			return err
+		}
+		if err := ownRun(a, r); err != nil {
 			return err
 		}
 		if r.Status.Terminal() {
@@ -216,6 +253,9 @@ func (s *Service) CreateArtifact(ctx context.Context, a Actor, taskID string, in
 			r, err := w.st.GetRun(ctx, in.RunID, false)
 			if err != nil || r.TaskID != taskID {
 				return invalid("run_id is not a run of this task")
+			}
+			if err := ownRun(a, r); err != nil {
+				return err
 			}
 		}
 		out = &models.Artifact{ID: uuid.NewString(), ProjectID: task.ProjectID, TaskID: taskID, RunID: in.RunID,

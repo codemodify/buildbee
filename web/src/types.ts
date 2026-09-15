@@ -12,6 +12,7 @@ export type Member = {
   display_name: string;
   role: string;
   instructions?: string;
+  agent?: string;
 };
 
 export type Channel = {
@@ -25,6 +26,8 @@ export type Project = {
   id: string;
   name: string;
   auto_run?: boolean;
+  repo_url?: string;
+  default_branch?: string;
   archived_at?: string;
   members?: Member[];
   channels?: Channel[];
@@ -79,6 +82,11 @@ export type Run = {
   bot_member_id?: string;
   status: string;
   detail: string;
+  agent?: string;
+  worker?: string;
+  attempts?: number;
+  started_at?: string;
+  finished_at?: string;
 };
 
 export type RunEvent = {

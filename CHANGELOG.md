@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased — LAN rebuild, Phase 1
+## Unreleased — LAN rebuild, Phase 3a (Run queue)
+
+### Breaking
+- Workers pull Runs: `POST /v1/worker/claim` and `POST /v1/runs/{id}/heartbeat`. The worker's `POST /runs` endpoint, `BUILDBEE_WORKER_ADDR`, `BUILDBEE_FAKE_SANDBOX` and the command Sandbox are gone
+- Only the claiming worker may write to a Run (`409` otherwise)
+- `buildbee run start --task ID [--agent A] [--bot ID] [--follow]` queues on the Server; `--acp`, `--fake`, `--cmd`, `--repo-url` and `BUILDBEE_WORKER_URL` are gone
+- New baseline schema: recreate the database
+
+### Added
+- Postgres Run queue with leases, heartbeats and a reaper; new Runs wake waiting workers; `buildbee run show|cancel`
+- Runs carry `agent`, `prompt`, `worker`, `attempts`; Bots have an `agent` (`PATCH /v1/members/{id}`); Projects have `repo_url` and `default_branch`
+- Workers: `BUILDBEE_WORKER_NAME`, `BUILDBEE_WORKER_AGENTS`, `BUILDBEE_WORKER_SLOTS`; [docs/workers.md](docs/workers.md)
+- The compose smoke test runs a Run end to end through the compose worker
+
+## LAN rebuild, Phase 1
 
 ### Breaking
 - New baseline schema: recreate the database

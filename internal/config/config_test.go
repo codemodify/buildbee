@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -37,14 +38,25 @@ func TestLoadServerRejectsBadInput(t *testing.T) {
 }
 
 func TestLoadWorker(t *testing.T) {
-	c, err := LoadWorker(env(map[string]string{"BUILDBEE_URL": "http://buildbee.lan:8080/", "BUILDBEE_FAKE_SANDBOX": "1"}))
+	c, err := LoadWorker(env(map[string]string{"BUILDBEE_URL": "http://buildbee.lan:8080/",
+		"BUILDBEE_WORKER_NAME": "gpu-box", "BUILDBEE_WORKER_AGENTS": " Claude, codex,claude ", "BUILDBEE_WORKER_SLOTS": "12"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ServerURL != "http://buildbee.lan:8080" || !c.FakeSandbox || c.Addr != "127.0.0.1:8090" {
+	if c.ServerURL != "http://buildbee.lan:8080" || c.Name != "gpu-box" || c.Slots != 12 ||
+		!slices.Equal(c.Agents, []string{"claude", "codex"}) || c.AllowHostAgents {
 		t.Fatalf("worker: %+v", c)
 	}
-	if _, err := LoadWorker(env(map[string]string{"BUILDBEE_URL": "buildbee.lan"})); err == nil {
-		t.Fatal("expected error for URL without scheme")
+	for _, bad := range []map[string]string{
+		{"BUILDBEE_URL": "buildbee.lan"},
+		{"BUILDBEE_WORKER_SLOTS": "0"},
+		{"BUILDBEE_WORKER_SLOTS": "many"},
+	} {
+		if _, err := LoadWorker(env(bad)); err == nil {
+			t.Fatalf("expected an error for %v", bad)
+		}
+	}
+	if c, err := LoadWorker(env(nil)); err != nil || c.Slots != 4 || c.Agents != nil {
+		t.Fatalf("defaults: %+v %v", c, err)
 	}
 }

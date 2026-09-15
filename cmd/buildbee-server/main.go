@@ -66,6 +66,7 @@ func run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
+	srv.RegisterOnShutdown(svc.StopWaiting) // release workers' long-polls
 
 	tickerDone := make(chan struct{})
 	go func() {
@@ -78,6 +79,11 @@ func run() error {
 				return
 			case <-t.C:
 				svc.TickRoutines(ctx)
+				if n, err := svc.ReapRuns(ctx); err != nil {
+					slog.Error("reap runs", "err", err)
+				} else if n > 0 {
+					slog.Warn("failed runs whose worker stopped heartbeating", "runs", n)
+				}
 			}
 		}
 	}()

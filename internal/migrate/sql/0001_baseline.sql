@@ -28,6 +28,8 @@ CREATE TABLE projects (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL CHECK (name <> ''),
     auto_run BOOLEAN NOT NULL DEFAULT false,
+    repo_url TEXT NOT NULL DEFAULT '',
+    default_branch TEXT NOT NULL DEFAULT '',
     archived_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -40,6 +42,7 @@ CREATE TABLE members (
     display_name TEXT NOT NULL,
     role TEXT NOT NULL,
     instructions TEXT NOT NULL DEFAULT '',
+    agent TEXT NOT NULL DEFAULT '', -- the agent CLI a Bot runs as (claude, grok, codex, ...)
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- every human Member is a Person; a Bot never is
     CHECK ((kind = 'human') = (person_id IS NOT NULL))
@@ -147,6 +150,11 @@ CREATE TABLE runs (
     bot_member_id UUID REFERENCES members (id) DEFERRABLE INITIALLY DEFERRED,
     status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'canceled')),
     detail TEXT NOT NULL DEFAULT '',
+    agent TEXT NOT NULL DEFAULT '',   -- '' = any agent the claiming worker offers
+    prompt TEXT NOT NULL DEFAULT '',  -- what the agent is asked to do
+    worker TEXT NOT NULL DEFAULT '',  -- the worker that claimed the Run
+    lease_until TIMESTAMPTZ,          -- claim expires unless the worker heartbeats
+    attempts INT NOT NULL DEFAULT 0,
     next_seq INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -154,7 +162,8 @@ CREATE TABLE runs (
     finished_at TIMESTAMPTZ
 );
 CREATE INDEX runs_task_id_idx ON runs (task_id, created_at DESC);
-CREATE INDEX runs_active_idx ON runs (status, created_at) WHERE status IN ('pending', 'running');
+CREATE INDEX runs_queue_idx ON runs (created_at) WHERE status = 'pending';
+CREATE INDEX runs_leased_idx ON runs (lease_until) WHERE status = 'running' AND lease_until IS NOT NULL;
 
 CREATE TABLE run_events (
     id UUID PRIMARY KEY,

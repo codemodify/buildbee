@@ -41,7 +41,7 @@ func (s *Server) withActor(next http.Handler) http.Handler {
 			}
 			a = core.Actor{PersonID: p.ID, Name: p.Name}
 		case strings.TrimSpace(r.Header.Get(workerHeader)) != "":
-			a = core.System("worker " + strings.TrimSpace(r.Header.Get(workerHeader)))
+			a = core.WorkerActor(strings.TrimSpace(r.Header.Get(workerHeader)))
 		default:
 			if c, err := r.Cookie(personCookie); err == nil && c.Value != "" {
 				if p, err := s.core.Person(r.Context(), c.Value); err == nil {

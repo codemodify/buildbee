@@ -6,15 +6,15 @@ import (
 	"github.com/codemodify/buildbee/internal/models"
 )
 
-const projectCols = `id, name, auto_run, archived_at, created_at`
+const projectCols = `id, name, auto_run, repo_url, default_branch, archived_at, created_at`
 
 func scanProject(row interface{ Scan(...any) error }, p *models.Project) error {
-	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.ArchivedAt, &p.CreatedAt)
+	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.RepoURL, &p.DefaultBranch, &p.ArchivedAt, &p.CreatedAt)
 }
 
 func (s *Store) InsertProject(ctx context.Context, p models.Project) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO projects (id, name, auto_run, created_at) VALUES ($1, $2, $3, $4)`,
-		p.ID, p.Name, p.AutoRun, p.CreatedAt)
+	_, err := s.q.Exec(ctx, `INSERT INTO projects (id, name, auto_run, repo_url, default_branch, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		p.ID, p.Name, p.AutoRun, p.RepoURL, p.DefaultBranch, p.CreatedAt)
 	return mapErr(err)
 }
 
@@ -43,25 +43,31 @@ func (s *Store) ListProjects(ctx context.Context, includeArchived bool) ([]model
 	return out, rows.Err()
 }
 
-// UpdateProject writes name, auto_run and archived_at.
+// UpdateProject writes name, auto_run, repo settings and archived_at.
 func (s *Store) UpdateProject(ctx context.Context, p models.Project) error {
-	return one(s.q.Exec(ctx, `UPDATE projects SET name=$2, auto_run=$3, archived_at=$4 WHERE id=$1`,
-		p.ID, p.Name, p.AutoRun, p.ArchivedAt))
+	return one(s.q.Exec(ctx, `UPDATE projects SET name=$2, auto_run=$3, repo_url=$4, default_branch=$5, archived_at=$6 WHERE id=$1`,
+		p.ID, p.Name, p.AutoRun, p.RepoURL, p.DefaultBranch, p.ArchivedAt))
 }
 
 // --- members ---
 
-const memberCols = `id, project_id, COALESCE(person_id::text, ''), kind, display_name, role, instructions, created_at`
+const memberCols = `id, project_id, COALESCE(person_id::text, ''), kind, display_name, role, instructions, agent, created_at`
 
 func scanMember(row interface{ Scan(...any) error }, m *models.Member) error {
-	return row.Scan(&m.ID, &m.ProjectID, &m.PersonID, &m.Kind, &m.DisplayName, &m.Role, &m.Instructions, &m.CreatedAt)
+	return row.Scan(&m.ID, &m.ProjectID, &m.PersonID, &m.Kind, &m.DisplayName, &m.Role, &m.Instructions, &m.Agent, &m.CreatedAt)
 }
 
 func (s *Store) InsertMember(ctx context.Context, m models.Member) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO members (id, project_id, person_id, kind, display_name, role, instructions, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		m.ID, m.ProjectID, nullID(m.PersonID), m.Kind, m.DisplayName, m.Role, m.Instructions, m.CreatedAt)
+	_, err := s.q.Exec(ctx, `INSERT INTO members (id, project_id, person_id, kind, display_name, role, instructions, agent, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		m.ID, m.ProjectID, nullID(m.PersonID), m.Kind, m.DisplayName, m.Role, m.Instructions, m.Agent, m.CreatedAt)
 	return mapErr(err)
+}
+
+// UpdateMember writes display_name, role, instructions and agent.
+func (s *Store) UpdateMember(ctx context.Context, m models.Member) error {
+	return one(s.q.Exec(ctx, `UPDATE members SET display_name=$2, role=$3, instructions=$4, agent=$5 WHERE id=$1`,
+		m.ID, m.DisplayName, m.Role, m.Instructions, m.Agent))
 }
 
 func (s *Store) GetMember(ctx context.Context, id string) (*models.Member, error) {

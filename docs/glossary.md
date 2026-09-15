@@ -27,8 +27,8 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | **Task** | A unit of work owned by a Member. |
 | **Handoff** | Transfer of a Task (or context for a Task) between Members. |
 | **Artifact** | A file or output produced while doing work (code, logs, reports). |
-| **Run** | One execution of a Bot in a Sandbox. Incremental ACP output is stored as RunEvents on that Run; the rolled-up transcript is an Artifact. |
-| **Worker** | A process on a machine with Docker that executes Runs and reports status, RunEvents and Artifacts to the Server. |
+| **Run** | One execution of an agent on a Task, queued on the Server and claimed by one Worker. Incremental output is stored as RunEvents on that Run; the transcript is an Artifact. |
+| **Worker** | A process on any LAN machine that claims queued Runs for the agents it offers, heartbeats while they execute, and reports RunEvents, Artifacts and the outcome to the Server. |
 | **Decision** | A single recorded choice; the Decisions surface collects them. |
 
 ## Platform
@@ -39,7 +39,7 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | **Repo** | Source control attached to a Project (GitHub). |
 | **Issues** | Tracked work items from the attached Repo. |
 | **Pipelines** | CI/CD attached to the Repo. |
-| **Sandbox** | Isolated Docker environment where a Bot Run executes. |
+| **Sandbox** | The per-Run container a Run will execute in: a checkout of the Project's repo and the agent CLI, nothing else from the worker host (roadmap Phase 3). |
 | **Activity** | An event in a Project. Later Activity may be signed (Nostr-inspired). This scaffold does not implement NIP-01. |
 | **Type** | A named kind of Project object (Task, Artifact, Decision, and so on). |
 | **Server** | The BuildBee backend: REST, WebSocket, Postgres persistence and the web UI. |
