@@ -5,13 +5,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
-	"slices"
 	"syscall"
-	"time"
 
 	"github.com/codemodify/buildbee/internal/config"
 	"github.com/codemodify/buildbee/internal/worker"
@@ -32,9 +29,6 @@ func main() {
 	}
 }
 
-// knownAgents are the real agents a worker can offer.
-var knownAgents = []string{"claude", "codex", "grok", "opencode", "goose"}
-
 func run() error {
 	cfg, err := config.LoadWorker(os.Getenv)
 	if err != nil {
@@ -43,47 +37,11 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	box := worker.Container{Image: cfg.Image, Memory: cfg.Memory, CPUs: cfg.CPUs, Network: cfg.Network}
-	agents := cfg.Agents
-	onlyFake := len(agents) > 0 && !slices.ContainsFunc(agents, func(a string) bool { return a != "fake" })
-	switch {
-	case onlyFake:
-	case cfg.Isolation == worker.IsolationHost:
-		slog.Warn("BUILDBEE_WORKER_ISOLATION=host: agents run on this machine with this user's files and logins")
-		if len(agents) == 0 {
-			if agents = acp.Installed(cfg.AgentCommands); len(agents) == 0 {
-				return errors.New("no agent's ACP command is on PATH (see docs/workers.md); install one or set BUILDBEE_WORKER_AGENTS=fake")
-			}
-		}
-	default: // container
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		found, err := box.Probe(probeCtx, knownAgents, cfg.AgentCommands)
-		cancel()
-		if err != nil {
-			return err
-		}
-		if len(agents) == 0 {
-			agents = found
-		}
-		for _, a := range agents {
-			if a != "fake" && !slices.Contains(found, a) {
-				return errors.New("agent " + a + " has no ACP command in image " + cfg.Image + " (see docs/workers.md)")
-			}
-		}
-		if len(agents) == 0 {
-			return errors.New("image " + cfg.Image + " has no agent's ACP command (see docs/workers.md)")
-		}
-		if err := box.RemoveLeftovers(ctx, cfg.Name); err != nil {
-			return err
-		}
-	}
-	w, err := worker.New(worker.Config{Server: cfg.ServerURL, Name: cfg.Name, Agents: agents, Slots: cfg.Slots,
-		Isolation: cfg.Isolation, Container: box, Commands: cfg.AgentCommands, RunTimeout: cfg.RunTimeout,
-		Dir: cfg.Dir, OpenPRs: cfg.OpenPRs})
+	w, err := worker.FromConfig(ctx, cfg, slog.Default())
 	if err != nil {
 		return err
 	}
-	slog.Info("buildbee-worker started", "name", cfg.Name, "server", cfg.ServerURL, "agents", agents,
+	slog.Info("buildbee-worker started", "name", cfg.Name, "server", cfg.ServerURL, "agents", w.Agents(),
 		"slots", cfg.Slots, "isolation", cfg.Isolation)
 	w.Run(ctx)
 	return nil

@@ -3,6 +3,7 @@ import type {
   Artifact,
   Channel,
   Decision,
+  DM,
   Member,
   Message,
   Notification,
@@ -68,10 +69,11 @@ export const api = {
   // who is using this browser
   me: () => request<{ person: Person | null }>("/v1/me"),
   setMe: (name: string) => request<{ person: Person }>("/v1/me", post({ name })),
+  rename: (name: string) => request<{ person: Person }>("/v1/me", patch({ name })),
   forgetMe: () => request<unknown>("/v1/me", { method: "DELETE" }),
 
   projects: () => request<Items<Project>>("/v1/projects"),
-  createProject: (name: string) => request<Project>("/v1/projects", post({ name })),
+  createProject: (name: string, agent = "") => request<Project>("/v1/projects", post({ name, agent })),
   project: (id: string) => request<Project>(`/v1/projects/${id}`),
   updateProject: (id: string, body: ProjectPatch) => request<Project>(`/v1/projects/${id}`, patch(body)),
   addMember: (
@@ -85,6 +87,8 @@ export const api = {
   channels: (projectId: string) => request<Items<Channel>>(`/v1/projects/${projectId}/channels`),
   createChannel: (projectId: string, name: string) =>
     request<Channel>(`/v1/projects/${projectId}/channels`, post({ name })),
+  directMessages: () => request<Items<DM>>("/v1/dms"),
+  openDirect: (body: { person_ids?: string[]; member_id?: string }) => request<Channel>("/v1/dms", post(body)),
   dms: (projectId: string) => request<Items<Channel>>(`/v1/projects/${projectId}/dms`),
   openDM: (projectId: string, memberIds: string[]) =>
     request<Channel>(`/v1/projects/${projectId}/dms`, post({ member_ids: memberIds })),

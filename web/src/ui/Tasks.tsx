@@ -15,31 +15,43 @@ const columns: { status: string; title: string }[] = [
 ];
 
 /** Board shows a Project's Tasks by status. */
-export function Board({ header }: { header: ReactNode }) {
+const DONE_SHOWN = 5;
+
+/** TaskBoard is one Project's Tasks by status, newest done ones only. */
+export function TaskBoard() {
   const { data } = useCtx();
   const [creating, setCreating] = useState(false);
+  const [allDone, setAllDone] = useState(false);
   return (
-    <section className="flex h-full min-w-0 flex-col">
-      {header}
-      <div className="flex items-center justify-between px-4 pt-3">
-        <p className="text-[13px] text-bb-subtle">{data.project.auto_run ? "Autopilot on" : "Autopilot off"}</p>
-        <Button tone="primary" size="sm" onClick={() => setCreating(true)}>
+    <section className="rounded-lg border border-bb-border bg-bb-surface">
+      <div className="flex items-center gap-2 border-b border-bb-border px-3 py-2">
+        <button type="button" className="font-medium hover:underline" onClick={() => go({ view: "channel", projectId: data.project.id })}>
+          {data.project.name}
+        </button>
+        <span className="text-[12px] text-bb-subtle">{data.project.auto_run ? "Autopilot on" : "Autopilot off"}</span>
+        <Button className="ml-auto" size="sm" onClick={() => setCreating(true)}>
           New Task
         </Button>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-3">
         {columns.map((c) => {
-          const tasks = data.tasks.filter((t) => t.status === c.status);
+          const all = data.tasks.filter((t) => t.status === c.status);
+          const tasks = c.status === "done" && !allDone ? all.slice(0, DONE_SHOWN) : all;
           return (
             <div key={c.status} className="min-w-0">
               <p className="mb-2 flex items-center gap-2 text-[12px] font-semibold tracking-wide text-bb-subtle uppercase">
-                {c.title} <span className="font-normal">{tasks.length}</span>
+                {c.title} <span className="font-normal">{all.length}</span>
               </p>
               <div className="space-y-2">
                 {tasks.map((t) => (
                   <TaskTile key={t.id} task={t} />
                 ))}
-                {tasks.length === 0 && <p className="rounded-lg border border-dashed border-bb-border px-3 py-6 text-center text-[12.5px] text-bb-subtle">—</p>}
+                {all.length > tasks.length && (
+                  <button type="button" className="text-[12px] text-bb-subtle hover:text-bb-fg" onClick={() => setAllDone(true)}>
+                    {all.length - tasks.length} more
+                  </button>
+                )}
+                {all.length === 0 && <p className="rounded-lg border border-dashed border-bb-border px-3 py-4 text-center text-[12.5px] text-bb-subtle">—</p>}
               </div>
             </div>
           );

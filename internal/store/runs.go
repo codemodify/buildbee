@@ -29,6 +29,26 @@ func (s *Store) RecordUsage(ctx context.Context, runID string, used, size int64,
 		runID, used, size, cost, currency))
 }
 
+// RunLoad counts the Runs queued and running, by kind, requested agent and
+// worker.
+func (s *Store) RunLoad(ctx context.Context) ([]models.RunLoad, error) {
+	rows, err := s.q.Query(ctx, `SELECT status, kind, agent, worker, count(*) FROM runs
+		WHERE status IN ('pending', 'running') GROUP BY 1, 2, 3, 4`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []models.RunLoad
+	for rows.Next() {
+		var l models.RunLoad
+		if err := rows.Scan(&l.Status, &l.Kind, &l.Agent, &l.Worker, &l.Runs); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 // Usage sums Runs created since, for one Project or ("") all of them.
 func (s *Store) Usage(ctx context.Context, projectID string, since time.Time) (*models.Usage, error) {
 	rows, err := s.q.Query(ctx, `SELECT r.project_id::text, p.name, r.agent, r.cost_currency, count(*), sum(r.cost), sum(r.context_tokens)

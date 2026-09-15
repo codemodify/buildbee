@@ -55,14 +55,11 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Name    string `json:"name"`
-		AutoRun bool   `json:"auto_run"`
-	}
+	var in core.NewProject
 	if !s.decode(w, r, &in) {
 		return
 	}
-	p, err := s.core.CreateProject(r.Context(), actorFrom(r.Context()), in.Name, in.AutoRun)
+	p, err := s.core.CreateProject(r.Context(), actorFrom(r.Context()), in)
 	respond(s, w, http.StatusCreated, p, err)
 }
 
@@ -192,6 +189,20 @@ func (s *Server) openDM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ch, err := s.core.OpenDM(r.Context(), actorFrom(r.Context()), r.PathValue("id"), in.MemberIDs)
+	respond(s, w, http.StatusOK, ch, err)
+}
+
+func (s *Server) listDirect(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.DirectMessages(r.Context(), actorFrom(r.Context()))
+	respondItems(s, w, list, err)
+}
+
+func (s *Server) openDirect(w http.ResponseWriter, r *http.Request) {
+	var in core.NewDirect
+	if !s.decode(w, r, &in) {
+		return
+	}
+	ch, err := s.core.OpenDirect(r.Context(), actorFrom(r.Context()), in)
 	respond(s, w, http.StatusOK, ch, err)
 }
 
@@ -395,10 +406,12 @@ func (s *Server) claimRun(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Agents      []string `json:"agents"`
 		WaitSeconds float64  `json:"wait_seconds"`
+		Slots       int      `json:"slots"`
 	}
 	if !s.decode(w, r, &in) {
 		return
 	}
+	s.core.WorkerSlots(actorFrom(r.Context()).Worker, in.Slots)
 	wait := min(max(time.Duration(in.WaitSeconds*float64(time.Second)), 0), maxClaimWait)
 	c, err := s.core.ClaimRun(r.Context(), actorFrom(r.Context()), in.Agents, wait)
 	if err == nil && c == nil {

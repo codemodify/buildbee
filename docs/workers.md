@@ -2,6 +2,19 @@
 
 A worker is a process that executes Runs. It pulls queued Runs from the Server, runs a coding agent on each, streams the agent's output back as RunEvents, and uploads the transcript as an Artifact. Workers open no port, so any machine on the LAN that can reach the Server can be one. Run as many as you like; each executes up to `BUILDBEE_WORKER_SLOTS` Runs at once.
 
+Agents are programs, not network services: each Run needs a machine with the agent installed, logged in (BuildBee uses the CLI logins, not API keys), a checkout of the repo, and a sandbox. That is what a worker provides. More workers mean more Runs at once and more logins to spread them over.
+
+## The Server's own worker
+
+The Server runs a worker itself, so on one machine there is nothing else to start. At startup it looks for, in order:
+
+1. Docker and the agent image (`make agents-image`): each Run gets a container, with the agents the Server's user is logged in to.
+2. Otherwise agents installed on the machine: they run directly, as the Server's user, with its files and logins.
+
+If neither is there, the Server runs no agents and `# status` says why. `BUILDBEE_LOCAL_WORKER` is `auto` (the default), `on` (refuse to start without agents) or `off`. The worker's other settings are the `BUILDBEE_WORKER_*` variables below; its name defaults to the hostname with `-server`, and `BUILDBEE_WORKER_ISOLATION` pins the isolation instead of falling back. Other machines join with `buildbee-worker` as below.
+
+`# status` shows each agent's load (running and queued Runs, and how many machines offer it) and warns when Runs or Bots wait for an agent no machine offers.
+
 ## How a Run reaches a worker
 
 1. Someone queues a Run: `POST /v1/tasks/{id}/runs`, `buildbee run start`, or a Handoff to the Builder with autorun. The Run is `pending`, with the agent to use and the prompt (the Bot's instructions, the Task, and the Handoff notes addressed to that Bot).
@@ -44,7 +57,7 @@ The worker finds the agents in the image, and each Run gets a container of its o
 | `BUILDBEE_WORKER_OPEN_PRS` | `1` | `0` pushes branches without opening pull requests |
 | `BUILDBEE_AGENT_<NAME>` | see below | command that starts an agent, e.g. `BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp"` |
 
-Without `BUILDBEE_WORKER_AGENTS`, a worker offers every agent whose ACP command it finds: in the image, or on its `PATH` in host isolation. It refuses to start when an agent it is asked to offer is missing. `BUILDBEE_WORKER_AGENTS=fake` needs neither Docker nor agents.
+Without `BUILDBEE_WORKER_AGENTS`, a worker offers every agent whose ACP command it finds: in the image, or on its `PATH` in host isolation. In a container only agents with a login in the worker user's home count (see [Agent logins](#agent-logins)). It refuses to start when an agent it is asked to offer is missing. `BUILDBEE_WORKER_AGENTS=fake` needs neither Docker nor agents.
 
 ## Agents
 

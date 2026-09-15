@@ -117,6 +117,7 @@ type work struct {
 	events  []Event
 	lastRun *models.Run // Run started by the latest handoff, if any
 	queued  bool        // a Run entered the queue; wake waiting workers after commit
+	load    bool        // a Run started or stopped; the agents' load changed
 }
 
 func (s *Service) tx(ctx context.Context, fn func(w *work) error) error {
@@ -133,6 +134,9 @@ func (s *Service) tx(ctx context.Context, fn func(w *work) error) error {
 	}
 	if w.queued {
 		s.queue.notify()
+	}
+	if w.queued || w.load {
+		s.presenceChanged()
 	}
 	return nil
 }
@@ -236,8 +240,18 @@ func (w *work) requireMember(ctx context.Context, a Actor, projectID string) (*m
 	return w.member(ctx, a, projectID, true)
 }
 
-// openProject returns a Project that accepts writes.
+// openProject returns a Project that accepts writes. The direct space
+// holds only DMs, so it takes no Project writes.
 func (w *work) openProject(ctx context.Context, id string) (*models.Project, error) {
+	p, err := w.openSpace(ctx, id)
+	if err == nil && p.Kind == models.DirectSpace {
+		return nil, fmt.Errorf("%w: direct messages are not a project", store.ErrConflict)
+	}
+	return p, err
+}
+
+// openSpace returns a Project or the direct space, if it accepts messages.
+func (w *work) openSpace(ctx context.Context, id string) (*models.Project, error) {
 	p, err := w.st.GetProject(ctx, id)
 	if err != nil {
 		return nil, err

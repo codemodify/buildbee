@@ -266,3 +266,70 @@ func TestAskingElsewhereOpensTheTaskThreadInTasks(t *testing.T) {
 		t.Fatalf("Scout reports in the Task's thread: %+v", th.Replies)
 	}
 }
+
+func TestDirectMessagesSpanTheServer(t *testing.T) {
+	f := newFixture(t)
+	ada, bob, cy := f.person("Ada"), f.person("Bob"), f.person("Cy")
+	pay := f.project(ada, "Payments")
+	f.project(bob, "Website")
+	// Ada and Bob share no Project; a DM needs none.
+	dm, err := f.s.OpenDirect(f.ctx, ada, NewDirect{PersonIDs: []string{bob.PersonID}})
+	f.must(err)
+	again, err := f.s.OpenDirect(f.ctx, bob, NewDirect{PersonIDs: []string{ada.PersonID}})
+	f.must(err)
+	if again.ID != dm.ID {
+		t.Fatal("one conversation between two people, whoever opens it")
+	}
+	_, err = f.s.PostMessage(f.ctx, ada, dm.ID, "hi Bob")
+	f.must(err)
+	if n := f.inbox(bob); len(n) != 1 || n[0].Kind != "dm" || n[0].Title != "Ada messaged you" {
+		t.Fatalf("bob's inbox: %+v", n)
+	}
+	if n := f.inbox(ada); len(n) != 0 {
+		t.Fatalf("no notice for the author: %+v", n)
+	}
+	if _, err := f.s.PostMessage(f.ctx, cy, dm.ID, "let me in"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("others cannot write in it: %v", err)
+	}
+	// A DM with a Bot lives in the Bot's Project.
+	builder := bot(pay, models.RoleBuilder)
+	withBot, err := f.s.OpenDirect(f.ctx, ada, NewDirect{MemberID: builder.ID})
+	f.must(err)
+	if withBot.ProjectID != pay.ID {
+		t.Fatalf("bot DM in %s", withBot.ProjectID)
+	}
+	if _, err := f.s.OpenDirect(f.ctx, ada, NewDirect{MemberID: pay.Members[0].ID}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("people are messaged by person: %v", err)
+	}
+	list, err := f.s.DirectMessages(f.ctx, bob)
+	f.must(err)
+	if len(list) != 1 || list[0].Unread != 1 || len(list[0].With) != 1 || list[0].With[0].Name != "Ada" || list[0].ProjectName != "" {
+		t.Fatalf("bob's DMs: %+v", list)
+	}
+	list, err = f.s.DirectMessages(f.ctx, ada)
+	f.must(err)
+	if len(list) != 2 || list[0].ID != withBot.ID || list[0].ProjectName != "Payments" || list[0].With[0].Kind != models.KindBot || list[1].Unread != 0 {
+		t.Fatalf("ada's DMs, newest first: %+v", list)
+	}
+	// The direct space is not a Project anyone sees or changes.
+	ps, err := f.s.Projects(f.ctx, false)
+	f.must(err)
+	if len(ps) != 2 {
+		t.Fatalf("projects: %+v", ps)
+	}
+	if _, err := f.s.CreateChannel(f.ctx, ada, dm.ProjectID, "side"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("no channels in the direct space: %v", err)
+	}
+	if _, err := f.s.CreateTask(f.ctx, ada, dm.ProjectID, NewTask{Title: "x"}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("no tasks in the direct space: %v", err)
+	}
+	r, err := f.s.Roster(f.ctx)
+	f.must(err)
+	for _, p := range r.People {
+		for _, m := range p.Projects {
+			if m.ProjectID == dm.ProjectID {
+				t.Fatalf("roster shows the direct space: %+v", p)
+			}
+		}
+	}
+}

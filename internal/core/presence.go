@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,7 @@ type presence struct {
 	mu      sync.Mutex
 	people  map[string]int // Person ID -> open sockets
 	workers map[string]WorkerSeen
+	local   LocalWorker
 	seq     atomic.Int64
 }
 
@@ -31,13 +33,40 @@ func newPresence() *presence {
 type WorkerSeen struct {
 	Name     string    `json:"name"`
 	Agents   []string  `json:"agents"`
+	Slots    int       `json:"slots,omitempty"` // Runs it executes at once, if it said
+	Running  int       `json:"running"`
+	Local    bool      `json:"local,omitempty"` // the Server's own worker
 	LastSeen time.Time `json:"last_seen"`
 }
 
-// Presence is who is online now.
+// AgentLoad is one agent across the workers: who offers it and how many
+// Runs asked for it are running or waiting. Agent "any" is Runs that take
+// whichever agent a worker has.
+type AgentLoad struct {
+	Agent   string `json:"agent"`
+	Workers int    `json:"workers"`
+	Running int    `json:"running"`
+	Queued  int    `json:"queued"`
+}
+
+// LocalWorker is whether the Server runs agents itself, and why not.
+type LocalWorker struct {
+	State  string `json:"state"` // off, starting, running, unavailable
+	Reason string `json:"reason,omitempty"`
+	Name   string `json:"name,omitempty"`
+	// Isolation is where its agents run: container, or host (directly on
+	// the Server's machine).
+	Isolation string `json:"isolation,omitempty"`
+}
+
+// Presence is who is online now, and what the agents are doing.
 type Presence struct {
 	People  []models.Person `json:"people"`
 	Workers []WorkerSeen    `json:"workers"`
+	Agents  []AgentLoad     `json:"agents"`
+	Slots   int             `json:"slots"`   // Runs the online workers can execute at once
+	Running int             `json:"running"` // Runs executing now, merges included
+	Local   LocalWorker     `json:"local"`
 }
 
 // Online marks a Person online for as long as one of their connections is
@@ -84,16 +113,45 @@ func (s *Service) sawWorker(name string, agents []string) {
 	}
 }
 
-// Presence returns the people with the app open and the workers seen lately.
+// WorkerSlots records how many Runs a worker executes at once.
+func (s *Service) WorkerSlots(name string, slots int) {
+	if name == "" || slots < 1 {
+		return
+	}
+	s.presence.mu.Lock()
+	w := s.presence.workers[name]
+	w.Name, w.Slots = name, slots
+	s.presence.workers[name] = w
+	s.presence.mu.Unlock()
+}
+
+// SetLocalWorker records whether the Server runs agents itself.
+func (s *Service) SetLocalWorker(l LocalWorker) {
+	s.presence.mu.Lock()
+	s.presence.local = l
+	s.presence.mu.Unlock()
+	s.presenceChanged()
+}
+
+// Presence returns the people with the app open, the workers seen lately
+// and the load on each agent.
 func (s *Service) Presence(ctx context.Context) (*Presence, error) {
+	load, err := s.st.RunLoad(ctx)
+	if err != nil {
+		return nil, err
+	}
 	s.presence.mu.Lock()
 	ids := make([]string, 0, len(s.presence.people))
 	for id := range s.presence.people {
 		ids = append(ids, id)
 	}
-	out := &Presence{People: []models.Person{}, Workers: []WorkerSeen{}}
+	out := &Presence{People: []models.Person{}, Workers: []WorkerSeen{}, Agents: []AgentLoad{}, Local: s.presence.local}
+	if out.Local.State == "" {
+		out.Local.State = "off"
+	}
 	for name, w := range s.presence.workers {
 		if time.Since(w.LastSeen) < workerFresh {
+			w.Local = w.Name == out.Local.Name && out.Local.State == "running"
 			out.Workers = append(out.Workers, w)
 		} else if time.Since(w.LastSeen) > 24*time.Hour {
 			delete(s.presence.workers, name)
@@ -106,15 +164,44 @@ func (s *Service) Presence(ctx context.Context) (*Presence, error) {
 			out.People = append(out.People, *p)
 		}
 	}
-	slices.SortFunc(out.Workers, func(a, b WorkerSeen) int {
-		if a.Name < b.Name {
-			return -1
+	slices.SortFunc(out.Workers, func(a, b WorkerSeen) int { return strings.Compare(a.Name, b.Name) })
+	agents := map[string]*AgentLoad{}
+	agent := func(name string) *AgentLoad {
+		if name == "" {
+			name = "any"
 		}
-		if a.Name > b.Name {
-			return 1
+		if agents[name] == nil {
+			agents[name] = &AgentLoad{Agent: name}
 		}
-		return 0
-	})
+		return agents[name]
+	}
+	byWorker := map[string]int{}
+	for _, l := range load {
+		if l.Status == models.RunRunning {
+			byWorker[l.Worker] += l.Runs
+			out.Running += l.Runs
+		}
+		if l.Kind == models.RunMerge { // merges need no agent
+			continue
+		}
+		if l.Status == models.RunRunning {
+			agent(l.Agent).Running += l.Runs
+		} else {
+			agent(l.Agent).Queued += l.Runs
+		}
+	}
+	for i := range out.Workers {
+		w := &out.Workers[i]
+		w.Running = byWorker[w.Name]
+		out.Slots += w.Slots
+		for _, a := range w.Agents {
+			agent(a).Workers++
+		}
+	}
+	for _, a := range agents {
+		out.Agents = append(out.Agents, *a)
+	}
+	slices.SortFunc(out.Agents, func(a, b AgentLoad) int { return strings.Compare(a.Agent, b.Agent) })
 	return out, nil
 }
 

@@ -33,9 +33,12 @@ CREATE TABLE projects (
     instructions TEXT NOT NULL DEFAULT '',   -- standing guidance every agent in the Project gets
     repo_url TEXT NOT NULL DEFAULT '',
     default_branch TEXT NOT NULL DEFAULT '',
+    -- 'direct' is the one hidden space for DMs between people across Projects
+    kind TEXT NOT NULL DEFAULT 'project' CHECK (kind IN ('project', 'direct')),
     archived_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX projects_direct_idx ON projects (kind) WHERE kind = 'direct';
 
 CREATE TABLE members (
     id UUID PRIMARY KEY,

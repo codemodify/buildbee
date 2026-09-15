@@ -14,7 +14,7 @@ func TestLoadServerDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":8080" || c.MaxBodyBytes != 32<<20 || c.WebDir != "" {
+	if c.Addr != ":8080" || c.MaxBodyBytes != 32<<20 || c.WebDir != "" || c.LocalWorker != LocalAuto {
 		t.Fatalf("defaults: %+v", c)
 	}
 }
@@ -28,6 +28,7 @@ func TestLoadServerRejectsBadInput(t *testing.T) {
 		"not postgres":     {map[string]string{"DATABASE_URL": "mysql://x"}, "postgres:// URL"},
 		"bad body limit":   {map[string]string{"DATABASE_URL": "postgres://x/y", "BUILDBEE_MAX_BODY_BYTES": "12"}, "BUILDBEE_MAX_BODY_BYTES"},
 		"bad repo":         {map[string]string{"DATABASE_URL": "postgres://x/y", "GITHUB_REPO": "justname"}, "owner/name"},
+		"bad local worker": {map[string]string{"DATABASE_URL": "postgres://x/y", "BUILDBEE_LOCAL_WORKER": "yes"}, "auto, on or off"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := LoadServer(env(tc.env))
@@ -64,5 +65,30 @@ func TestLoadWorker(t *testing.T) {
 	}
 	if c, err := LoadWorker(env(nil)); err != nil || c.Slots != 4 || c.Agents != nil || c.RunTimeout != 2*time.Hour {
 		t.Fatalf("defaults: %+v %v", c, err)
+	}
+}
+
+func TestLocalWorkerTalksOverLoopback(t *testing.T) {
+	for addr, want := range map[string]string{
+		":8080":          "http://127.0.0.1:8080",
+		"0.0.0.0:9000":   "http://127.0.0.1:9000",
+		"10.0.0.5:8080":  "http://10.0.0.5:8080",
+		"[::]:8080":      "http://127.0.0.1:8080",
+		"127.0.0.1:8084": "http://127.0.0.1:8084",
+	} {
+		c, err := LocalWorker(env(map[string]string{"BUILDBEE_URL": "http://elsewhere:1"}), addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.ServerURL != want {
+			t.Errorf("%s: %s, want %s", addr, c.ServerURL, want)
+		}
+		if !strings.HasSuffix(c.Name, "-server") || !strings.Contains(c.Dir, "buildbee-server-worker") || c.Isolation != "container" {
+			t.Errorf("%s: %+v", addr, c)
+		}
+	}
+	c, err := LocalWorker(env(map[string]string{"BUILDBEE_WORKER_NAME": "box", "BUILDBEE_WORKER_DIR": "/w"}), ":1")
+	if err != nil || c.Name != "box" || c.Dir != "/w" {
+		t.Fatalf("overrides: %+v %v", c, err)
 	}
 }

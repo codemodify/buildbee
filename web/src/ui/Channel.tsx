@@ -5,6 +5,7 @@ import type { Channel, Message } from "../types";
 import { Composer } from "./Composer";
 import { useCtx } from "./context";
 import { InboxBell } from "./Inbox";
+import { PrefsButton } from "./Preferences";
 import { Avatar, Button, Empty, ErrorNote } from "./kit";
 import { MessageList } from "./Messages";
 
@@ -106,12 +107,13 @@ export function ChannelHeader({ channel, onMenu }: { channel: Channel; onMenu: (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-bb-border px-4">
       <MenuButton onClick={onMenu} />
       <h1 className="min-w-0 truncate text-[15px] font-semibold">{channel.kind === "dm" ? channel.name : `# ${channel.name}`}</h1>
-      <span className="truncate text-[13px] text-bb-subtle">{project.name}</span>
+      {project.kind !== "direct" && <span className="truncate text-[13px] text-bb-subtle">{project.name}</span>}
       <div className="ml-auto flex items-center -space-x-1.5">
         {here.slice(0, 5).map((m) => m && <Avatar key={m.id} member={m} size={22} />)}
         {here.length > 0 && <span className="pl-3 text-[12px] text-bb-subtle">{here.length} here</span>}
       </div>
       <InboxBell />
+      <PrefsButton />
     </header>
   );
 }

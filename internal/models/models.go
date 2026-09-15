@@ -183,8 +183,36 @@ type Project struct {
 	Instructions  string     `json:"instructions,omitempty"`
 	RepoURL       string     `json:"repo_url,omitempty"`
 	DefaultBranch string     `json:"default_branch,omitempty"`
+	Kind          string     `json:"kind"` // ProjectKind or DirectSpace
 	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// Project kinds. The direct space is one hidden Project that holds DMs
+// between people, whichever Projects they share.
+const (
+	ProjectKind = "project"
+	DirectSpace = "direct"
+)
+
+// DM is a direct message Channel as its reader sees it: who else is in it,
+// where it lives and what they have not read.
+type DM struct {
+	Channel
+	ProjectName string    `json:"project_name,omitempty"` // empty in the direct space
+	With        []DMPeer  `json:"with"`
+	Unread      int       `json:"unread"`
+	LastSeq     int64     `json:"last_seq"`
+	LastAt      time.Time `json:"last_at"`
+}
+
+// DMPeer is someone else in a DM.
+type DMPeer struct {
+	MemberID string `json:"member_id"`
+	PersonID string `json:"person_id,omitempty"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	Role     string `json:"role"`
 }
 
 // ProjectBundle is a Project plus its Members and Channels.
@@ -649,6 +677,16 @@ type UsageRow struct {
 	Runs          int                `json:"runs"`
 	Cost          map[string]float64 `json:"cost"`
 	ContextTokens int64              `json:"context_tokens"` // sum of each Run's peak
+}
+
+// RunLoad is how many Runs of one status, kind, requested agent ("" =
+// any) and worker ("" while queued) there are.
+type RunLoad struct {
+	Status RunStatus
+	Kind   RunKind
+	Agent  string
+	Worker string
+	Runs   int
 }
 
 // Roster is everyone who is part of this Server: people with the Projects

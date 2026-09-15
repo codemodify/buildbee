@@ -19,6 +19,28 @@ func (s *Store) UpsertPerson(ctx context.Context, name string) (*models.Person, 
 	return &p, mapErr(err)
 }
 
+// RenamePerson changes a Person's name and their name in every Project,
+// returning the Members renamed. ErrConflict if someone has the name.
+func (s *Store) RenamePerson(ctx context.Context, id, name string) ([]models.Member, error) {
+	if err := one(s.q.Exec(ctx, `UPDATE people SET name=$2 WHERE id=$1`, id, name)); err != nil {
+		return nil, err
+	}
+	rows, err := s.q.Query(ctx, `UPDATE members SET display_name=$2 WHERE person_id=$1 RETURNING `+memberCols, id, name)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []models.Member
+	for rows.Next() {
+		var m models.Member
+		if err := scanMember(rows, &m); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // GetPerson returns one Person.
 func (s *Store) GetPerson(ctx context.Context, id string) (*models.Person, error) {
 	var p models.Person
@@ -52,7 +74,8 @@ func (s *Store) Roster(ctx context.Context, events int) (*models.Roster, error) 
 	out := &models.Roster{People: []models.RosterPerson{}, Bots: []models.RosterBot{}, Events: []models.RosterEvent{}}
 	rows, err := s.q.Query(ctx, `SELECT p.id, p.name, p.created_at, m.project_id, pr.name, m.id, m.role, m.created_at, m.left_at
 		FROM people p
-		LEFT JOIN members m ON m.person_id = p.id AND EXISTS (SELECT 1 FROM projects x WHERE x.id = m.project_id AND x.archived_at IS NULL)
+		LEFT JOIN members m ON m.person_id = p.id
+			AND EXISTS (SELECT 1 FROM projects x WHERE x.id = m.project_id AND x.archived_at IS NULL AND x.kind = 'project')
 		LEFT JOIN projects pr ON pr.id = m.project_id
 		ORDER BY lower(p.name), pr.name`)
 	if err != nil {
@@ -104,7 +127,7 @@ func (s *Store) Roster(ctx context.Context, events int) (*models.Roster, error) 
 	}
 	evs, err := s.q.Query(ctx, `SELECT CASE WHEN a.type = 'project' THEN a.actor ELSE COALESCE(a.payload->>'name', a.actor) END, a.action, a.project_id, pr.name, a.created_at
 		FROM activity a JOIN projects pr ON pr.id = a.project_id
-		WHERE (a.type = 'member' AND a.action IN ('joined', 'left', 'added')) OR (a.type = 'project' AND a.action = 'created')
+		WHERE pr.kind = 'project' AND ((a.type = 'member' AND a.action IN ('joined', 'left', 'added')) OR (a.type = 'project' AND a.action = 'created'))
 		ORDER BY a.created_at DESC, a.seq DESC LIMIT $1`, events)
 	if err != nil {
 		return nil, mapErr(err)

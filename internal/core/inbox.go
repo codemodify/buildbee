@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/store"
@@ -16,6 +18,41 @@ func (s *Service) Hello(ctx context.Context, personName string) (*models.Person,
 		return nil, err
 	}
 	return s.st.UpsertPerson(ctx, n)
+}
+
+// Rename changes the acting Person's name, everywhere they appear.
+func (s *Service) Rename(ctx context.Context, a Actor, personName string) (*models.Person, error) {
+	if !a.IsPerson() {
+		return nil, ErrNoActor
+	}
+	n, err := name("name", personName)
+	if err != nil {
+		return nil, err
+	}
+	var out *models.Person
+	err = s.tx(ctx, func(w *work) error {
+		old, err := w.st.GetPerson(ctx, a.PersonID)
+		if err != nil {
+			return err
+		}
+		members, err := w.st.RenamePerson(ctx, a.PersonID, n)
+		if errors.Is(err, store.ErrConflict) {
+			return fmt.Errorf("%w: someone is already called %s", store.ErrConflict, n)
+		}
+		if err != nil {
+			return err
+		}
+		for i := range members {
+			m := &members[i]
+			if err := w.activity(ctx, m.ProjectID, whoOf(m, a), models.TypeMember, "updated", m.ID,
+				map[string]any{"display_name": map[string]string{"from": old.Name, "to": n}}); err != nil {
+				return err
+			}
+		}
+		out, err = w.st.GetPerson(ctx, a.PersonID)
+		return err
+	})
+	return out, err
 }
 
 // Person returns one Person.

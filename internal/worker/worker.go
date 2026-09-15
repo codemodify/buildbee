@@ -166,7 +166,7 @@ func (w *Worker) Run(ctx context.Context) {
 func (w *Worker) loop(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
-		c, err := w.api.claim(ctx, w.cfg.Agents, claimWait)
+		c, err := w.api.claim(ctx, w.cfg.Agents, w.cfg.Slots, claimWait)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

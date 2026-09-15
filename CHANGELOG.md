@@ -2,6 +2,19 @@
 
 ## Unreleased — Phase 2c (client feedback)
 
+### Added
+- The Server runs agents itself (`BUILDBEE_LOCAL_WORKER`, default `auto`): in containers when Docker and the agent image are there, otherwise directly on its machine; `# status` says which, or why not
+- `# status` shows each agent's load and warns about Runs and Bots waiting for an agent no machine offers; machines are a detail under it. Workers report their `slots`
+- Server-wide DMs: `GET/POST /v1/dms`. DMs between people are one conversation wherever they work; DMs with a Bot stay in its Project. The sidebar's DM group lists them all; a DM notifies the others in it
+- `# decisions`, pinned after `# status`: every Project's open Decisions. `# status` holds every Project's Tasks board
+- Your settings (next to notifications): name (`PATCH /v1/me`), theme, rounded or sharp corners, notifications
+- New Projects ask what their Bots run (`agent` on `POST /v1/projects`)
+
+### Changed
+- A worker in a container offers only the agents its user is logged in to
+- The sidebar: pinned `# status` and `# decisions`, DMs, then Projects with only their channels; `+` (channel) and Settings sit on the Project's row
+- Dialogs render over the whole page, also when opened from the sidebar
+
 ### Fixed
 - `GET /v1/usage` with no Runs returned `by_agent: null`
 

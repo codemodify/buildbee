@@ -105,6 +105,7 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 		if err != nil {
 			return err
 		}
+		w.load = true
 		// Recount under the Project's lock: concurrent claims may both have
 		// seen room for one more Run.
 		maxRuns, running, err := w.st.ProjectLoad(ctx, r.ProjectID)
@@ -191,6 +192,7 @@ func (s *Service) ReapRuns(ctx context.Context) (int, error) {
 			if err := w.st.UpdateRun(ctx, *r); err != nil {
 				return err
 			}
+			w.load = true
 			if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
 				return err
 			}

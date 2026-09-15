@@ -9,10 +9,22 @@ import (
 	"github.com/codemodify/buildbee/internal/models"
 )
 
-const projectCols = `id, name, auto_run, merge_policy, max_runs, instructions, repo_url, default_branch, archived_at, created_at`
+const projectCols = `id, name, auto_run, merge_policy, max_runs, instructions, repo_url, default_branch, kind, archived_at, created_at`
 
 func scanProject(row interface{ Scan(...any) error }, p *models.Project) error {
-	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.MergePolicy, &p.MaxRuns, &p.Instructions, &p.RepoURL, &p.DefaultBranch, &p.ArchivedAt, &p.CreatedAt)
+	return row.Scan(&p.ID, &p.Name, &p.AutoRun, &p.MergePolicy, &p.MaxRuns, &p.Instructions, &p.RepoURL, &p.DefaultBranch, &p.Kind, &p.ArchivedAt, &p.CreatedAt)
+}
+
+// DirectSpace returns the hidden Project for DMs between people, creating
+// it the first time.
+func (s *Store) DirectSpace(ctx context.Context, id string, now time.Time) (*models.Project, error) {
+	if _, err := s.q.Exec(ctx, `INSERT INTO projects (id, name, kind, created_at) VALUES ($1, 'Direct messages', 'direct', $2)
+		ON CONFLICT (kind) WHERE kind = 'direct' DO NOTHING`, id, now); err != nil {
+		return nil, mapErr(err)
+	}
+	var p models.Project
+	err := scanProject(s.q.QueryRow(ctx, `SELECT `+projectCols+` FROM projects WHERE kind = 'direct'`), &p)
+	return &p, mapErr(err)
 }
 
 func (s *Store) InsertProject(ctx context.Context, p models.Project) error {
@@ -34,7 +46,7 @@ func (s *Store) GetProject(ctx context.Context, id string) (*models.Project, err
 // ListProjects returns Projects oldest first; archived ones only on request.
 func (s *Store) ListProjects(ctx context.Context, includeArchived bool) ([]models.Project, error) {
 	rows, err := s.q.Query(ctx, `SELECT `+projectCols+` FROM projects
-		WHERE $1 OR archived_at IS NULL ORDER BY created_at, id`, includeArchived)
+		WHERE kind = 'project' AND ($1 OR archived_at IS NULL) ORDER BY created_at, id`, includeArchived)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -152,6 +164,71 @@ func (s *Store) ListDMs(ctx context.Context, projectID, memberID string) ([]mode
 		AND EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = channels.id AND cm.member_id = $2)
 		ORDER BY created_at DESC, id`, projectID, memberID)
 }
+
+// PersonDMs lists every DM a Person is in, across Projects and the direct
+// space, most recently active first.
+func (s *Store) PersonDMs(ctx context.Context, personID string) ([]models.DM, error) {
+	rows, err := s.q.Query(ctx, `SELECT `+prefixedChannelCols+`, pr.kind, pr.name,
+			(SELECT count(*) FROM messages m WHERE m.channel_id = c.id AND m.seq > COALESCE(rm.last_seq, 0) AND m.member_id <> me.id),
+			COALESCE((SELECT max(m.seq) FROM messages m WHERE m.channel_id = c.id), 0),
+			COALESCE((SELECT max(m.created_at) FROM messages m WHERE m.channel_id = c.id), c.created_at) AS last_at
+		FROM channels c
+		JOIN projects pr ON pr.id = c.project_id AND pr.archived_at IS NULL
+		JOIN members me ON me.project_id = c.project_id AND me.person_id = $1
+		JOIN channel_members mine ON mine.channel_id = c.id AND mine.member_id = me.id
+		LEFT JOIN read_markers rm ON rm.channel_id = c.id AND rm.person_id = $1
+		WHERE c.kind = 'dm' AND c.archived_at IS NULL
+		ORDER BY last_at DESC, c.id`, personID)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := []models.DM{}
+	var ids []string
+	for rows.Next() {
+		var d models.DM
+		var kind string
+		if err := rows.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Kind, &d.Locked, &d.ArchivedAt, &d.CreatedAt, &d.Members,
+			&kind, &d.ProjectName, &d.Unread, &d.LastSeq, &d.LastAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if kind == models.DirectSpace {
+			d.ProjectName = ""
+		}
+		d.With = []models.DMPeer{}
+		out = append(out, d)
+		ids = append(ids, d.ID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(out) == 0 {
+		return out, err
+	}
+	peers, err := s.q.Query(ctx, `SELECT cm.channel_id, m.id, COALESCE(m.person_id::text, ''), m.display_name, m.kind, m.role
+		FROM channel_members cm JOIN members m ON m.id = cm.member_id
+		WHERE cm.channel_id = ANY($1::uuid[]) AND (m.person_id IS NULL OR m.person_id <> $2)
+		ORDER BY m.display_name`, ids, personID)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer peers.Close()
+	at := map[string]int{}
+	for i, d := range out {
+		at[d.ID] = i
+	}
+	for peers.Next() {
+		var ch string
+		var p models.DMPeer
+		if err := peers.Scan(&ch, &p.MemberID, &p.PersonID, &p.Name, &p.Kind, &p.Role); err != nil {
+			return nil, err
+		}
+		out[at[ch]].With = append(out[at[ch]].With, p)
+	}
+	return out, peers.Err()
+}
+
+// prefixedChannelCols are channelCols for a query that names channels c.
+const prefixedChannelCols = `c.id, c.project_id, c.name, c.kind, c.locked, c.archived_at, c.created_at,
+	COALESCE((SELECT array_agg(member_id::text ORDER BY member_id) FROM channel_members cm WHERE cm.channel_id = c.id), '{}')`
 
 // OpenDM returns the DM between exactly memberIDs, creating it if needed.
 // Safe under races: the sorted member list is unique.

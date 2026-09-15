@@ -330,3 +330,69 @@ func TestUsageIsTrackedPerRunAndSummed(t *testing.T) {
 		t.Fatalf("server usage: %+v", all)
 	}
 }
+
+func TestPresenceShowsEachAgentsLoad(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p := f.project(ada, "Load")
+	f.queue(ada, p.ID, "one", NewRun{Agent: "claude"})
+	f.queue(ada, p.ID, "two", NewRun{Agent: "claude"})
+	f.queue(ada, p.ID, "three", NewRun{Agent: "codex"})
+	f.queue(ada, p.ID, "four", NewRun{})
+	f.s.WorkerSlots("box", 3)
+	before := len(f.pub.topic("presence:server"))
+	c, err := f.s.ClaimRun(f.ctx, WorkerActor("box"), []string{"claude"}, 0)
+	f.must(err)
+	if c == nil || c.Run.Agent != "claude" {
+		t.Fatalf("claimed %+v", c)
+	}
+	if len(f.pub.topic("presence:server")) <= before {
+		t.Fatal("a claim changes the load; subscribers are told")
+	}
+	f.s.SetLocalWorker(LocalWorker{State: "running", Name: "box", Isolation: "host"})
+	pr, err := f.s.Presence(f.ctx)
+	f.must(err)
+	got := map[string]AgentLoad{}
+	for _, a := range pr.Agents {
+		got[a.Agent] = a
+	}
+	want := map[string]AgentLoad{
+		"claude": {Agent: "claude", Workers: 1, Running: 1, Queued: 1},
+		"codex":  {Agent: "codex", Queued: 1}, // nobody offers it
+		"any":    {Agent: "any", Queued: 1},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("agents: %+v", pr.Agents)
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Fatalf("%s: %+v want %+v", k, got[k], w)
+		}
+	}
+	if len(pr.Workers) != 1 || pr.Workers[0].Slots != 3 || pr.Workers[0].Running != 1 || !pr.Workers[0].Local || pr.Slots != 3 || pr.Running != 1 {
+		t.Fatalf("workers: %+v slots %d running %d", pr.Workers, pr.Slots, pr.Running)
+	}
+	if pr.Local.Isolation != "host" {
+		t.Fatalf("local: %+v", pr.Local)
+	}
+	_, err = f.s.ReportRun(f.ctx, WorkerActor("box"), c.Run.ID, RunReport{Status: "succeeded"})
+	f.must(err)
+	if pr, _ = f.s.Presence(f.ctx); pr.Running != 0 {
+		t.Fatalf("finished Runs free the slot: %+v", pr)
+	}
+}
+
+func TestNewProjectsBotsUseTheChosenAgent(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	p, err := f.s.CreateProject(f.ctx, ada, NewProject{Name: "Codexed", Agent: "Codex"})
+	f.must(err)
+	for _, m := range p.Members {
+		if m.Kind == models.KindBot && m.Agent != "codex" {
+			t.Fatalf("%s runs %q", m.DisplayName, m.Agent)
+		}
+	}
+	if _, err := f.s.CreateProject(f.ctx, ada, NewProject{Name: "Bad", Agent: "gpt"}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("unknown agent: %v", err)
+	}
+}

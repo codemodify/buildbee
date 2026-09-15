@@ -5,20 +5,22 @@ import { useLoad } from "../store";
 import { ago, Markdown, money, tokens } from "../text";
 import type { Member, Routine, Usage } from "../types";
 import { useCtx } from "./context";
-import { Avatar, Button, Empty, ErrorNote, Field, Pill, Toggle, cx, inputBase, inputClass } from "./kit";
+import { Avatar, Button, ErrorNote, Field, Pill, Toggle, cx, inputBase, inputClass } from "./kit";
 
 export const agents = ["", "claude", "codex", "grok", "opencode", "goose", "fake"];
 
-/** Decisions lists the questions waiting for people, and lets them answer. */
-export function Decisions({ header }: { header: ReactNode }) {
+/** DecisionList is one Project's open Decisions, answerable; nothing when none. */
+export function DecisionList() {
   const { data, reload } = useCtx();
   const [err, setErr] = useState("");
+  if (data.decisions.length === 0) return null;
   return (
-    <Page header={header}>
+    <section className="space-y-2">
+      <h2 className="text-[12px] font-semibold tracking-wide text-bb-subtle uppercase">
+        {data.project.name} <span className="font-normal">{data.decisions.length}</span>
+      </h2>
       <ErrorNote>{err}</ErrorNote>
-      {data.decisions.length === 0 ? (
-        <Empty title="No open decisions" />
-      ) : (
+      {
         <div className="space-y-3">
           {data.decisions.map((d) => (
             <div key={d.id} className="rounded-lg border border-bb-border bg-bb-surface p-4">
@@ -52,8 +54,8 @@ export function Decisions({ header }: { header: ReactNode }) {
             </div>
           ))}
         </div>
-      )}
-    </Page>
+      }
+    </section>
   );
 }
 

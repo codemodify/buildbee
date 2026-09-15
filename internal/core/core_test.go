@@ -62,7 +62,7 @@ func (f *fixture) person(name string) Actor {
 
 func (f *fixture) project(a Actor, name string) *models.ProjectBundle {
 	f.t.Helper()
-	p, err := f.s.CreateProject(f.ctx, a, name, false)
+	p, err := f.s.CreateProject(f.ctx, a, NewProject{Name: name})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -659,5 +659,23 @@ func TestReplayCatchesUpEachTopic(t *testing.T) {
 	}
 	if _, err := f.s.Replay(f.ctx, "bogus:1", 0); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("unknown topic: %v", err)
+	}
+}
+
+func TestRenameChangesTheNameEverywhere(t *testing.T) {
+	f := newFixture(t)
+	ada := f.person("Ada")
+	f.person("Bob")
+	p := f.project(ada, "Names")
+	got, err := f.s.Rename(f.ctx, ada, "Ada L")
+	f.must(err)
+	if got.Name != "Ada L" || f.memberOf(p.ID, ada).DisplayName != "Ada L" {
+		t.Fatalf("renamed: %+v %+v", got, f.memberOf(p.ID, ada))
+	}
+	if _, err := f.s.Rename(f.ctx, ada, "bob"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("names are unique, ignoring case: %v", err)
+	}
+	if acts := f.activity(p.ID); acts[0].Action != "updated" {
+		t.Fatalf("activity: %+v", acts[0])
 	}
 }

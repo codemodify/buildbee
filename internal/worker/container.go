@@ -191,11 +191,11 @@ func (c *Container) Probe(ctx context.Context, agents []string, commands map[str
 		return nil, err
 	}
 	if _, err := exec.LookPath(c.Docker); err != nil {
-		return nil, fmt.Errorf("%s is not installed; install Docker or set BUILDBEE_WORKER_ISOLATION=host", c.Docker)
+		return nil, fmt.Errorf("%w: %s is not installed; install Docker or set BUILDBEE_WORKER_ISOLATION=host", ErrNoDocker, c.Docker)
 	}
 	if out, err := exec.CommandContext(ctx, c.Docker, "image", "inspect", "--format", "{{.Id}}", c.Image).CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("image %s is not available (%s); build it with: docker build -f Dockerfile.agents -t %s .",
-			c.Image, strings.TrimSpace(string(out)), c.Image)
+		return nil, fmt.Errorf("%w: image %s is not available (%s); build it with: docker build -f Dockerfile.agents -t %s .",
+			ErrNoImage, c.Image, strings.TrimSpace(string(out)), c.Image)
 	}
 	var script strings.Builder
 	for _, a := range agents {
@@ -214,6 +214,37 @@ func (c *Container) Probe(ctx context.Context, agents []string, commands map[str
 		return nil, fmt.Errorf("probing image %s: %v: %s", c.Image, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.Fields(stdout.String()), nil
+}
+
+// Why container isolation is unavailable.
+var (
+	ErrNoDocker = errors.New("no docker")
+	ErrNoImage  = errors.New("no agent image")
+)
+
+// LoggedIn returns the agents whose login files are in the worker user's
+// home: in a container, an agent has no other way to sign in. The fake
+// agent needs none.
+func (c *Container) LoggedIn(agents []string) ([]string, error) {
+	if err := c.defaults(); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, a := range agents {
+		if a == "fake" {
+			out = append(out, a)
+			continue
+		}
+		for _, f := range loginFiles[a] {
+			if f.token || len(loginFiles[a]) == 1 {
+				if _, err := os.Stat(filepath.Join(c.Home, f.path)); err == nil {
+					out = append(out, a)
+					break
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // copiedLogins are an agent's login files copied into a Run's home.

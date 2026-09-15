@@ -229,6 +229,7 @@ func (s *Service) ReportRun(ctx context.Context, a Actor, id string, rep RunRepo
 		if err := w.st.UpdateRun(ctx, *r); err != nil {
 			return err
 		}
+		w.load = true
 		out = r
 		if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
 			return err

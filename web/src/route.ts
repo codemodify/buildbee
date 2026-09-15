@@ -4,11 +4,10 @@ import { useEffect, useState } from "react";
 export type Route =
   | { view: "home" }
   | { view: "channel"; projectId: string; channelId?: string; threadId?: string }
-  | { view: "tasks"; projectId: string; threadId?: string }
   | { view: "task"; projectId: string; taskId: string }
-  | { view: "decisions"; projectId: string }
   | { view: "settings"; projectId: string }
-  | { view: "status" };
+  | { view: "status" }
+  | { view: "decisions" };
 
 export function parse(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#\/?/, "").split("?");
@@ -17,16 +16,18 @@ export function parse(hash: string): Route {
   const [p, projectId, section, id] = path.split("/").filter(Boolean);
   // #/usage and #/members were the Server's pages before #/status held them
   if (p === "status" || p === "usage" || p === "members") return { view: "status" };
+  if (p === "decisions") return { view: "decisions" };
   if (p === "hi") return { view: "home" };
   if (p === "projects") return fromServerLink(path) ?? { view: "home" };
   if (p !== "p" || !projectId) return { view: "home" };
   switch (section) {
     case "c":
       return { view: "channel", projectId, channelId: id, threadId };
+    // A Project's board and Decisions moved to #/status and #/decisions.
     case "tasks":
-      return id ? { view: "task", projectId, taskId: id } : { view: "tasks", projectId, threadId };
+      return id ? { view: "task", projectId, taskId: id } : { view: "status" };
     case "decisions":
-      return { view: "decisions", projectId };
+      return { view: "decisions" };
     case "settings":
       return { view: "settings", projectId };
     default:
@@ -41,12 +42,10 @@ export function href(r: Route): string {
       return "#/";
     case "channel":
       return r.channelId ? `#/p/${r.projectId}/c/${r.channelId}${t}` : `#/p/${r.projectId}${t}`;
-    case "tasks":
-      return `#/p/${r.projectId}/tasks${t}`;
     case "task":
       return `#/p/${r.projectId}/tasks/${r.taskId}`;
     case "decisions":
-      return `#/p/${r.projectId}/decisions`;
+      return "#/decisions";
     case "settings":
       return `#/p/${r.projectId}/settings`;
     case "status":

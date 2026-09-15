@@ -4,6 +4,7 @@ import { live, useLiveStatus, useTopic } from "./live";
 import type {
   Channel,
   Decision,
+  DM,
   Member,
   Message,
   Notification,
@@ -225,6 +226,29 @@ function liveBump(channelId: string, fn: (m: Message) => void) {
   return live.subscribe(`channel:${channelId}`, null, (f) => {
     if (f.type === "message") fn(f.data as Message);
   });
+}
+
+/**
+ * useDMs lists the Person's DMs across the Server, live: a new DM arrives
+ * as a notification, a new message on a DM's own topic. Opening one reads it.
+ */
+export function useDMs(personId: string, activeId: string | undefined) {
+  const { data, reload } = useLoad<DM[]>(() => api.directMessages().then((r) => r.items), [personId]);
+  const refresh = useThrottled(reload, 300);
+  useTopic(`person:${personId}`, null, refresh);
+  const dms = data ?? [];
+  const key = dms.map((d) => d.id).join(",");
+  useEffect(() => {
+    const offs = dms.map((d) => liveBump(d.id, refresh));
+    return () => offs.forEach((off) => off());
+    // Resubscribe when the set of DMs changes, not on every count.
+  }, [key]);
+  const active = dms.find((d) => d.id === activeId);
+  useEffect(() => {
+    if (!active || active.unread === 0) return;
+    void api.markRead(active.id, active.last_seq).then(refresh, () => undefined);
+  }, [active?.id, active?.unread]);
+  return { dms, reload };
 }
 
 /** useRun holds a Run and its events, live. */

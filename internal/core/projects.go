@@ -14,14 +14,27 @@ import (
 
 // CreateProject creates a Project owned by the acting Person, with the four
 // default Bots, a #general Channel and a disabled morning-digest Routine.
-func (s *Service) CreateProject(ctx context.Context, a Actor, projectName string, autoRun bool) (*models.ProjectBundle, error) {
-	n, err := text("name", projectName, true, 100)
+// NewProject describes a Project to create. Agent is what its Bots run
+// ("" = any agent a worker has).
+type NewProject struct {
+	Name    string `json:"name"`
+	AutoRun bool   `json:"auto_run"`
+	Agent   string `json:"agent"`
+}
+
+func (s *Service) CreateProject(ctx context.Context, a Actor, in NewProject) (*models.ProjectBundle, error) {
+	n, err := text("name", in.Name, true, 100)
 	if err != nil {
 		return nil, err
 	}
+	autoRun := in.AutoRun
+	agent := strings.ToLower(strings.TrimSpace(in.Agent))
+	if !models.ValidAgent(agent) {
+		return nil, invalid("agent must be one of %s", strings.Join(models.Agents, ", "))
+	}
 	var out *models.ProjectBundle
 	err = s.tx(ctx, func(w *work) error {
-		p := models.Project{ID: uuid.NewString(), Name: n, AutoRun: autoRun, CreatedAt: w.now}
+		p := models.Project{ID: uuid.NewString(), Name: n, AutoRun: autoRun, Kind: models.ProjectKind, CreatedAt: w.now}
 		if err := w.st.InsertProject(ctx, p); err != nil {
 			return err
 		}
@@ -42,7 +55,7 @@ func (s *Service) CreateProject(ctx context.Context, a Actor, projectName string
 		}
 		for i, b := range models.DefaultBots() {
 			m := models.Member{ID: uuid.NewString(), ProjectID: p.ID, Kind: models.KindBot, DisplayName: b.Name,
-				Role: b.Role, Instructions: b.Instructions, CreatedAt: w.now.Add(time.Duration(i+1) * time.Microsecond)}
+				Role: b.Role, Instructions: b.Instructions, Agent: agent, CreatedAt: w.now.Add(time.Duration(i+1) * time.Microsecond)}
 			if err := w.st.InsertMember(ctx, m); err != nil {
 				return err
 			}
@@ -105,6 +118,9 @@ func (s *Service) UpdateProject(ctx context.Context, a Actor, id string, patch P
 		p, err := w.st.GetProject(ctx, id)
 		if err != nil {
 			return err
+		}
+		if p.Kind == models.DirectSpace {
+			return fmt.Errorf("%w: direct messages are not a project", store.ErrConflict)
 		}
 		if p.ArchivedAt != nil && (patch.Archived == nil || *patch.Archived) {
 			return fmt.Errorf("%w: project is archived; unarchive it first", store.ErrConflict)

@@ -95,6 +95,22 @@ func (s *Server) postMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"person": p})
 }
 
+// patchMe renames the Person this browser is.
+func (s *Server) patchMe(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	p, err := s.core.Rename(r.Context(), actorFrom(r.Context()), in.Name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"person": p})
+}
+
 // deleteMe forgets who this browser is (switch to another name).
 func (s *Server) deleteMe(w http.ResponseWriter, _ *http.Request) {
 	clearPersonCookie(w)

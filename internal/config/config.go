@@ -6,8 +6,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,7 +33,18 @@ type Server struct {
 	WebDir       string // BUILDBEE_WEB_DIR: serve the UI from disk instead of the embed
 	MaxBodyBytes int64  // BUILDBEE_MAX_BODY_BYTES
 	GitHub       GitHub
+	// LocalWorker is whether the Server runs agents itself
+	// (BUILDBEE_LOCAL_WORKER): auto (default) when this machine can,
+	// on (refuse to start if it cannot) or off.
+	LocalWorker string
 }
+
+// Local worker modes.
+const (
+	LocalAuto = "auto"
+	LocalOn   = "on"
+	LocalOff  = "off"
+)
 
 const (
 	defaultServerAddr   = ":8080"
@@ -45,6 +58,7 @@ func LoadServer(getenv Getenv) (Server, error) {
 		DatabaseURL:  value(getenv, "DATABASE_URL", ""),
 		WebDir:       value(getenv, "BUILDBEE_WEB_DIR", ""),
 		MaxBodyBytes: defaultMaxBodyBytes,
+		LocalWorker:  strings.ToLower(value(getenv, "BUILDBEE_LOCAL_WORKER", LocalAuto)),
 		GitHub: GitHub{
 			Token:         value(getenv, "GITHUB_TOKEN", ""),
 			Repo:          value(getenv, "GITHUB_REPO", ""),
@@ -68,7 +82,49 @@ func LoadServer(getenv Getenv) (Server, error) {
 	if c.GitHub.Repo != "" && !validRepo(c.GitHub.Repo) {
 		errs = append(errs, fmt.Errorf("GITHUB_REPO must be owner/name, got %q", c.GitHub.Repo))
 	}
+	if !slices.Contains([]string{LocalAuto, LocalOn, LocalOff}, c.LocalWorker) {
+		errs = append(errs, fmt.Errorf("BUILDBEE_LOCAL_WORKER must be auto, on or off, got %q", c.LocalWorker))
+	}
 	return c, errors.Join(errs...)
+}
+
+// LocalWorker is the configuration of the Server's own worker: the
+// BUILDBEE_WORKER_* settings, talking to the Server over loopback, named
+// after the host with a "-server" suffix, with its own directory.
+func LocalWorker(getenv Getenv, addr string) (Worker, error) {
+	c, err := LoadWorker(func(k string) string {
+		switch k {
+		case "BUILDBEE_URL":
+			return loopback(addr)
+		case "BUILDBEE_WORKER_NAME":
+			if v := getenv(k); v != "" {
+				return v
+			}
+			host, _ := os.Hostname()
+			return host + "-server"
+		case "BUILDBEE_WORKER_DIR":
+			if v := getenv(k); v != "" {
+				return v
+			}
+			if cache, err := os.UserCacheDir(); err == nil {
+				return filepath.Join(cache, "buildbee-server-worker")
+			}
+		}
+		return getenv(k)
+	})
+	return c, err
+}
+
+// loopback is the URL a process on this machine reaches addr at.
+func loopback(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://" + addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // Worker is the buildbee-worker configuration.

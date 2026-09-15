@@ -1,4 +1,5 @@
 import { useEffect, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { Member } from "../types";
 
 export function cx(...xs: (string | false | null | undefined)[]) {
@@ -133,14 +134,18 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   );
 }
 
-/** Sheet is a dialog: centered on wide screens, full-height on phones. */
+/**
+ * Sheet is a dialog: centered on wide screens, full-height on phones. It
+ * renders into the body, so a transformed ancestor (the sliding sidebar)
+ * cannot shrink it to its own box.
+ */
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
     const on = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, [onClose]);
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
       <div
         role="dialog"
@@ -156,7 +161,8 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

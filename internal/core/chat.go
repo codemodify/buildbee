@@ -119,7 +119,7 @@ func (s *Service) send(ctx context.Context, a Actor, channelID, threadID, body s
 		if ch.ArchivedAt != nil {
 			return fmt.Errorf("%w: channel #%s is archived", store.ErrConflict, ch.Name)
 		}
-		proj, err := w.openProject(ctx, ch.ProjectID)
+		proj, err := w.openSpace(ctx, ch.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -169,13 +169,27 @@ func (w *work) post(ctx context.Context, proj *models.Project, ch *models.Channe
 	if threadID != "" {
 		link = href(ch.ProjectID, "threads", threadID)
 	}
-	for _, p := range models.MentionedPeople(body, members) {
+	mentioned := models.MentionedPeople(body, members)
+	for _, p := range mentioned {
 		if p.ID == author.ID {
 			continue
 		}
 		if err := w.notifyMember(ctx, &p, notice{projectID: ch.ProjectID, kind: "mention",
 			title: author.DisplayName + " mentioned you in " + where, body: truncate(body, 500), href: link}); err != nil {
 			return nil, err
+		}
+	}
+	if ch.Kind == models.ChannelDM && author.Kind == models.KindHuman { // the others hear of it, and see the DM
+		for i := range members {
+			p := &members[i]
+			if p.ID == author.ID || p.Kind != models.KindHuman || !ch.Allows(p.ID) ||
+				slices.ContainsFunc(mentioned, func(m models.Member) bool { return m.ID == p.ID }) {
+				continue
+			}
+			if err := w.notifyMember(ctx, p, notice{projectID: ch.ProjectID, kind: "dm",
+				title: author.DisplayName + " messaged you", body: truncate(body, 500), href: link}); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if author.Kind == models.KindHuman {
@@ -392,6 +406,87 @@ func (s *Service) DMs(ctx context.Context, a Actor, projectID string) ([]models.
 		return []models.Channel{}, nil
 	}
 	return s.st.ListDMs(ctx, projectID, m.ID)
+}
+
+// NewDirect is whom to message: people, anywhere on the Server, or one
+// Bot, in its Project.
+type NewDirect struct {
+	PersonIDs []string `json:"person_ids"`
+	MemberID  string   `json:"member_id"`
+}
+
+// OpenDirect returns the DM with the given people or Bot, creating it if
+// needed. DMs between people live in the direct space, so there is one
+// conversation however many Projects they share; a DM with a Bot lives in
+// the Bot's Project, where it works.
+func (s *Service) OpenDirect(ctx context.Context, a Actor, in NewDirect) (*models.Channel, error) {
+	if !a.IsPerson() {
+		return nil, ErrNoActor
+	}
+	if in.MemberID != "" {
+		if len(in.PersonIDs) > 0 {
+			return nil, invalid("message either people or a bot")
+		}
+		m, err := s.st.GetMember(ctx, strings.TrimSpace(in.MemberID))
+		if err != nil {
+			return nil, err
+		}
+		if m.Kind != models.KindBot {
+			return nil, invalid("member_id must be a bot; message people by person_ids")
+		}
+		return s.OpenDM(ctx, a, m.ProjectID, []string{m.ID})
+	}
+	if len(in.PersonIDs) == 0 || len(in.PersonIDs) > 20 {
+		return nil, invalid("a direct message is with 1 to 20 people")
+	}
+	var out *models.Channel
+	err := s.tx(ctx, func(w *work) error {
+		space, err := w.st.DirectSpace(ctx, uuid.NewString(), w.now)
+		if err != nil {
+			return err
+		}
+		join := func(personID string) (*models.Member, error) {
+			p, err := w.st.GetPerson(ctx, strings.TrimSpace(personID))
+			if err != nil {
+				return nil, invalid("no person %s", personID)
+			}
+			m, _, err := w.st.JoinPerson(ctx, models.Member{ID: uuid.NewString(), ProjectID: space.ID, PersonID: p.ID,
+				DisplayName: p.Name, Role: models.RoleMember, CreatedAt: w.now})
+			return m, err
+		}
+		me, err := join(a.PersonID)
+		if err != nil {
+			return err
+		}
+		ids := []string{me.ID}
+		var names []string
+		for _, pid := range in.PersonIDs {
+			m, err := join(pid)
+			if err != nil {
+				return err
+			}
+			if m.ID != me.ID && !slices.Contains(ids, m.ID) {
+				ids = append(ids, m.ID)
+				names = append(names, m.DisplayName)
+			}
+		}
+		if len(ids) < 2 {
+			return invalid("a direct message needs someone besides you")
+		}
+		slices.Sort(names)
+		out, err = w.st.OpenDM(ctx, models.Channel{ID: uuid.NewString(), ProjectID: space.ID,
+			Name: truncate(strings.Join(names, ", "), 100), CreatedAt: w.now}, ids)
+		return err
+	})
+	return out, err
+}
+
+// DirectMessages lists every DM the acting Person is in, across the Server.
+func (s *Service) DirectMessages(ctx context.Context, a Actor) ([]models.DM, error) {
+	if !a.IsPerson() {
+		return []models.DM{}, nil
+	}
+	return s.st.PersonDMs(ctx, a.PersonID)
 }
 
 // --- unread ---

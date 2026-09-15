@@ -200,3 +200,28 @@ func TestProbeFindsAgentsInTheImage(t *testing.T) {
 		t.Fatalf("missing image: %v", err)
 	}
 }
+
+func TestLoggedInNeedsTheAgentsLogin(t *testing.T) {
+	home := t.TempDir()
+	write := func(p string) {
+		t.Helper()
+		full := filepath.Join(home, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".claude/.credentials.json")
+	write(".codex/config.toml") // settings without a login
+	write(".config/goose/config.yaml")
+	box := Container{Image: "img", Home: home}
+	got, err := box.LoggedIn([]string{"claude", "codex", "grok", "goose", "fake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "claude,goose,fake" {
+		t.Fatalf("logged in: %v", got)
+	}
+}

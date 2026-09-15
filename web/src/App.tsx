@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api } from "./api";
 import { MeContext } from "./me";
 import { go, useRoute, type Route } from "./route";
-import { useLoad, useMemberIndex, usePresence, useProject } from "./store";
+import { useLoad, usePresence } from "./store";
 import type { Message, Person, Presence, Project } from "./types";
 import { ChannelHeader, ChannelView, MenuButton } from "./ui/Channel";
 import { InboxBell } from "./ui/Inbox";
-import { ProjectCtx, type Ctx } from "./ui/context";
+import { ProjectCtx } from "./ui/context";
+import { Decisions } from "./ui/Decisions";
+import { PrefsButton } from "./ui/Preferences";
+import { useProjectCtx } from "./ui/scope";
 import { Button, Empty, ErrorNote, cx, inputClass } from "./ui/kit";
-import { Decisions, Settings } from "./ui/Settings";
+import { Settings } from "./ui/Settings";
 import { Status, invitedName } from "./ui/Status";
-import { Sidebar, dmName } from "./ui/Sidebar";
-import { Board, TaskPage } from "./ui/Tasks";
+import { AgentField, Sidebar, dmName } from "./ui/Sidebar";
+import { TaskPage } from "./ui/Tasks";
 import { ThreadPanel } from "./ui/Thread";
 
 export default function App() {
@@ -33,6 +36,7 @@ export default function App() {
 function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Person) => void }) {
   const [name, setName] = useState(invitedName);
   const [project, setProject] = useState("");
+  const [agent, setAgent] = useState("");
   const [error, setError] = useState("");
   const ready = name.trim() && (!needProject || project.trim());
   async function submit(e: FormEvent) {
@@ -41,7 +45,7 @@ function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Pers
       const { person } = await api.setMe(name.trim());
       if (window.location.hash.startsWith("#/hi/")) go({ view: "home" });
       if (needProject) {
-        const p = await api.createProject(project.trim());
+        const p = await api.createProject(project.trim(), agent);
         go({ view: "channel", projectId: p.id });
       }
       onDone(person);
@@ -57,7 +61,12 @@ function Start({ needProject, onDone }: { needProject: boolean; onDone: (p: Pers
           <h1 className="text-[18px] font-semibold">BuildBee</h1>
         </div>
         <input className={inputClass} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" aria-label="Your name" />
-        {needProject && <input className={inputClass} value={project} onChange={(e) => setProject(e.target.value)} placeholder="Project name" aria-label="Project name" />}
+        {needProject && (
+          <>
+            <input className={inputClass} value={project} onChange={(e) => setProject(e.target.value)} placeholder="Project name" aria-label="Project name" />
+            <AgentField value={agent} onChange={setAgent} />
+          </>
+        )}
         <ErrorNote>{error}</ErrorNote>
         <Button tone="primary" type="submit" disabled={!ready} className="w-full">
           Start
@@ -91,9 +100,18 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
     const last = localStorage.getItem("buildbee.project");
     go({ view: "channel", projectId: (projects.find((p) => p.id === last) ?? projects[0]).id });
   }, [route.view, projects]);
+  // A Project someone else just made is not listed yet; look once. DMs'
+  // own space is never listed.
+  const looked = useRef(new Set<string>());
   useEffect(() => {
-    if (projectId) localStorage.setItem("buildbee.project", projectId);
-    if (projectId && !projects.some((p) => p.id === projectId)) reloadProjects();
+    if (!projectId || projects.some((p) => p.id === projectId)) {
+      if (projectId) localStorage.setItem("buildbee.project", projectId);
+      return;
+    }
+    if (!looked.current.has(projectId)) {
+      looked.current.add(projectId);
+      reloadProjects();
+    }
   }, [projectId, projects, reloadProjects]);
   const menu = () => (window.matchMedia("(min-width: 1024px)").matches ? setHidden((h) => !h) : setDrawer(true));
   return (
@@ -115,6 +133,10 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
           <div className="min-w-0 flex-1">
             <Status me={me} projects={projects} presence={presence} header={<TopBar title="# status" onMenu={menu} />} />
           </div>
+        ) : route.view === "decisions" ? (
+          <div className="min-w-0 flex-1">
+            <Decisions me={me} projects={projects} presence={presence} header={<TopBar title="# decisions" onMenu={menu} />} />
+          </div>
         ) : (
           <div className="flex min-w-0 flex-1 flex-col">
             <TopBar title="" onMenu={menu} />
@@ -128,15 +150,11 @@ function Shell({ me, projects, reloadProjects }: { me: Person; projects: Project
 
 /** ProjectView is one Project's current view, with a thread beside it. */
 function ProjectView({ me, route, projectId, presence, onMenu }: { me: Person; route: Route; projectId: string; presence?: Presence; onMenu: () => void }) {
-  const { data, error, reload } = useProject(projectId);
-  const members = useMemberIndex(data?.members);
-  const tasks = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data?.tasks]);
-  const online = useMemo(() => new Set((presence?.people ?? []).map((p) => p.id)), [presence]);
+  const { ctx, error } = useProjectCtx(projectId, me, presence);
   const threadId = "threadId" in route ? route.threadId : undefined;
   const [threadWidth, setThreadWidth] = useThreadWidth();
-  if (!data) return <div className="flex-1 p-4">{error && <ErrorNote>{error}</ErrorNote>}</div>;
-  const myMember = data.members.find((m) => m.person_id === me.id && !m.left_at);
-  const ctx: Ctx = { me, data, members, tasks, online, myMember, reload };
+  if (!ctx) return <div className="flex-1 p-4">{error && <ErrorNote>{error}</ErrorNote>}</div>;
+  const { data, members, myMember } = ctx;
   const channelId = route.view === "channel" ? route.channelId ?? data.channels[0]?.id : undefined;
   const all = [...data.channels, ...data.dms];
   const found = all.find((c) => c.id === channelId);
@@ -151,14 +169,8 @@ function ProjectView({ me, route, projectId, presence, onMenu }: { me: Person; r
 
   let main: ReactNode;
   switch (route.view) {
-    case "tasks":
-      main = <Board header={titled("Tasks")} />;
-      break;
     case "task":
       main = <TaskPage taskId={route.taskId} header={titled("Task")} onOpenThread={openThread} />;
-      break;
-    case "decisions":
-      main = <Decisions header={titled("Decisions")} />;
       break;
     case "settings":
       main = <Settings header={titled("Settings")} />;
@@ -189,8 +201,9 @@ function TopBar({ title, sub, onMenu }: { title: string; sub?: string; onMenu: (
       <MenuButton onClick={onMenu} />
       <h1 className="text-[15px] font-semibold">{title}</h1>
       {sub && <span className="truncate text-[13px] text-bb-subtle">{sub}</span>}
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center">
         <InboxBell />
+        <PrefsButton />
       </div>
     </header>
   );

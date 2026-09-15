@@ -37,10 +37,10 @@ func newAPI(base, name string) *api {
 
 // claim asks for a queued Run, waiting up to wait. It returns nil, nil when
 // there is none.
-func (a *api) claim(ctx context.Context, agents []string, wait time.Duration) (*models.Claim, error) {
+func (a *api) claim(ctx context.Context, agents []string, slots int, wait time.Duration) (*models.Claim, error) {
 	var c models.Claim
 	ok, err := a.do(ctx, http.MethodPost, "/v1/worker/claim",
-		map[string]any{"agents": agents, "wait_seconds": wait.Seconds()}, &c)
+		map[string]any{"agents": agents, "slots": slots, "wait_seconds": wait.Seconds()}, &c)
 	if err != nil || !ok {
 		return nil, err
 	}

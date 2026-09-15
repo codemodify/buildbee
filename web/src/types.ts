@@ -35,6 +35,7 @@ export type Project = {
   instructions?: string;
   repo_url?: string;
   default_branch?: string;
+  kind?: "project" | "direct" | string; // direct: the space for DMs between people
   archived_at?: string;
   members?: Member[];
   channels?: Channel[];
@@ -216,12 +217,34 @@ export type Unread = {
 export type WorkerSeen = {
   name: string;
   agents: string[];
+  slots?: number;
+  running: number;
+  local?: boolean;
   last_seen: string;
+};
+
+/** AgentLoad is one agent across the workers; "any" is Runs that take whichever. */
+export type AgentLoad = {
+  agent: string;
+  workers: number;
+  running: number;
+  queued: number;
+};
+
+export type LocalWorker = {
+  state: "off" | "starting" | "running" | "unavailable" | string;
+  reason?: string;
+  name?: string;
+  isolation?: "container" | "host" | string;
 };
 
 export type Presence = {
   people: Person[];
   workers: WorkerSeen[];
+  agents: AgentLoad[];
+  slots: number;
+  running: number;
+  local: LocalWorker;
 };
 
 export type UsageRow = {
@@ -253,6 +276,15 @@ export type Roster = {
   people: (Person & { projects: Membership[] })[];
   bots: (Member & { project_name: string })[];
   events: { name: string; action: string; project_id: string; project_name: string; at: string }[];
+};
+
+/** DM is a direct message as its reader sees it. */
+export type DM = Channel & {
+  project_name?: string; // empty for DMs between people
+  with: { member_id: string; person_id?: string; name: string; kind: string; role: string }[];
+  unread: number;
+  last_seq: number;
+  last_at: string;
 };
 
 /** A message as posted, with what its mentions set in motion. */
