@@ -38,7 +38,7 @@ export function Status({ me, projects, presence, header }: { me: Person; project
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl space-y-6 px-4 py-5">
           <ErrorNote>{error}</ErrorNote>
-          <Agents presence={presence} bots={r?.bots ?? []} />
+          <Agents presence={presence} bots={r?.bots ?? []} onChanged={reload} />
 
           <Runs />
 
@@ -205,19 +205,28 @@ function ArchivedProjects() {
 }
 
 /** Agents is which agents can work now, how busy they are, and what waits in vain. */
-function Agents({ presence, bots }: { presence?: Presence; bots: Roster["bots"] }) {
+function Agents({ presence, bots, onChanged }: { presence?: Presence; bots: Roster["bots"]; onChanged: () => void }) {
   if (!presence) return null;
   const { workers, local } = presence;
   const offered = new Set(workers.flatMap((w) => w.agents));
   const realOnline = [...offered].some((a) => a !== "fake");
-  const warnings: string[] = [];
+  const warnings: { text: string; fix?: { label: string; run: () => Promise<unknown> } }[] = [];
   for (const a of presence.agents) {
-    if (a.agent === "any" && a.queued > 0 && !realOnline) warnings.push(`${a.queued} waiting for any agent. None is online.`);
-    else if (a.agent !== "any" && a.workers === 0 && a.queued > 0) warnings.push(`${a.queued} waiting for ${a.agent}. No machine offers it.`);
+    if (a.agent === "any" && a.queued > 0 && !realOnline) {
+      warnings.push({ text: `${a.queued} Run${a.queued > 1 ? "s are" : " is"} waiting: no agent is running anywhere yet.` });
+    } else if (a.agent !== "any" && a.workers === 0 && a.queued > 0) {
+      warnings.push({ text: `${a.queued} Run${a.queued > 1 ? "s are" : " is"} waiting for ${a.agent}, which nothing here runs.` });
+    }
   }
-  const idleBots = new Map<string, string[]>();
-  for (const b of bots) if (b.agent && !offered.has(b.agent)) idleBots.set(b.agent, [...(idleBots.get(b.agent) ?? []), `${b.display_name} (${b.project_name})`]);
-  if (workers.length > 0) for (const [agent, names] of idleBots) warnings.push(`${names.join(", ")} ${names.length > 1 ? "use" : "uses"} ${agent}. No machine offers it.`);
+  // A Bot asking for an agent nobody runs would wait for ever; it can take
+  // whichever agent is free instead.
+  for (const b of bots) {
+    if (!b.agent || offered.has(b.agent) || workers.length === 0) continue;
+    warnings.push({
+      text: `${b.display_name} in ${b.project_name} is set to ${b.agent}, which nothing here runs. Its work would wait.`,
+      fix: { label: "Use any agent", run: () => api.updateMember(b.id, { agent: "" }) },
+    });
+  }
   const rows = presence.agents.filter((a) => a.agent !== "any" || a.running > 0 || a.queued > 0);
   const note =
     local.state === "running"
@@ -236,23 +245,39 @@ function Agents({ presence, bots }: { presence?: Presence; bots: Roster["bots"] 
   return (
     <Group title="Agents" count={rows.filter((a) => a.workers > 0).length} action={presence.slots > 0 && <span className="text-[12px] text-bb-subtle tabular-nums">{presence.running} of {presence.slots} busy</span>}>
       {warnings.map((w) => (
-        <p key={w} className="bg-bb-danger-soft px-3 py-2 text-[13px] text-bb-danger">
-          {w}
-        </p>
+        <div key={w.text} className="flex items-center gap-3 bg-bb-danger-soft px-3 py-2 text-[13px] text-bb-danger">
+          <span className="min-w-0">{w.text}</span>
+          {w.fix && (
+            <Button
+              className="ml-auto shrink-0"
+              size="sm"
+              onClick={async () => {
+                await w.fix?.run();
+                onChanged();
+              }}
+            >
+              {w.fix.label}
+            </Button>
+          )}
+        </div>
       ))}
       {rows.length === 0 && <p className="px-3 py-2 text-[13px] text-bb-subtle">None online. Tasks wait until one is.</p>}
       {rows.map((a) => (
         <Row key={a.agent}>
           <span className={cx("h-2 w-2 shrink-0 rounded-full", a.workers > 0 || a.agent === "any" ? "bg-bb-success" : "bg-bb-danger")} />
           <span className="w-32 shrink-0 truncate font-medium">{a.agent === "any" ? "any agent" : a.agent}</span>
-          <span className="text-[12px] text-bb-subtle">{a.agent === "any" ? "" : a.workers === 0 ? "offline" : `${a.workers} machine${a.workers > 1 ? "s" : ""}`}</span>
+          <span className="text-[12px] text-bb-subtle">
+            {a.agent === "any" ? "whichever is free" : a.workers === 0 ? "nothing runs it" : `on ${a.workers} computer${a.workers > 1 ? "s" : ""}`}
+          </span>
           <span className="ml-auto text-[12px] text-bb-subtle tabular-nums">{load(a)}</span>
         </Row>
       ))}
       {note && <p className="px-3 py-2 text-[12.5px] text-bb-subtle">{note}</p>}
       {workers.length > 0 && (
         <details className="px-3 py-2 text-[13px]">
-          <summary className="cursor-pointer text-[12.5px] text-bb-subtle hover:text-bb-fg">Machines {workers.length}</summary>
+          <summary className="cursor-pointer text-[12.5px] text-bb-subtle hover:text-bb-fg">
+            Computers running agents ({workers.length})
+          </summary>
           <div className="mt-1 divide-y divide-bb-border">
             {workers.map((w) => (
               <div key={w.name} className="flex items-center gap-3 py-1.5">

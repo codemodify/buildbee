@@ -25,6 +25,8 @@ export function AddBot({ projects, onClose, onDone }: { projects: Project[]; onC
   const [agent, setAgent] = useState("");
   const [instructions, setInstructions] = useState("");
   const [err, setErr] = useState("");
+  const { data: presence } = useLoad(() => api.presence(), []);
+  const running = new Set((presence?.workers ?? []).flatMap((w) => w.agents));
   const pick = (t: BotTemplate | null) => {
     setKind(t?.role ?? "other");
     setName(t?.name ?? "");
@@ -74,11 +76,11 @@ export function AddBot({ projects, onClose, onDone }: { projects: Project[]; onC
                 <input id="bot-role" className={inputClass} value={role} onChange={(e) => setRole(e.target.value)} placeholder="writer" />
               </Field>
             </div>
-            <Field label="Agent">
+            <Field label="Agent" hint="Which program does the work. Any agent takes whichever is free; naming one makes this Bot wait for a computer that runs it.">
               <select id="bot-agent" className={cx(inputBase, "w-full")} value={agent} onChange={(e) => setAgent(e.target.value)}>
                 {agents.map((a) => (
                   <option key={a} value={a}>
-                    {a || "Any agent"}
+                    {a ? `${a}${running.size === 0 || running.has(a) ? "" : " — nothing runs it here"}` : "Any agent"}
                   </option>
                 ))}
               </select>

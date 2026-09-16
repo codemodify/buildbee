@@ -8,7 +8,7 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | --- | --- |
 | **Project** | The workspace where humans and Bots cooperate on engineering work. |
 | **Channel** | A conversation and coordination surface inside a Project. |
-| **Bot** | An automated collaborator that holds an Identity and can take on Tasks. |
+| **Bot** | An automated collaborator that holds an Identity and can take on Tasks: a name, a Role and standing instructions in one Project. A Bot is not a computer and is never tied to one; it may name the **Agent** it wants, or take whichever is free. |
 | **Decisions** | The Project record of choices the team has committed to. |
 
 ## People and access
@@ -30,7 +30,8 @@ Locked product language for BuildBee. Use these nouns in docs, APIs, and code co
 | **Run** | One execution on a Task, queued on the Server and claimed by one Worker. Its **kind** is `plan`, `build`, `review` (with a verdict) or `merge`. Incremental output is stored as RunEvents on that Run; the transcript is an Artifact. |
 | **Autopilot** | A Project setting (`auto_run`) under which Bots move each Task from plan to merged code by themselves; see [autopilot.md](autopilot.md). |
 | **Steering** | A person's message to the agent working on a Run, delivered as the agent's next turn or at once. |
-| **Worker** | A process on any LAN machine that claims queued Runs for the agents it offers, heartbeats while they execute, and reports RunEvents, Artifacts and the outcome to the Server. |
+| **Agent** | The program that does the thinking in a Run: `claude`, `codex`, `grok`, `opencode`, `goose` (and `fake` for demos). It runs on a machine where its CLI is installed and logged in; BuildBee talks to it over ACP. A Bot with no Agent named takes whichever is free. |
+| **Worker** | A process on any LAN machine (the Server's own machine included) that claims queued Runs for the Agents it offers, heartbeats while they execute, and reports RunEvents, Artifacts and the outcome to the Server. In the UI, workers are the *computers running agents*: you never assign a Bot to one, the queue does that. |
 | **Decision** | A single recorded choice; the Decisions surface collects them. A Decision with an **action** (`merge`) does something when answered. |
 
 ## Platform

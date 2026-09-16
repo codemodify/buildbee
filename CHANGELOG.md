@@ -18,6 +18,10 @@
 - `scripts/backup.sh` and `scripts/restore.sh` cover the database and the files volume; the smoke test exercises both
 - `buildbee-loadtest` drives a Server with many Runs at once: 200 Runs, 50 at a time, all succeeded at 639 runs/minute and 458 events/second on one laptop
 
+### Changed (wording)
+- `# status` says what a warning means and offers the fix: "Builder in acme is set to grok, which nothing here runs. Its work would wait." with **Use any agent**. Agents read "on 2 computers" or "nothing runs it"; the machine list is "Computers running agents". Add bot marks agents nothing here runs, and says what the field is for
+- The glossary defines Bot (a persona in a Project, never tied to a computer), Agent (the program that does the thinking) and Worker (a computer running agents; the queue picks it)
+
 ### Added (chat)
 - Agents are given what people attached to the Task: the worker downloads the files beside the agent and names them in the prompt, and images go to agents that read them (a pasted screenshot is something the agent can see)
 - Pasting formatted text keeps its shape as Markdown (headings, lists, links, code, quotes, tables); tables render in messages; Escape closes the @mention list
