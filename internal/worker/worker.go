@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -34,10 +35,20 @@ type Job struct {
 	// a container mounts it read-only.
 	Objects string
 	Prompt  string
-	Steer   <-chan acp.Steer // people's messages while the agent works
+	// Files are what people attached to the Task, downloaded by the worker;
+	// each Exec puts them where its agent can read them.
+	Files []JobFile
+	Steer <-chan acp.Steer // people's messages while the agent works
 	// Ask, when the Project's agents ask before acting, turns each request
 	// into a Decision and waits for its answer.
 	Ask func(ctx context.Context, p acp.Permission) (string, error)
+}
+
+// JobFile is one attachment, already on the worker's disk.
+type JobFile struct {
+	Name     string
+	MimeType string
+	Path     string // on the worker
 }
 
 // Exec runs a Job, calling emit for each piece of output, and returns the
@@ -147,7 +158,17 @@ func New(cfg Config) (*Worker, error) {
 					return "", err
 				}
 			}
-			return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: argv, WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask}, job.Prompt, emit)
+			dir, err := os.MkdirTemp("", "buildbee-attachments-*")
+			if err != nil {
+				return "", err
+			}
+			defer os.RemoveAll(dir)
+			attached, err := placeFiles(job.Files, dir, dir)
+			if err != nil {
+				return "", err
+			}
+			return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: argv, WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask,
+				Attachments: attached}, job.Prompt, emit)
 		}
 	}
 	if cfg.Log == nil {
@@ -345,11 +366,16 @@ func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit a
 		defer os.RemoveAll(dir)
 		workDir = dir
 	}
+	files, cleanFiles, err := w.fetchFiles(ctx, c, say)
+	if err != nil {
+		return "", rep, err
+	}
+	defer cleanFiles()
 	steer := make(chan acp.Steer, 16)
 	listenCtx, stopListening := context.WithCancel(ctx)
 	defer stopListening()
 	go w.listen(listenCtx, run.ID, c.Seq, steer)
-	job := Job{RunID: run.ID, Agent: agent, Image: c.Project.AgentImage, Dir: workDir, Prompt: run.Prompt, Steer: steer}
+	job := Job{RunID: run.ID, Agent: agent, Image: c.Project.AgentImage, Dir: workDir, Prompt: run.Prompt, Files: files, Steer: steer}
 	if c.Project.AgentPermissions == models.PermissionsAsk {
 		job.Ask = w.asker(run.ID)
 	}
@@ -544,4 +570,83 @@ func (w *Worker) asker(runID string) func(ctx context.Context, p acp.Permission)
 			return "", fmt.Errorf("answered %q, which is none of the options", got.Answer)
 		}
 	}
+}
+
+// maxAttachmentBytes is how much of a Task's attachments one Run is given.
+const maxAttachmentBytes = 64 << 20
+
+// fetchFiles downloads what people attached to the Task into a directory of
+// the worker's. The Run goes on without a file it cannot fetch; the agent
+// is told what it got.
+func (w *Worker) fetchFiles(ctx context.Context, c *models.Claim, say func(string, ...any)) ([]JobFile, func(), error) {
+	if len(c.Files) == 0 {
+		return nil, func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "buildbee-files-*")
+	if err != nil {
+		return nil, func() {}, err
+	}
+	clean := func() { os.RemoveAll(dir) }
+	var out []JobFile
+	var total int64
+	for _, f := range c.Files {
+		if total+f.Size > maxAttachmentBytes {
+			say("attachment %s skipped: the Task's files are over %d MB", f.Name, maxAttachmentBytes>>20)
+			continue
+		}
+		name := uniqueName(filepath.Base(f.Name), out)
+		path := filepath.Join(dir, name)
+		if err := w.api.file(ctx, c.Run.ID, f.ID, path); err != nil {
+			say("attachment %s could not be fetched: %v", f.Name, err)
+			continue
+		}
+		total += f.Size
+		out = append(out, JobFile{Name: name, MimeType: f.ContentType, Path: path})
+	}
+	if len(out) > 0 {
+		say("%d attached file(s) for the agent", len(out))
+	}
+	return out, clean, nil
+}
+
+// uniqueName keeps two attachments called the same apart.
+func uniqueName(name string, taken []JobFile) string {
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		name = "file"
+	}
+	base, ext := strings.TrimSuffix(name, filepath.Ext(name)), filepath.Ext(name)
+	out := name
+	for i := 2; slices.ContainsFunc(taken, func(f JobFile) bool { return f.Name == out }); i++ {
+		out = fmt.Sprintf("%s-%d%s", base, i, ext)
+	}
+	return out
+}
+
+// placeFiles copies a Job's files into dir (the agent's home or a scratch
+// directory) and says where the agent finds them, loading images small
+// enough to send in the prompt.
+func placeFiles(files []JobFile, dir, agentDir string) ([]acp.Attachment, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	const maxInlineImage = 5 << 20
+	var out []acp.Attachment
+	for _, f := range files {
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(dir, f.Name), data, 0o600); err != nil {
+			return nil, err
+		}
+		a := acp.Attachment{Name: f.Name, MimeType: f.MimeType, Path: path.Join(agentDir, f.Name)}
+		if len(data) <= maxInlineImage {
+			a.Data = data
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }

@@ -60,6 +60,7 @@ DELETE /v1/me                            → forget this browser's Person
 | `GET/PATCH /v1/runs/{id}` | Run / `{status, detail}`: `pending → running → succeeded\|failed\|canceled`; people may only cancel; workers also report `{summary, branch, pr_url}` |
 | `POST /v1/runs/{id}/steer` | people: `{text, interrupt}`; a message for the agent, folded into a queued Run's prompt or delivered as the running agent's next turn (`interrupt` cancels the current turn first) |
 | `GET/POST /v1/runs/{id}/events` | `?after=<seq>&limit=` / append `{kind, payload}` (`409` once finished) |
+| `GET /v1/runs/{id}/files/{file}` | worker only, for its running Run: an attachment of the Run's Task |
 | `POST /v1/worker/claim` | workers: `{agents, wait_seconds ≤ 30}` → `200 {run, task, project, bot, handoffs}` or `204` |
 | `POST /v1/runs/{id}/heartbeat` | workers: renew the 60 s lease; returns the Run (status `canceled` means stop) |
 | `GET/POST /v1/tasks/{id}/artifacts`, `GET /v1/artifacts/{id}` | listings carry `size`; fetch one for its `body`. Bodies over 64 KiB live in the blob store: then `body` is the first MiB, with `truncated` and `raw_url` |

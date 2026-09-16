@@ -133,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tasks/{id}/artifacts", s.listArtifacts)
 	mux.HandleFunc("POST /v1/tasks/{id}/artifacts", s.createArtifact)
 	mux.HandleFunc("POST /v1/runs/{id}/permission", s.askPermission)
+	mux.HandleFunc("GET /v1/runs/{id}/files/{file}", s.getRunFile)
 	mux.HandleFunc("GET /v1/decisions/{id}", s.getDecision)
 	mux.HandleFunc("GET /v1/artifacts/{id}", s.getArtifact)
 	mux.HandleFunc("GET /v1/artifacts/{id}/raw", s.rawArtifact)

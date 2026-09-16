@@ -19,6 +19,8 @@
 - `buildbee-loadtest` drives a Server with many Runs at once: 200 Runs, 50 at a time, all succeeded at 639 runs/minute and 458 events/second on one laptop
 
 ### Added (chat)
+- Agents are given what people attached to the Task: the worker downloads the files beside the agent and names them in the prompt, and images go to agents that read them (a pasted screenshot is something the agent can see)
+- Pasting formatted text keeps its shape as Markdown (headings, lists, links, code, quotes, tables); tables render in messages; Escape closes the @mention list
 - Attachments: attach, paste or drop files in any composer (`POST /v1/channels/{id}/files`, `file_ids` on posts); images preview, other files download safely (`GET /v1/files/{id}`)
 - Files and large Artifacts live outside Postgres (migration 0004): `BUILDBEE_BLOB_DIR` by default, or an S3-compatible bucket (`BUILDBEE_S3_*`); `GET /v1/artifacts/{id}/raw` streams a whole log
 - Message search (`GET /v1/search`, migration 0003): words and prefixes across channels, threads and your DMs

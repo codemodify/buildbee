@@ -93,7 +93,7 @@ Each binary validates its configuration at startup and refuses to start on bad i
 
 ## Security model
 
-BuildBee trusts the network it runs on. Anyone who can reach the Server can read and change every Project, and a Person is whoever claims their name: names attribute work, they do not prove identity. Protections that remain:
+BuildBee is for secure LANs only, and trusts the network it runs on. Do not expose it to the internet: there is no authentication and no TLS, by decision ([ADR 0002](docs/adr/0002-lan-agent-harness.md)). Anyone who can reach the Server can read and change every Project, and a Person is whoever claims their name: names attribute work, they do not prove identity. Protections that remain:
 
 - State-changing requests from another site's page are refused, and WebSockets only accept same-origin pages, so a website a LAN user visits cannot drive the Server through their browser.
 - Only the Server port is published by compose. Postgres stays on the compose network, and workers open no port.

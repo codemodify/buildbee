@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -45,6 +46,33 @@ func (a *api) claim(ctx context.Context, agents []string, slots int, wait time.D
 		return nil, err
 	}
 	return &c, nil
+}
+
+// file downloads a Task attachment the worker's Run may read.
+func (a *api) file(ctx context.Context, runID, fileID, dst string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.base+"/v1/runs/"+runID+"/files/"+fileID, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-BuildBee-Worker", a.name)
+	res, err := a.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(res.Body, 512))
+		return fmt.Errorf("%s: %s", res.Status, bytes.TrimSpace(msg))
+	}
+	f, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, res.Body)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 func (a *api) heartbeat(ctx context.Context, runID string) (*models.Run, error) {

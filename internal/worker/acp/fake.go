@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -67,7 +68,7 @@ func (f *fakeAgent) handle(method string, params json.RawMessage) (any, *RPCErro
 		return map[string]any{
 			"protocolVersion":   protocolVersion,
 			"agentInfo":         map[string]string{"name": "buildbee-fake-agent", "version": "1"},
-			"agentCapabilities": map[string]any{},
+			"agentCapabilities": map[string]any{"promptCapabilities": map[string]bool{"image": true}},
 			"authMethods":       []map[string]string{{"id": "cached", "name": "Use the CLI's login"}},
 		}, nil
 	case "authenticate":
@@ -108,13 +109,33 @@ func (f *fakeAgent) handle(method string, params json.RawMessage) (any, *RPCErro
 	case "session/prompt":
 		var p struct {
 			Prompt []struct {
+				Type string `json:"type"`
 				Text string `json:"text"`
+				Name string `json:"name"`
+				URI  string `json:"uri"`
+				Data string `json:"data"`
 			} `json:"prompt"`
 		}
 		_ = json.Unmarshal(params, &p)
-		text := ""
-		if len(p.Prompt) > 0 {
-			text = p.Prompt[0].Text
+		text, saw := "", ""
+		images, links := 0, 0
+		for _, b := range p.Prompt {
+			switch b.Type {
+			case "text":
+				if text == "" {
+					text = b.Text
+				}
+			case "image":
+				if b.Data != "" {
+					images++
+				}
+			case "resource_link":
+				links++
+				saw += " " + b.Name
+			}
+		}
+		if images+links > 0 {
+			text += fmt.Sprintf("\n\n[fake agent received %d image(s) and %d file link(s):%s]", images, links, saw)
 		}
 		return f.work(text), nil
 	default:
@@ -200,8 +221,20 @@ func (f *fakeAgent) work(prompt string) any {
 // fakeClosing is the fake agent's last message; asked for a verdict, it
 // approves, so demos run through review.
 func fakeClosing(prompt string) string {
-	if strings.Contains(prompt, "VERDICT: APPROVE") {
-		return "Done.\nVERDICT: APPROVE\n"
+	out := ""
+	// Repeat what came with the prompt, so tests can see what an agent got.
+	if i := strings.Index(prompt, "[fake agent received"); i >= 0 {
+		out += prompt[i:strings.Index(prompt[i:], "]")+i+1] + "\n"
 	}
-	return "Done.\n"
+	if i := strings.Index(prompt, "Attached by the people who asked"); i >= 0 {
+		for _, line := range strings.Split(prompt[i:], "\n") {
+			if strings.HasPrefix(line, "- ") {
+				out += line + "\n"
+			}
+		}
+	}
+	if strings.Contains(prompt, "VERDICT: APPROVE") {
+		return out + "Done.\nVERDICT: APPROVE\n"
+	}
+	return out + "Done.\n"
 }

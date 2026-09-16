@@ -42,9 +42,9 @@ type Report struct {
 	Wall          time.Duration `json:"wall"`
 	RunsPerMinute float64       `json:"runs_per_minute"`
 	PeakRunning   int           `json:"peak_running"`
-	WaitP50       time.Duration `json:"wait_p50"`  // queued until a worker took it
+	WaitP50       time.Duration `json:"wait_p50"` // queued until a worker took it
 	WaitP95       time.Duration `json:"wait_p95"`
-	RunP50        time.Duration `json:"run_p50"`   // taken until finished
+	RunP50        time.Duration `json:"run_p50"` // taken until finished
 	RunP95        time.Duration `json:"run_p95"`
 	EventsPerSec  float64       `json:"events_per_second"`
 	Errors        []string      `json:"errors,omitempty"`

@@ -11,6 +11,10 @@ import (
 const fileCols = `id, channel_id, COALESCE(message_id::text, ''), COALESCE(uploader_person_id::text, ''), name, content_type, size,
 	sha256, blob_key, created_at`
 
+// fileColsF are fileCols for a query that names files f.
+const fileColsF = `f.id, f.channel_id, COALESCE(f.message_id::text, ''), COALESCE(f.uploader_person_id::text, ''), f.name,
+	f.content_type, f.size, f.sha256, f.blob_key, f.created_at`
+
 func scanFile(row interface{ Scan(...any) error }, f *models.File) error {
 	err := row.Scan(&f.ID, &f.ChannelID, &f.MessageID, &f.UploaderPersonID, &f.Name, &f.ContentType, &f.Size, &f.SHA256, &f.BlobKey, &f.CreatedAt)
 	f.URL = "/v1/files/" + f.ID
@@ -78,6 +82,28 @@ func (s *Store) FilesOf(ctx context.Context, messageIDs []string) (map[string][]
 			return nil, err
 		}
 		out[f.MessageID] = append(out[f.MessageID], f)
+	}
+	return out, rows.Err()
+}
+
+// TaskFiles returns the files people attached to a Task: in the message
+// that opened it and anywhere in its thread, oldest first.
+func (s *Store) TaskFiles(ctx context.Context, taskID, threadID string, limit int) ([]models.File, error) {
+	rows, err := s.q.Query(ctx, `SELECT `+fileColsF+` FROM files f
+		JOIN messages m ON m.id = f.message_id AND m.deleted_at IS NULL
+		WHERE m.task_id = $1 OR ($2 <> '' AND (m.id::text = $2 OR m.thread_id::text = $2))
+		ORDER BY f.created_at, f.id LIMIT $3`, taskID, threadID, limit)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []models.File{}
+	for rows.Next() {
+		var f models.File
+		if err := scanFile(rows, &f); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
 	}
 	return out, rows.Err()
 }

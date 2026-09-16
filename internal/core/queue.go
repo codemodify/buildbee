@@ -127,7 +127,11 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 		if err != nil {
 			return err
 		}
-		c := &models.Claim{Run: *r, Task: *task, Project: *proj, Notes: notes}
+		files, err := w.st.TaskFiles(ctx, task.ID, task.ThreadID, maxTaskFiles)
+		if err != nil {
+			return err
+		}
+		c := &models.Claim{Run: *r, Task: *task, Project: *proj, Notes: notes, Files: files}
 		if r.BotMemberID != "" {
 			if c.Bot, err = w.st.GetMember(ctx, r.BotMemberID); err != nil {
 				return err

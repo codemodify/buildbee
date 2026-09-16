@@ -581,6 +581,20 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, rc)
 }
 
+// getRunFile serves a Task's attachment to the worker running its Run.
+func (s *Server) getRunFile(w http.ResponseWriter, r *http.Request) {
+	f, rc, err := s.core.OpenRunFile(r.Context(), actorFrom(r.Context()), r.PathValue("id"), r.PathValue("file"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer rc.Close()
+	safeDownload(w.Header())
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(f.Size, 10))
+	_, _ = io.Copy(w, rc)
+}
+
 // safeDownload marks a response as a file, never a page: no sniffing, and a
 // sandbox with nothing allowed if a browser renders it anyway.
 func safeDownload(h http.Header) {

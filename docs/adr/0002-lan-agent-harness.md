@@ -8,7 +8,7 @@
 
 BuildBee v0 was a scaffold that aimed at a hosted, multi-user product: GitHub OAuth, Invites, a desktop app talking to remote Servers, Railway deploys, and an in-memory store for tests. An adversarial architecture review found that the design fit none of those goals well, and that CI never exercised the Postgres path the product actually runs.
 
-The owner's goal is different: a Slack/Discord-style workspace where people and coding agents work on many Projects in parallel and autonomously, on a secure LAN, with no authentication for now.
+The owner's goal is different: a Slack/Discord-style workspace where people and coding agents work on many Projects in parallel and autonomously, on a secure LAN, with no authentication. Confirmed 2026-09-16: BuildBee is for secure LANs only. It is not made safe to expose to the internet, so authentication and TLS stay out of the plan; the security effort goes into what agents may do (containers, the bubblewrap sandbox, permission Decisions) and into keeping browsers from being used against the Server (same-origin writes, sandboxed downloads).
 
 ## Decisions
 

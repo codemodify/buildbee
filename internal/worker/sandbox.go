@@ -112,7 +112,17 @@ func (s *Sandbox) installDirs(argv []string) []string {
 func (s *Sandbox) exec(commands map[string][]string) Exec {
 	return func(ctx context.Context, job Job, emit acp.Handler) (string, error) {
 		if job.Agent == "fake" {
-			return acp.Run(ctx, acp.Config{Agent: "fake", WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask}, job.Prompt, emit)
+			dir, err := os.MkdirTemp("", "buildbee-attachments-*")
+			if err != nil {
+				return "", err
+			}
+			defer os.RemoveAll(dir)
+			attached, err := placeFiles(job.Files, dir, dir)
+			if err != nil {
+				return "", err
+			}
+			return acp.Run(ctx, acp.Config{Agent: "fake", WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask, Attachments: attached},
+				job.Prompt, emit)
 		}
 		argv, err := acp.Command(job.Agent, commands)
 		if err != nil {
@@ -131,6 +141,10 @@ func (s *Sandbox) exec(commands map[string][]string) Exec {
 			return "", err
 		}
 		defer logins.writeBack()
+		attached, err := placeFiles(job.Files, filepath.Join(scratch, "attachments"), filepath.Join(scratch, "attachments"))
+		if err != nil {
+			return "", err
+		}
 		if job.Dir == "" {
 			if job.Dir, err = os.MkdirTemp("", "buildbee-run-*"); err != nil {
 				return "", err
@@ -138,6 +152,6 @@ func (s *Sandbox) exec(commands map[string][]string) Exec {
 			defer os.RemoveAll(job.Dir)
 		}
 		cmd := s.command(job, scratch, argv)
-		return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: cmd, WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask}, job.Prompt, emit)
+		return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: cmd, WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask, Attachments: attached}, job.Prompt, emit)
 	}
 }

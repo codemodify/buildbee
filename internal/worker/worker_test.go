@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/blob"
 	"github.com/codemodify/buildbee/internal/core"
 	"github.com/codemodify/buildbee/internal/httpapi"
 	"github.com/codemodify/buildbee/internal/models"
@@ -37,7 +39,7 @@ func newStack(t *testing.T) *stack {
 	hub := ws.NewHub(func(ctx context.Context, topic string, after int64) ([]core.Event, error) {
 		return svc.Replay(ctx, topic, after)
 	}, nil)
-	svc = core.New(store.New(testdb.New(t)), hub, core.Options{})
+	svc = core.New(store.New(testdb.New(t)), hub, core.Options{Blobs: blob.Dir{Root: t.TempDir()}})
 	srv := httptest.NewServer(httpapi.NewServer(svc, hub, httpapi.Options{}).Handler())
 	t.Cleanup(srv.Close)
 	t.Cleanup(hub.Close)
@@ -437,5 +439,59 @@ func TestAgentsAskPeopleWhenTheProjectSaysSo(t *testing.T) {
 	}
 	if _, err := s.svc.AskPermission(s.ctx, core.WorkerActor("other"), r.ID, core.PermissionAsk{Title: "x", Options: []core.PermissionChoice{{ID: "y"}}}); err == nil {
 		t.Fatal("only the run's worker asks")
+	}
+}
+
+func TestAgentsGetWhatPeopleAttached(t *testing.T) {
+	s := newStack(t)
+	png := []byte("\x89PNG\r\n\x1a\n" + strings.Repeat("p", 40))
+	// Ada asks in #tasks with a screenshot and a note.
+	proj, err := s.svc.Project(s.ctx, s.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks := proj.Channels[0].ID
+	shot, err := s.svc.UploadFile(s.ctx, s.ada, tasks, "shot.png", int64(len(png)), bytes.NewReader(png))
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes, err := s.svc.UploadFile(s.ctx, s.ada, tasks, "notes.md", 11, strings.NewReader("# what I want"[:11]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := s.svc.PostMessage(s.ctx, s.ada, tasks, "@Builder make it look like this", shot.ID, notes.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posted.Tasks) != 1 {
+		t.Fatalf("the mention opens a Task: %+v", posted)
+	}
+	task := posted.Tasks[0]
+	r, err := s.svc.CreateRun(s.ctx, s.ada, task.ID, core.NewRun{Agent: "fake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.start(Config{Dir: t.TempDir()})
+	s.wait(r.ID, func(r *models.Run) bool { return r.Status == models.RunSucceeded })
+
+	arts, err := s.svc.Artifacts(s.ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var log string
+	for _, a := range arts {
+		if a.Kind == "log" {
+			full, err := s.svc.Artifact(s.ctx, a.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			log = full.Body
+		}
+	}
+	if !strings.Contains(log, "[fake agent received 1 image(s) and 2 file link(s): shot.png notes.md]") {
+		t.Fatalf("the agent got the files:\n%s", log)
+	}
+	if !strings.Contains(log, "- shot.png (image/png) at ") || !strings.Contains(log, "- notes.md (text/plain") {
+		t.Fatalf("the prompt says what and where:\n%s", log)
 	}
 }

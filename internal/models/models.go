@@ -719,6 +719,10 @@ type Claim struct {
 	Project Project   `json:"project"`
 	Bot     *Member   `json:"bot,omitempty"`
 	Notes   []Handoff `json:"handoffs"`
+	// Files are what people attached to the Task: screenshots, logs,
+	// designs. The worker fetches them and puts them where the agent can
+	// read them.
+	Files []File `json:"files,omitempty"`
 	// Seq is the Run's last event when it was claimed; steering messages
 	// after it are for the worker to pass on.
 	Seq int `json:"seq"`

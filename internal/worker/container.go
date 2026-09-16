@@ -124,7 +124,17 @@ func containerName(runID string) string { return "buildbee-run-" + runID }
 func (c *Container) exec(worker string, commands map[string][]string) Exec {
 	return func(ctx context.Context, job Job, emit acp.Handler) (string, error) {
 		if job.Agent == "fake" {
-			return acp.Run(ctx, acp.Config{Agent: "fake", WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask}, job.Prompt, emit)
+			dir, err := os.MkdirTemp("", "buildbee-attachments-*")
+			if err != nil {
+				return "", err
+			}
+			defer os.RemoveAll(dir)
+			attached, err := placeFiles(job.Files, dir, dir)
+			if err != nil {
+				return "", err
+			}
+			return acp.Run(ctx, acp.Config{Agent: "fake", WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask, Attachments: attached},
+				job.Prompt, emit)
 		}
 		argv := commands[job.Agent]
 		if len(argv) == 0 {
@@ -146,6 +156,10 @@ func (c *Container) exec(worker string, commands map[string][]string) Exec {
 			return "", err
 		}
 		defer logins.writeBack()
+		attached, err := placeFiles(job.Files, filepath.Join(home, "attachments"), containerHome+"/attachments")
+		if err != nil {
+			return "", err
+		}
 		if job.Dir == "" { // no repo: an empty directory to work in
 			if job.Dir, err = os.MkdirTemp("", "buildbee-run-*"); err != nil {
 				return "", err
@@ -162,7 +176,7 @@ func (c *Container) exec(worker string, commands map[string][]string) Exec {
 		// Stopping the docker client does not stop the container; remove it.
 		defer c.remove(containerName(job.RunID))
 		cmd := append([]string{c.Docker}, c.args(worker, job, home, argv, image)...)
-		return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: cmd, WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask}, job.Prompt, emit)
+		return acp.Run(ctx, acp.Config{Agent: job.Agent, Command: cmd, WorkDir: job.Dir, Steer: job.Steer, Ask: job.Ask, Attachments: attached}, job.Prompt, emit)
 	}
 }
 

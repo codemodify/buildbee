@@ -352,3 +352,37 @@ func TestPeopleAnswerPermissionsWhenAsked(t *testing.T) {
 		}
 	}
 }
+
+func TestAttachmentsReachTheAgent(t *testing.T) {
+	var rec recorder
+	png := []byte("\x89PNG\r\n\x1a\nfake bytes")
+	files := []Attachment{
+		{Name: "shot.png", MimeType: "image/png", Path: "/home/agent/attachments/shot.png", Data: png},
+		{Name: "notes.md", MimeType: "text/markdown", Path: "/home/agent/attachments/notes.md"},
+	}
+	out, err := Run(context.Background(), Config{Agent: "fake", Attachments: files}, "Task: use the screenshot", rec.emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "received 1 image(s) and 2 file link(s): shot.png notes.md") {
+		t.Fatalf("the agent saw: %q", out)
+	}
+	if !strings.Contains(out, "shot.png (image/png) at /home/agent/attachments/shot.png") {
+		t.Fatalf("the prompt names the files and where they are: %q", out)
+	}
+}
+
+func TestPromptBlocks(t *testing.T) {
+	files := []Attachment{{Name: "a.png", MimeType: "image/png", Path: "/p/a.png", Data: []byte("x")}}
+	blocks := promptBlocks("do it", files, false)
+	if len(blocks) != 2 || blocks[1]["type"] != "resource_link" {
+		t.Fatalf("an agent without image support gets links only: %+v", blocks)
+	}
+	blocks = promptBlocks("do it", files, true)
+	if len(blocks) != 3 || blocks[1]["type"] != "image" || blocks[1]["data"] != "eA==" {
+		t.Fatalf("with image support the bytes come too: %+v", blocks)
+	}
+	if got := blocks[0]["text"].(string); !strings.HasPrefix(got, "do it\n\nAttached by the people who asked") {
+		t.Fatalf("text: %q", got)
+	}
+}

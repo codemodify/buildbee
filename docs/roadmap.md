@@ -126,4 +126,4 @@ One app for every platform, built on the Phase 2 web UI, so every client gets th
 - Native notifications for mentions, Decisions to answer and failed Runs; a tray/menu-bar badge on desktop
 - The web UI is also an installable PWA, for phones and machines without the app
 - CI builds and signs the packages; releases carry checksums
-- Needs, before shipping outside a trusted LAN: authentication (ADR 0002 keeps it out for now), TLS to the Server
+- The apps talk to a Server on the LAN, like the browser does. BuildBee is for secure LANs only (ADR 0002): no authentication, no TLS, nothing to expose to the internet

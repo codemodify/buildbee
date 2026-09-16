@@ -12,6 +12,7 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,11 +70,55 @@ type Config struct {
 	CancelGrace time.Duration
 	// Steer delivers people's messages while the agent works (optional).
 	Steer <-chan Steer
+	// Attachments are files people added to the Task, already placed where
+	// the agent can read them (Path is its path, not the worker's).
+	Attachments []Attachment
 	// Ask, when set, decides each permission the agent asks for (a person
 	// answers it) and keeps the session out of modes that skip asking.
 	// Without it every request is approved: the agent works unattended in
 	// its Run's own directory.
 	Ask func(ctx context.Context, p Permission) (optionID string, err error)
+}
+
+// promptBlocks is the prompt the agent receives: the text, then each
+// attachment as a link to its path, and images inline for agents that read
+// them. The text names the files too, so an agent that ignores links still
+// knows they are there.
+func promptBlocks(text string, files []Attachment, images bool) []map[string]any {
+	if len(files) > 0 {
+		var b strings.Builder
+		b.WriteString(text)
+		b.WriteString("\n\nAttached by the people who asked (read them before you start):\n")
+		for _, f := range files {
+			fmt.Fprintf(&b, "- %s (%s) at %s\n", f.Name, f.MimeType, f.Path)
+		}
+		text = b.String()
+	}
+	out := []map[string]any{{"type": "text", "text": text}}
+	for _, f := range files {
+		if images && f.image() && len(f.Data) > 0 {
+			out = append(out, map[string]any{"type": "image", "mimeType": f.MimeType, "data": base64.StdEncoding.EncodeToString(f.Data)})
+		}
+		out = append(out, map[string]any{"type": "resource_link", "uri": "file://" + f.Path, "name": f.Name, "mimeType": f.MimeType})
+	}
+	return out
+}
+
+// Attachment is a file the agent is given with the prompt.
+type Attachment struct {
+	Name     string
+	MimeType string
+	Path     string // where the agent finds it
+	Data     []byte // the bytes, for agents that take images in the prompt
+}
+
+// image reports whether an agent could look at this as an image.
+func (a Attachment) image() bool {
+	switch a.MimeType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	}
+	return false
 }
 
 // Permission is an agent asking before it acts.
@@ -221,8 +266,13 @@ func (s *session) drive(ctx context.Context, r io.Reader, w io.Writer, prompt st
 
 func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 	var init struct {
-		ProtocolVersion int `json:"protocolVersion"`
-		AgentInfo       *struct {
+		ProtocolVersion   int `json:"protocolVersion"`
+		AgentCapabilities struct {
+			PromptCapabilities struct {
+				Image bool `json:"image"`
+			} `json:"promptCapabilities"`
+		} `json:"agentCapabilities"`
+		AgentInfo *struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"agentInfo"`
@@ -302,13 +352,13 @@ func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 		}
 	}
 
-	send := func(text string) (<-chan response, error) {
+	send := func(text string, with []Attachment) (<-chan response, error) {
 		return c.start("session/prompt", map[string]any{
 			"sessionId": s.id,
-			"prompt":    []map[string]string{{"type": "text", "text": text}},
+			"prompt":    promptBlocks(text, with, init.AgentCapabilities.PromptCapabilities.Image),
 		})
 	}
-	ch, err := send(prompt)
+	ch, err := send(prompt, s.cfg.Attachments)
 	if err != nil {
 		return err
 	}
@@ -351,7 +401,7 @@ func (s *session) converse(ctx context.Context, c *conn, prompt string) error {
 			if len(pending) == 0 {
 				return nil
 			}
-			ch, err = send(steerPrompt(pending))
+			ch, err = send(steerPrompt(pending), nil)
 			if err != nil {
 				return err
 			}

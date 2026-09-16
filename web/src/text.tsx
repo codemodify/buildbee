@@ -5,6 +5,15 @@ import { Fragment, type ReactNode } from "react";
  * fenced code, headings, lists, quotes, bold, italics, inline code, links
  * and @mentions. It builds React elements; it never injects HTML.
  */
+/** cells splits one row of a pipe table. */
+function cells(line: string): string[] {
+  return line
+    .replace(/^\s*\|/, "")
+    .replace(/\|\s*$/, "")
+    .split("|")
+    .map((c) => c.trim());
+}
+
 export function Markdown({ text, mentions }: { text: string; mentions?: Set<string> }) {
   const blocks: ReactNode[] = [];
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -44,6 +53,40 @@ export function Markdown({ text, mentions }: { text: string; mentions?: Set<stri
             <li key={j}>{inline(it, mentions)}</li>
           ))}
         </List>,
+      );
+      continue;
+    }
+    // A pipe table: a header row, a --- row, then rows.
+    if (line.includes("|") && i + 1 < lines.length && /^\s*\|?[\s:-]*-[\s:|-]*\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes("-")) {
+      const rows: string[][] = [];
+      const header = cells(line);
+      i += 2;
+      while (i < lines.length && lines[i].includes("|")) rows.push(cells(lines[i++]));
+      blocks.push(
+        <div key={blocks.length} className="overflow-x-auto">
+          <table className="w-full text-[13.5px]">
+            <thead className="text-left text-bb-muted">
+              <tr>
+                {header.map((h, j) => (
+                  <th key={j} className="border-b border-bb-border py-1 pr-4 font-semibold">
+                    {inline(h, mentions)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, j) => (
+                <tr key={j}>
+                  {header.map((_, k) => (
+                    <td key={k} className="border-b border-bb-border py-1 pr-4 align-top">
+                      {inline(r[k] ?? "", mentions)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
       );
       continue;
     }

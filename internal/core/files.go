@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -131,6 +132,44 @@ func (s *Service) OpenFile(ctx context.Context, a Actor, id string) (*models.Fil
 		return nil, nil, store.ErrNotFound
 	}
 	return f, rc, err
+}
+
+// maxTaskFiles is how many attachments one Run is given.
+const maxTaskFiles = 20
+
+// OpenRunFile returns a file attached to a running Run's Task, for the
+// worker running it.
+func (s *Service) OpenRunFile(ctx context.Context, a Actor, runID, fileID string) (*models.File, io.ReadCloser, error) {
+	if s.blobs == nil {
+		return nil, nil, ErrNoStorage
+	}
+	if a.Worker == "" {
+		return nil, nil, invalid("only the worker running the Run reads its files")
+	}
+	r, err := s.st.GetRun(ctx, runID, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	if r.Worker != a.Worker {
+		return nil, nil, fmt.Errorf("%w: run is not on worker %s", store.ErrConflict, a.Worker)
+	}
+	t, err := s.st.GetTask(ctx, r.TaskID, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	files, err := s.st.TaskFiles(ctx, t.ID, t.ThreadID, maxTaskFiles)
+	if err != nil {
+		return nil, nil, err
+	}
+	i := slices.IndexFunc(files, func(f models.File) bool { return f.ID == fileID })
+	if i < 0 {
+		return nil, nil, store.ErrNotFound
+	}
+	rc, _, err := s.blobs.Get(ctx, files[i].BlobKey)
+	if errors.Is(err, blob.ErrNotFound) {
+		return nil, nil, store.ErrNotFound
+	}
+	return &files[i], rc, err
 }
 
 // writableChannel is a Channel the acting Person can post to now.

@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api } from "../api";
+import { htmlToMarkdown } from "../paste";
 import type { FileRef, Member } from "../types";
 import { Avatar, cx } from "./kit";
 
@@ -42,6 +43,7 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pick, setPick] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null); // the @word Escape closed
   const ref = useRef<HTMLTextAreaElement>(null);
   // Where the caret goes after a completion, applied before the next
   // keystroke can land.
@@ -60,7 +62,7 @@ export function Composer({
     return m ? m[2].toLowerCase() : null;
   }, [text]);
   const matches = useMemo(() => {
-    if (mention === null) return [];
+    if (mention === null || mention === dismissed) return [];
     return members
       .filter((m) => !m.left_at)
       .filter((m) => m.display_name.toLowerCase().startsWith(mention) || m.role.toLowerCase().startsWith(mention))
@@ -96,6 +98,11 @@ export function Composer({
   }
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (matches.length && e.key === "Escape") {
+      e.preventDefault();
+      setDismissed(mention);
+      return;
+    }
     if (matches.length) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -182,7 +189,24 @@ export function Composer({
             if (channelId && e.clipboardData.files.length) {
               e.preventDefault();
               attach(e.clipboardData.files);
+              return;
             }
+            // Keep what formatting Markdown can carry: headings, lists,
+            // links, code, tables.
+            const html = e.clipboardData.getData("text/html");
+            if (!html) return;
+            const md = htmlToMarkdown(html);
+            const plain = e.clipboardData.getData("text/plain");
+            if (!md || md === plain.trim()) return;
+            e.preventDefault();
+            const el = ref.current;
+            const from = el?.selectionStart ?? text.length;
+            const to = el?.selectionEnd ?? from;
+            const before = text.slice(0, from);
+            // A heading, list or table needs a line of its own to read as one.
+            const gap = /^[#>|-]|^\d+\.|^```/.test(md) && before.trim() && !before.endsWith("\n") ? "\n\n" : "";
+            caret.current = from + gap.length + md.length;
+            setText(before + gap + md + text.slice(to));
           }}
           placeholder={placeholder}
           className="block max-h-60 w-full resize-none bg-transparent px-3 py-2 text-[14px] leading-relaxed placeholder:text-bb-subtle focus:outline-none focus-visible:outline-none"
