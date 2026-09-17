@@ -1,4 +1,4 @@
-package worker
+package agent
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codemodify/buildbee/internal/worker/acp"
+	"github.com/codemodify/buildbee/internal/agent/acp"
 )
 
 // Container runs each Run's agent in a container of its own. It sees the

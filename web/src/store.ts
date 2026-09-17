@@ -324,7 +324,7 @@ export function useRun(runId: string | undefined) {
   return { run, events };
 }
 
-/** usePresence is who is online and which workers are polling. */
+/** usePresence is who is online and which Bots' agents are connected. */
 export function usePresence() {
   const { data, reload } = useLoad<Presence>(() => api.presence(), []);
   const refresh = useThrottled(reload, 500);
@@ -336,7 +336,7 @@ export function usePresence() {
     if (status === "open") refresh();
   }, [status, refresh]);
   useEffect(() => {
-    const t = window.setInterval(reload, 60_000); // workers age out
+    const t = window.setInterval(reload, 60_000); // a silent agent ages out
     return () => window.clearInterval(t);
   }, [reload]);
   return data;

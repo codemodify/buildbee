@@ -99,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/dms/{id}", s.deleteDirect)
 	mux.HandleFunc("GET /v1/projects/{id}/dms", s.listDMs)
 	mux.HandleFunc("GET /v1/bot-templates", s.botTemplates)
+	mux.HandleFunc("GET /v1/bots/{id}", s.getBot)
 	mux.HandleFunc("GET /v1/projects/{id}/unread", s.listUnread)
 	mux.HandleFunc("GET /v1/projects/{id}/activity", s.listActivity)
 
@@ -127,7 +128,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{id}/steer", s.steerRun)
 	mux.HandleFunc("GET /v1/usage", s.usage)
 	mux.HandleFunc("GET /v1/projects/{id}/usage", s.usage)
-	mux.HandleFunc("POST /v1/worker/claim", s.claimRun)
+	mux.HandleFunc("POST /v1/agent/claim", s.claimRun)
+	mux.HandleFunc("POST /v1/agent/goodbye", s.agentGoodbye)
 	mux.HandleFunc("GET /v1/runs/{id}/events", s.listRunEvents)
 	mux.HandleFunc("POST /v1/runs/{id}/events", s.createRunEvent)
 	mux.HandleFunc("GET /v1/tasks/{id}/artifacts", s.listArtifacts)
@@ -174,7 +176,8 @@ func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 		"identity": map[string]string{
 			"cookie": personCookie,
 			"header": asHeader,
-			"worker": workerHeader,
+			"agent":  agentHeader,
+			"bot":    botHeader,
 		},
 		"streams": []string{"/v1/ws", "/v1/runs/{id}/ws", "/v1/channels/{id}/ws"},
 	})

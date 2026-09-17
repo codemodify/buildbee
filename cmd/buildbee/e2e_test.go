@@ -11,25 +11,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/agent"
+	"github.com/codemodify/buildbee/internal/agent/acp"
 	"github.com/codemodify/buildbee/internal/client"
 	"github.com/codemodify/buildbee/internal/core"
 	"github.com/codemodify/buildbee/internal/httpapi"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/codemodify/buildbee/internal/testdb"
-	"github.com/codemodify/buildbee/internal/worker"
-	"github.com/codemodify/buildbee/internal/worker/acp"
 	"github.com/codemodify/buildbee/internal/ws"
 	"github.com/gorilla/websocket"
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// TestRunThroughWorker drives `buildbee run start --follow` against a real
-// Server on Postgres with an in-process worker offering the fake agent. It
+// TestRunThroughAgent drives `buildbee run start --follow` against a real
+// Server on Postgres with an in-process agent running the fake AI. It
 // checks that the Run is claimed, that RunEvents reach a WebSocket
 // subscriber while the Run is still running, that --follow prints the
 // agent's output, and that the Run ends succeeded with its transcript.
-func TestRunThroughWorker(t *testing.T) {
+func TestRunThroughAgent(t *testing.T) {
 	prev, prevFollow := acp.StreamStep, client.FollowInterval
 	acp.StreamStep, client.FollowInterval = 25*time.Millisecond, 20*time.Millisecond
 	t.Cleanup(func() { acp.StreamStep, client.FollowInterval = prev, prevFollow })
@@ -49,13 +49,20 @@ func TestRunThroughWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The Bot whose agent runs below.
+	var bot map[string]any
+	if err := doJSON(c, "POST", "/v1/projects/"+proj["id"].(string)+"/members",
+		map[string]string{"kind": "bot", "display_name": "Runner", "role": "runner", "agent": "fake"}, &bot); err != nil {
+		t.Fatal(err)
+	}
+	botID := bot["id"].(string)
 	var task map[string]any
 	if err := doJSON(c, "POST", "/v1/projects/"+proj["id"].(string)+"/tasks", map[string]string{"title": "Stream the Run", "handoff_role": "none"}, &task); err != nil {
 		t.Fatal(err)
 	}
 	tid := task["id"].(string)
 
-	// Subscribe before the worker exists so no event can be missed.
+	// Subscribe before the agent exists so no event can be missed.
 	var runErr error
 	var wg sync.WaitGroup
 	wg.Go(func() { runErr = run([]string{"run", "start", "--task", tid, "--agent", "fake", "--follow"}, c) })
@@ -66,7 +73,7 @@ func TestRunThroughWorker(t *testing.T) {
 	}
 	defer conn.Close()
 
-	wk, err := worker.New(worker.Config{Server: srv.URL, Name: "test-worker", Agents: []string{"fake"}, Slots: 1})
+	wk, err := agent.New(agent.Config{Server: srv.URL, Name: "Builder@test", BotID: botID, AI: "fake", Slots: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +92,7 @@ func TestRunThroughWorker(t *testing.T) {
 		if err := conn.ReadJSON(&ev); err != nil {
 			t.Fatalf("stream ended before the Run finished (%d live events): %v", live, err)
 		}
-		if ev.Kind == "status" && strings.Contains(fmt.Sprint(ev.Payload["detail"]), "claimed by worker test-worker") {
+		if ev.Kind == "status" && strings.Contains(fmt.Sprint(ev.Payload["detail"]), "claimed by Builder@test") {
 			claimed = true
 		}
 		if ev.Kind == "status" && (ev.Payload["status"] == "succeeded" || ev.Payload["status"] == "failed") {
@@ -119,7 +126,7 @@ func TestRunThroughWorker(t *testing.T) {
 	if err := doJSON(c, "GET", "/v1/tasks/"+tid+"/detail", nil, &detail); err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Runs) != 1 || detail.Runs[0].Status != "succeeded" || detail.Runs[0].Worker != "test-worker" {
+	if len(detail.Runs) != 1 || detail.Runs[0].Status != "succeeded" || detail.Runs[0].Worker != "Builder@test" {
 		t.Fatalf("runs: %+v", detail.Runs)
 	}
 	var names []string

@@ -1,4 +1,4 @@
-package worker
+package agent
 
 import (
 	"bytes"
@@ -16,10 +16,14 @@ import (
 )
 
 // api is the worker's view of the Server. Every request carries
-// X-BuildBee-Worker so the Server knows which worker owns which Run.
+// X-BuildBee-Agent and X-BuildBee-Bot, so the Server knows which Bot's
+// agent is acting and which Runs it owns.
 type api struct {
 	base string
-	name string
+	name string // this process
+	bot  string // the Bot it runs
+	ai   string
+	host string
 	http *http.Client
 }
 
@@ -31,17 +35,18 @@ var errConflict = errors.New("conflict")
 // 409): retrying the same request will not help.
 var errRejected = errors.New("rejected")
 
-func newAPI(base, name string) *api {
+func newAPI(cfg Config) *api {
 	// No client timeout: claims long-poll. Each call bounds itself by ctx.
-	return &api{base: strings.TrimRight(base, "/"), name: name, http: &http.Client{}}
+	return &api{base: strings.TrimRight(cfg.Server, "/"), name: cfg.Name, bot: cfg.BotID, ai: cfg.AI, host: cfg.Host,
+		http: &http.Client{}}
 }
 
 // claim asks for a queued Run, waiting up to wait. It returns nil, nil when
 // there is none.
-func (a *api) claim(ctx context.Context, agents []string, slots int, wait time.Duration) (*models.Claim, error) {
+func (a *api) claim(ctx context.Context, slots int, wait time.Duration) (*models.Claim, error) {
 	var c models.Claim
-	ok, err := a.do(ctx, http.MethodPost, "/v1/worker/claim",
-		map[string]any{"agents": agents, "slots": slots, "wait_seconds": wait.Seconds()}, &c)
+	ok, err := a.do(ctx, http.MethodPost, "/v1/agent/claim",
+		map[string]any{"ai": a.ai, "host": a.host, "slots": slots, "wait_seconds": wait.Seconds()}, &c)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -54,7 +59,8 @@ func (a *api) file(ctx context.Context, runID, fileID, dst string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-BuildBee-Worker", a.name)
+	req.Header.Set("X-BuildBee-Agent", a.name)
+	req.Header.Set("X-BuildBee-Bot", a.bot)
 	res, err := a.http.Do(req)
 	if err != nil {
 		return err
@@ -72,6 +78,27 @@ func (a *api) file(ctx context.Context, runID, fileID, dst string) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	return err
+}
+
+// bot reads the Bot this agent runs, so it can name itself after it and
+// fail early on a wrong id.
+func (a *api) whichBot(ctx context.Context) (*models.Member, error) {
+	var m models.Member
+	ok, err := a.do(ctx, http.MethodGet, "/v1/bots/"+a.bot, nil, &m)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errRejected
+	}
+	return &m, nil
+}
+
+// goodbye tells the Server this agent is stopping, so its Bot shows
+// offline at once.
+func (a *api) goodbye(ctx context.Context) error {
+	_, err := a.do(ctx, http.MethodPost, "/v1/agent/goodbye", nil, nil)
 	return err
 }
 
@@ -133,7 +160,8 @@ func (a *api) do(ctx context.Context, method, path string, body, dest any) (ok b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("X-BuildBee-Worker", a.name)
+	req.Header.Set("X-BuildBee-Agent", a.name)
+	req.Header.Set("X-BuildBee-Bot", a.bot)
 	res, err := a.http.Do(req)
 	if err != nil {
 		return false, err

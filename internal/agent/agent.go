@@ -5,7 +5,7 @@
 // the transcript as an Artifact and reports the outcome. Workers open no
 // port, so any LAN machine with agent logins can join by pointing at the
 // Server.
-package worker
+package agent
 
 import (
 	"context"
@@ -21,8 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/agent/acp"
 	"github.com/codemodify/buildbee/internal/models"
-	"github.com/codemodify/buildbee/internal/worker/acp"
 )
 
 // Job is one agent session for a Run.
@@ -57,10 +57,12 @@ type Exec func(ctx context.Context, job Job, emit acp.Handler) (string, error)
 
 // Config describes one worker process.
 type Config struct {
-	Server string   // Server base URL
-	Name   string   // unique on the LAN; owns the Runs this worker claims
-	Agents []string // agents this worker offers, e.g. claude, codex, fake
-	Slots  int      // Runs executed at once
+	Server string // Server base URL
+	Name   string // how this process names itself, e.g. Docs@nc-laptop
+	BotID  string // the Bot this agent runs; its Runs come here
+	AI     string // the AI it runs: claude, codex, grok, opencode, goose, fake
+	Host   string // the machine it runs on, for people to see
+	Slots  int    // Runs it takes at once
 	// Isolation is where agents run: IsolationContainer (default), a
 	// container per Run, or IsolationHost, directly on this machine as the
 	// worker's user. The fake agent always runs in-process.
@@ -95,8 +97,8 @@ const (
 	maxBackoff     = 30 * time.Second
 )
 
-// Worker claims and executes Runs until its context ends.
-type Worker struct {
+// Agent claims and executes its Bot's Runs until its context ends.
+type Agent struct {
 	cfg       Config
 	api       *api
 	log       *slog.Logger
@@ -104,42 +106,32 @@ type Worker struct {
 	repos     *repos
 }
 
-// New checks cfg and returns a Worker.
-func New(cfg Config) (*Worker, error) {
-	if cfg.Name == "" {
-		return nil, errors.New("worker: a name is required")
+// New checks cfg and returns an Agent.
+func New(cfg Config) (*Agent, error) {
+	if cfg.Name == "" || cfg.BotID == "" {
+		return nil, errors.New("agent: a name and the Bot it runs are required")
 	}
 	if cfg.Slots < 1 {
-		return nil, errors.New("worker: slots must be at least 1")
+		return nil, errors.New("agent: slots must be at least 1")
 	}
-	if len(cfg.Agents) == 0 {
-		return nil, errors.New("worker: offer at least one agent")
+	if cfg.AI == "" || !models.ValidAgent(cfg.AI) {
+		return nil, fmt.Errorf("agent: unknown AI %q (known: %v)", cfg.AI, models.Agents)
 	}
 	if cfg.Isolation == "" {
 		cfg.Isolation = IsolationContainer
 	}
 	if cfg.Isolation != IsolationContainer && cfg.Isolation != IsolationHost {
-		return nil, fmt.Errorf("worker: isolation must be %s or %s, got %q", IsolationContainer, IsolationHost, cfg.Isolation)
+		return nil, fmt.Errorf("agent: isolation must be %s or %s, got %q", IsolationContainer, IsolationHost, cfg.Isolation)
 	}
-	real := false
-	for _, a := range cfg.Agents {
-		if a == "" || !models.ValidAgent(a) {
-			return nil, fmt.Errorf("worker: unknown agent %q (known: %v)", a, models.Agents)
-		}
-		if a == "fake" {
-			continue
-		}
-		real = true
-		if cfg.Exec == nil && cfg.Isolation == IsolationHost {
-			if _, err := acp.Command(a, cfg.Commands); err != nil {
-				return nil, fmt.Errorf("worker: %w", err)
-			}
+	if cfg.Exec == nil && cfg.AI != "fake" && cfg.Isolation == IsolationHost {
+		if _, err := acp.Command(cfg.AI, cfg.Commands); err != nil {
+			return nil, fmt.Errorf("agent: %w", err)
 		}
 	}
 	if cfg.RunTimeout <= 0 {
 		cfg.RunTimeout = 2 * time.Hour
 	}
-	if cfg.Exec == nil && real && cfg.Isolation == IsolationContainer {
+	if cfg.Exec == nil && cfg.AI != "fake" && cfg.Isolation == IsolationContainer {
 		if err := cfg.Container.defaults(); err != nil {
 			return nil, fmt.Errorf("worker: %w", err)
 		}
@@ -181,13 +173,13 @@ func New(cfg Config) (*Worker, error) {
 		}
 		cfg.Dir = filepath.Join(cache, "buildbee-worker")
 	}
-	return &Worker{cfg: cfg, api: newAPI(cfg.Server, cfg.Name), heartbeat: heartbeatEvery, repos: newRepos(cfg.Dir),
+	return &Agent{cfg: cfg, api: newAPI(cfg), heartbeat: heartbeatEvery, repos: newRepos(cfg.Dir),
 		log: cfg.Log.With("worker", cfg.Name)}, nil
 }
 
 // Run executes Runs in cfg.Slots parallel loops until ctx ends. A Run in
 // progress when ctx ends is stopped and reported failed.
-func (w *Worker) Run(ctx context.Context) {
+func (w *Agent) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for range w.cfg.Slots {
 		wg.Go(func() { w.loop(ctx) })
@@ -195,10 +187,10 @@ func (w *Worker) Run(ctx context.Context) {
 	wg.Wait()
 }
 
-func (w *Worker) loop(ctx context.Context) {
+func (w *Agent) loop(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
-		c, err := w.api.claim(ctx, w.cfg.Agents, w.cfg.Slots, claimWait)
+		c, err := w.api.claim(ctx, w.cfg.Slots, claimWait)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -226,16 +218,10 @@ type errTimeout struct{ limit time.Duration }
 
 func (e errTimeout) Error() string { return "the run exceeded its time limit of " + e.limit.String() }
 
-func (w *Worker) execute(ctx context.Context, c *models.Claim) {
+func (w *Agent) execute(ctx context.Context, c *models.Claim) {
 	run := c.Run
-	agent := run.Agent
-	if agent == "" && run.Kind != models.RunMerge { // any agent: prefer a real one
-		agent = w.cfg.Agents[0]
-		if i := slices.IndexFunc(w.cfg.Agents, func(a string) bool { return a != "fake" }); i >= 0 {
-			agent = w.cfg.Agents[i]
-		}
-	}
-	log := w.log.With("run", run.ID, "task", run.TaskID, "kind", run.Kind, "agent", agent)
+	agent := w.cfg.AI // this agent runs one AI; a merge needs none
+	log := w.log.With("run", run.ID, "task", run.TaskID, "kind", run.Kind, "ai", agent)
 	log.Info("run claimed")
 
 	runCtx, stop := context.WithCancelCause(ctx)
@@ -291,7 +277,7 @@ func (w *Worker) execute(ctx context.Context, c *models.Claim) {
 
 // reportOutcome reports a finished Run, retrying while the Server is
 // unreachable. The Run's heartbeats keep its claim meanwhile.
-func (w *Worker) reportOutcome(ctx context.Context, runID string, status models.RunStatus, rep outcome) error {
+func (w *Agent) reportOutcome(ctx context.Context, runID string, status models.RunStatus, rep outcome) error {
 	var err error
 	for attempt := range 6 {
 		if err = w.api.report(ctx, runID, status, rep); err == nil || errors.Is(err, errConflict) || errors.Is(err, errRejected) {
@@ -307,7 +293,7 @@ func (w *Worker) reportOutcome(ctx context.Context, runID string, status models.
 // emitter posts agent output as RunEvents. A Server that is briefly
 // unreachable costs a few events, not the Run; only a Run the Server says
 // is finished or not ours (409) stops the agent.
-func (w *Worker) emitter(ctx context.Context, runID string, log *slog.Logger) acp.Handler {
+func (w *Agent) emitter(ctx context.Context, runID string, log *slog.Logger) acp.Handler {
 	dropped := 0
 	return func(ev acp.Event) error {
 		var err error
@@ -333,7 +319,7 @@ type outcome struct {
 
 // work runs the agent on the Run's checkout (the Project's repo, when it
 // has one) and delivers what a build produced.
-func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit acp.Handler, say func(string, ...any)) (string, outcome, error) {
+func (w *Agent) work(ctx context.Context, c *models.Claim, agent string, emit acp.Handler, say func(string, ...any)) (string, outcome, error) {
 	run := c.Run
 	rep := outcome{detail: "agent " + agent + " finished"}
 	say("worker %s starting agent %s for a %s Run", w.cfg.Name, agent, run.Kind)
@@ -398,7 +384,7 @@ func (w *Worker) work(ctx context.Context, c *models.Claim, agent string, emit a
 // deliver turns a build's work into a pushed branch and, for GitHub repos,
 // a pull request. keep reports that the work must stay on this worker
 // because it could not be pushed.
-func (w *Worker) deliver(ctx context.Context, c *models.Claim, ws *workspace, agent string, rep outcome, say func(string, ...any)) (outcome, bool, error) {
+func (w *Agent) deliver(ctx context.Context, c *models.Claim, ws *workspace, agent string, rep outcome, say func(string, ...any)) (outcome, bool, error) {
 	author := "BuildBee"
 	if c.Bot != nil {
 		author = c.Bot.DisplayName + " (BuildBee)"
@@ -449,7 +435,7 @@ func (w *Worker) deliver(ctx context.Context, c *models.Claim, ws *workspace, ag
 
 // merge lands the Task's branch on the default branch: with the GitHub CLI
 // when the Task has a pull request, else with git.
-func (w *Worker) merge(ctx context.Context, c *models.Claim, say func(string, ...any)) (outcome, error) {
+func (w *Agent) merge(ctx context.Context, c *models.Claim, say func(string, ...any)) (outcome, error) {
 	p, t := c.Project, c.Task
 	if p.RepoURL == "" || t.Branch == "" {
 		return outcome{}, errors.New("nothing to merge: the Task has no branch")
@@ -493,7 +479,7 @@ func finalReply(transcript string) string {
 
 // keepAlive renews the claim until ctx ends, and stops the Run when the
 // Server says it is finished or no longer this worker's.
-func (w *Worker) keepAlive(ctx context.Context, runID string, stop context.CancelCauseFunc, log *slog.Logger) {
+func (w *Agent) keepAlive(ctx context.Context, runID string, stop context.CancelCauseFunc, log *slog.Logger) {
 	t := time.NewTicker(w.heartbeat)
 	defer t.Stop()
 	for {
@@ -534,7 +520,7 @@ var answerPoll = 2 * time.Second
 // asker relays an agent's permission requests for a Run as Decisions and
 // waits for each answer, until the Run's context ends. An answer that is
 // none of the agent's options is refused.
-func (w *Worker) asker(runID string) func(ctx context.Context, p acp.Permission) (string, error) {
+func (w *Agent) asker(runID string) func(ctx context.Context, p acp.Permission) (string, error) {
 	return func(ctx context.Context, p acp.Permission) (string, error) {
 		body := map[string]any{"title": p.Title}
 		opts := make([]map[string]string, 0, len(p.Options))
@@ -578,7 +564,7 @@ const maxAttachmentBytes = 64 << 20
 // fetchFiles downloads what people attached to the Task into a directory of
 // the worker's. The Run goes on without a file it cannot fetch; the agent
 // is told what it got.
-func (w *Worker) fetchFiles(ctx context.Context, c *models.Claim, say func(string, ...any)) ([]JobFile, func(), error) {
+func (w *Agent) fetchFiles(ctx context.Context, c *models.Claim, say func(string, ...any)) ([]JobFile, func(), error) {
 	if len(c.Files) == 0 {
 		return nil, func() {}, nil
 	}

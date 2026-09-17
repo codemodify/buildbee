@@ -96,8 +96,8 @@ func (s *Store) RecordUsage(ctx context.Context, runID string, used, size int64,
 // RunLoad counts the Runs queued and running, by kind, requested agent and
 // worker.
 func (s *Store) RunLoad(ctx context.Context) ([]models.RunLoad, error) {
-	rows, err := s.q.Query(ctx, `SELECT status, kind, agent, worker, count(*) FROM runs
-		WHERE status IN ('pending', 'running') GROUP BY 1, 2, 3, 4`)
+	rows, err := s.q.Query(ctx, `SELECT status, kind, COALESCE(bot_member_id::text, ''), count(*) FROM runs
+		WHERE status IN ('pending', 'running') GROUP BY 1, 2, 3`)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -105,7 +105,7 @@ func (s *Store) RunLoad(ctx context.Context) ([]models.RunLoad, error) {
 	var out []models.RunLoad
 	for rows.Next() {
 		var l models.RunLoad
-		if err := rows.Scan(&l.Status, &l.Kind, &l.Agent, &l.Worker, &l.Runs); err != nil {
+		if err := rows.Scan(&l.Status, &l.Kind, &l.Bot, &l.Runs); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -186,23 +186,27 @@ func (s *Store) InsertRun(ctx context.Context, r models.Run) error {
 // A Run for any agent (empty agent) needs a worker offering a real one: the
 // fake agent only takes Runs that ask for it. Merge Runs need no agent and
 // go to any worker. ErrNotFound means the queue has nothing for this worker.
-func (s *Store) ClaimRun(ctx context.Context, worker string, agents []string, now, until time.Time) (*models.Run, error) {
-	// Projects share the workers: a Project at its max_runs waits, and the
-	// Project with the fewest Runs going is served first, then the oldest Run.
+// ClaimRun gives a Bot's agent the oldest Run waiting for that Bot, or a
+// Run nobody is assigned (a merge). Projects share the Bots: a Project at
+// its max_runs waits, and the Project with the fewest Runs going is served
+// first, then the oldest Run. ai is what the agent runs, recorded on the
+// Run when it does not say.
+func (s *Store) ClaimRun(ctx context.Context, process, botID, ai string, now, until time.Time) (*models.Run, error) {
 	var r models.Run
-	err := scanRun(s.q.QueryRow(ctx, `UPDATE runs SET status='running', worker=$1, lease_until=$4, attempts=attempts+1,
-			started_at=COALESCE(started_at, $3), updated_at=$3
+	err := scanRun(s.q.QueryRow(ctx, `UPDATE runs SET status='running', worker=$1, lease_until=$5, attempts=attempts+1,
+			agent=CASE WHEN runs.agent = '' THEN $3 ELSE runs.agent END,
+			started_at=COALESCE(started_at, $4), updated_at=$4
 		WHERE id = (
 			SELECT r.id FROM runs r
 			JOIN projects p ON p.id = r.project_id
 			LEFT JOIN LATERAL (SELECT count(*) AS n FROM runs x WHERE x.project_id = r.project_id AND x.status = 'running') busy ON true
 			WHERE r.status = 'pending' AND p.archived_at IS NULL
-				AND (r.kind = 'merge' OR r.agent = ANY($2) OR (r.agent = '' AND EXISTS (SELECT 1 FROM unnest($2::text[]) a WHERE a <> 'fake')))
+				AND (r.bot_member_id::text = $2 OR r.bot_member_id IS NULL)
 				AND (p.max_runs = 0 OR busy.n < p.max_runs)
 			ORDER BY busy.n, r.created_at, r.id
 			FOR UPDATE OF r SKIP LOCKED
 			LIMIT 1)
-		RETURNING `+runCols, worker, agents, now, until), &r)
+		RETURNING `+runCols, process, botID, ai, now, until), &r)
 	return &r, mapErr(err)
 }
 

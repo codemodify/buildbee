@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build the images, start the compose stack on a spare port, check that the
-# Server answers and persists a Project, and that the compose worker claims
-# and finishes a Run. Then tear everything down.
+# Server answers and persists a Project, add a Bot, start its agent (the
+# fake AI) and see it finish that Bot's Run. Then tear everything down.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-buildbee-smoke}"
 export BUILDBEE_PORT="${BUILDBEE_PORT:-18580}"
-compose=(docker compose -f "$ROOT/deploy/compose/docker-compose.yml" --profile worker)
+compose=(docker compose -f "$ROOT/deploy/compose/docker-compose.yml")
 trap '"${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true' EXIT
 
 "${compose[@]}" up -d --build --wait
@@ -18,8 +18,12 @@ curl -fsS "$base/healthz"
 echo
 project=$(api -X POST "$base/v1/projects" -d '{"name":"smoke"}' | field "['id']")
 api "$base/v1/projects" | grep -q '"smoke"'
+# A Bot, and its agent: one process, one Bot, one AI.
+bot=$(api -X POST "$base/v1/projects/$project/members" \
+  -d '{"kind":"bot","display_name":"Smoke","role":"builder","agent":"fake"}' | field "['id']")
+BUILDBEE_BOT="$bot" "${compose[@]}" --profile agent up -d --build --wait agent
 task=$(api -X POST "$base/v1/projects/$project/tasks" -d '{"title":"smoke run","handoff_role":"none"}' | field "['id']")
-run=$(api -X POST "$base/v1/tasks/$task/runs" -d '{"agent":"fake"}' | field "['id']")
+run=$(api -X POST "$base/v1/tasks/$task/runs" -d "{\"agent\":\"fake\",\"bot_member_id\":\"$bot\"}" | field "['id']")
 for _ in $(seq 60); do
   status=$(api "$base/v1/runs/$run" | field "['status']")
   case "$status" in
@@ -35,7 +39,7 @@ backup="$(mktemp -d)"
 "$ROOT/scripts/backup.sh" "$backup/b" >/dev/null
 test -s "$backup/b/buildbee.dump" && test -s "$backup/b/files.tar.gz"
 "$ROOT/scripts/restore.sh" "$backup/b" >/dev/null
-"${compose[@]}" up -d --wait >/dev/null
+BUILDBEE_BOT="$bot" "${compose[@]}" up -d --wait >/dev/null
 api "$base/v1/projects" | grep -q '"smoke"'
 echo "backup and restore ok"
 

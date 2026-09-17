@@ -143,15 +143,15 @@ func (s *Service) OpenRunFile(ctx context.Context, a Actor, runID, fileID string
 	if s.blobs == nil {
 		return nil, nil, ErrNoStorage
 	}
-	if a.Worker == "" {
+	if a.Agent == "" {
 		return nil, nil, invalid("only the worker running the Run reads its files")
 	}
 	r, err := s.st.GetRun(ctx, runID, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	if r.Worker != a.Worker {
-		return nil, nil, fmt.Errorf("%w: run is not on worker %s", store.ErrConflict, a.Worker)
+	if r.Worker != a.Agent {
+		return nil, nil, fmt.Errorf("%w: run is not on worker %s", store.ErrConflict, a.Agent)
 	}
 	t, err := s.st.GetTask(ctx, r.TaskID, false)
 	if err != nil {

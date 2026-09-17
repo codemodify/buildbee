@@ -60,9 +60,7 @@ func TestTaskThreadsCarryTheWork(t *testing.T) {
 		t.Fatalf("prompt: %s", r.Prompt)
 	}
 	// ...as a steer event once it runs.
-	w := WorkerActor("w1")
-	_, err = f.s.ClaimRun(f.ctx, w, []string{"claude"}, 0)
-	f.must(err)
+	_, w := f.claimFor(bot(p, models.RoleBuilder).ID, "claude")
 	_, err = f.s.Reply(f.ctx, ada, tc.ThreadID, "And add a TTL.")
 	f.must(err)
 	evs, _, _ := f.s.RunEvents(f.ctx, r.ID, 0, 0)
@@ -217,12 +215,18 @@ func TestPresence(t *testing.T) {
 	if p, _ := f.s.Presence(f.ctx); len(p.People) != 0 {
 		t.Fatalf("offline: %+v", p)
 	}
-	if _, err := f.s.ClaimRun(f.ctx, WorkerActor("gpu-box"), []string{"claude", "codex"}, 0); err != nil {
+	proj := f.project(ada, "Presence")
+	builder := bot(proj, models.RoleBuilder)
+	if _, err := f.s.ClaimRun(f.ctx, AgentActor("Builder@gpu-box", builder.ID), Connect{AI: "claude", Host: "gpu-box", Slots: 4}, 0); err != nil {
 		t.Fatal(err)
 	}
 	p, _ = f.s.Presence(f.ctx)
-	if len(p.Workers) != 1 || p.Workers[0].Name != "gpu-box" || strings.Join(p.Workers[0].Agents, ",") != "claude,codex" {
-		t.Fatalf("workers: %+v", p.Workers)
+	if len(p.Bots) != 1 || p.Bots[0].Name != "Builder" || p.Bots[0].AI != "claude" || p.Bots[0].Host != "gpu-box" || p.Bots[0].Slots != 4 {
+		t.Fatalf("connected Bots: %+v", p.Bots)
+	}
+	f.s.SetAgentGone(builder.ID)
+	if p, _ := f.s.Presence(f.ctx); len(p.Bots) != 0 {
+		t.Fatalf("an agent that said goodbye is gone: %+v", p.Bots)
 	}
 	if n := len(f.pub.topic("presence:server")); n < 3 {
 		t.Fatalf("presence changes are published: %d events", n)

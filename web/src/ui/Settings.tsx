@@ -6,10 +6,12 @@ import { useLoad } from "../store";
 import { ago, Markdown, money, tokens } from "../text";
 import type { Member, Routine, Usage } from "../types";
 import { AddBot } from "./AddBot";
+import { ConnectSheet } from "./Connect";
 import { useCtx } from "./context";
 import { Avatar, Button, Confirm, ErrorNote, Field, Pill, Toggle, cx, inputBase, inputClass } from "./kit";
 
-export const agents = ["", "claude", "codex", "grok", "opencode", "goose", "fake"];
+// The AIs a Bot's agent can run.
+export const ais = ["claude", "codex", "grok", "opencode", "goose", "fake"];
 
 /** DecisionList is one Project's open Decisions, answerable; nothing when none. */
 export function DecisionList() {
@@ -216,6 +218,7 @@ export function Settings({ header }: { header: ReactNode }) {
 function BotRow({ bot, onSaved, onRemove }: { bot: Member; onSaved: () => void; onRemove: () => void }) {
   const [instr, setInstr] = useState(bot.instructions ?? "");
   const [err, setErr] = useState("");
+  const [connecting, setConnecting] = useState(false);
   useEffect(() => {
     setInstr(bot.instructions ?? "");
   }, [bot.instructions]);
@@ -233,13 +236,16 @@ function BotRow({ bot, onSaved, onRemove }: { bot: Member; onSaved: () => void; 
         <Avatar member={bot} size={26} />
         <span className="font-medium">{bot.display_name}</span>
         <Pill tone="bot">{bot.role}</Pill>
-        <select className={cx(inputBase, "ml-auto w-36")} value={bot.agent ?? ""} onChange={(e) => void save({ agent: e.target.value })} aria-label={`${bot.display_name}'s agent`}>
-          {agents.map((a) => (
+        <select className={cx(inputBase, "ml-auto w-32")} value={bot.agent ?? ""} onChange={(e) => void save({ agent: e.target.value })} aria-label={`${bot.display_name}'s AI`}>
+          {ais.map((a) => (
             <option key={a} value={a}>
-              {a || "Any agent"}
+              {a}
             </option>
           ))}
         </select>
+        <Button size="sm" onClick={() => setConnecting(true)}>
+          Connect
+        </Button>
         <Button size="sm" tone="ghost" onClick={onRemove}>
           Remove
         </Button>
@@ -251,6 +257,7 @@ function BotRow({ bot, onSaved, onRemove }: { bot: Member; onSaved: () => void; 
         onBlur={() => instr !== (bot.instructions ?? "") && void save({ instructions: instr })}
       />
       <ErrorNote>{err}</ErrorNote>
+      {connecting && <ConnectSheet bot={bot} onClose={() => setConnecting(false)} />}
     </div>
   );
 }
@@ -394,11 +401,11 @@ export function UsagePanel() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Stat label="Runs" value={String(u.runs)} />
             <Stat label="Cost reported" value={money(u.cost)} />
-            <Stat label="Agents used" value={String(u.by_agent.length)} />
+            <Stat label="AIs used" value={String(u.by_agent.length)} />
           </div>
-          <UsageTable title="By agent" rows={u.by_agent} />
+          <UsageTable title="By AI" rows={u.by_agent} />
           {u.by_project && <UsageTable title="By Project" rows={u.by_project} />}
-          <p className="text-[12px] text-bb-subtle">As reported by agents.</p>
+          <p className="text-[12px] text-bb-subtle">As reported by the AIs.</p>
         </>
       )}
     </div>

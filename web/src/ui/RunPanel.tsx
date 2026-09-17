@@ -38,7 +38,7 @@ export function RunPanel({ runId, defaultOpen = true }: { runId: string; default
       </button>
       {open && (
         <div className="space-y-3 border-t border-bb-border px-3 py-3">
-          {run.status === "pending" && <p className="text-[13px] text-bb-subtle">Waiting for a worker{run.agent ? ` (${run.agent})` : ""}.</p>}
+          {run.status === "pending" && <p className="text-[13px] text-bb-subtle">Waiting for its Bot's agent to take it.</p>}
           {view.plan.length > 0 && <PlanView entries={view.plan} />}
           {view.steps.length > 0 && <Steps steps={view.steps} />}
           {view.reply && (

@@ -2,6 +2,12 @@
 
 ## Unreleased — Phase 2c (client feedback)
 
+### Changed (the model)
+- **A Bot is its agent.** `buildbee-agent` replaces `buildbee-worker`: one process runs one Bot's AI on the machine where that CLI is logged in, connects out to the Server and takes only that Bot's Runs (work nobody is assigned, such as a merge, goes to whichever agent asks first). There is no pool of machines, no matching by agent name, and no `BUILDBEE_LOCAL_WORKER`: the Server runs no AIs
+- Add bot now hands you the line to run: `buildbee-agent --server … --bot <id> --ai claude`. A Bot is online while its agent runs; `# status` lists Bots with their AI, machine and load, and offers the command for one that is offline or has work waiting
+- `POST /v1/agent/claim` (was `/v1/worker/claim`) with `X-BuildBee-Agent` and `X-BuildBee-Bot`; `POST /v1/agent/goodbye`; presence carries `bots` and per-Bot `work`; metrics are per Bot
+- Agent settings are `BUILDBEE_BOT`, `BUILDBEE_AI`, `BUILDBEE_SLOTS`, `BUILDBEE_ISOLATION`, `BUILDBEE_SANDBOX`, `BUILDBEE_IMAGE`, `BUILDBEE_DIR` (was `BUILDBEE_WORKER_*`), each with a flag; `docs/workers.md` is now [docs/agents.md](docs/agents.md)
+
 ### Added
 - The Server runs agents itself (`BUILDBEE_LOCAL_WORKER`, default `auto`): in containers when Docker and the agent image are there, otherwise directly on its machine; `# status` says which, or why not
 - `# status` shows each agent's load and warns about Runs and Bots waiting for an agent no machine offers; machines are a detail under it. Workers report their `slots`
@@ -158,7 +164,7 @@
 ## LAN rebuild, Phase 3c (ACP client)
 
 ### Breaking
-- Workers run agents over the Agent Client Protocol instead of one-shot CLI calls: Claude Code needs `claude-agent-acp`, Codex needs `codex-acp` (see [docs/workers.md](docs/workers.md))
+- Workers run agents over the Agent Client Protocol instead of one-shot CLI calls: Claude Code needs `claude-agent-acp`, Codex needs `codex-acp` (see [docs/agents.md](docs/agents.md))
 - New RunEvent kinds `thought`, `plan` and `usage`; recreate the database
 
 ### Added
@@ -176,7 +182,7 @@
 ### Added
 - Postgres Run queue with leases, heartbeats and a reaper; new Runs wake waiting workers; `buildbee run show|cancel`
 - Runs carry `agent`, `prompt`, `worker`, `attempts`; Bots have an `agent` (`PATCH /v1/members/{id}`); Projects have `repo_url` and `default_branch`
-- Workers: `BUILDBEE_WORKER_NAME`, `BUILDBEE_WORKER_AGENTS`, `BUILDBEE_WORKER_SLOTS`; [docs/workers.md](docs/workers.md)
+- Workers: `BUILDBEE_WORKER_NAME`, `BUILDBEE_WORKER_AGENTS`, `BUILDBEE_WORKER_SLOTS`; [docs/agents.md](docs/agents.md)
 - The compose smoke test runs a Run end to end through the compose worker
 
 ## LAN rebuild, Phase 1

@@ -5,10 +5,11 @@ import { go } from "../route";
 import { signal } from "../signals";
 import { useLoad } from "../store";
 import { ago } from "../text";
-import type { AgentLoad, Person, Presence, Project, Roster } from "../types";
+import type { Person, Presence, Project, Roster } from "../types";
 import { Avatar, Button, ErrorNote, Field, Pill, Sheet, cx, inputClass, runTone } from "./kit";
 import { ProjectScope } from "./scope";
 import { AddBot } from "./AddBot";
+import { ConnectSheet } from "./Connect";
 import { UsagePanel } from "./Settings";
 import { TaskBoard } from "./Tasks";
 
@@ -28,18 +29,23 @@ export function Status({ me, projects, presence, header }: { me: Person; project
   const { data: r, error, reload } = useLoad<Roster>(() => api.roster(), []);
   const live = useLiveStatus();
   const [dialog, setDialog] = useState<"invite" | "bot" | null>(null);
+  const [connect, setConnect] = useState<Roster["bots"][number] | null>(null);
   useTopic("presence:server", null, reload);
   const online = new Set((presence?.people ?? []).map((p) => p.id));
   const byProject = new Map<string, Roster["bots"]>();
   for (const b of r?.bots ?? []) byProject.set(b.project_id, [...(byProject.get(b.project_id) ?? []), b]);
+  const connected = new Map((presence?.bots ?? []).map((b) => [b.bot_id, b]));
+  const unassigned = presence?.work?.[""]?.queued ?? 0;
+  // A Bot with work but no agent would wait for ever; say so with the fix.
+  const waiting = (r?.bots ?? [])
+    .map((bot) => ({ bot, queued: presence?.work?.[bot.id]?.queued ?? 0 }))
+    .filter((w) => w.queued > 0 && !connected.has(w.bot.id));
   return (
     <section className="flex h-full min-w-0 flex-col">
       {header}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl space-y-6 px-4 py-5">
           <ErrorNote>{error}</ErrorNote>
-          <Agents presence={presence} bots={r?.bots ?? []} onChanged={reload} />
-
           <Runs />
 
           <section className="space-y-3">
@@ -105,21 +111,54 @@ export function Status({ me, projects, presence, header }: { me: Person; project
               </Button>
             }
           >
+            {waiting.map((w) => (
+              <div key={w.bot.id} className="flex items-center gap-3 bg-bb-danger-soft px-3 py-2 text-[13px] text-bb-danger">
+                <span className="min-w-0">
+                  {w.bot.display_name} has {w.queued} Run{w.queued > 1 ? "s" : ""} waiting: its agent is not connected.
+                </span>
+                <Button className="ml-auto shrink-0" size="sm" onClick={() => setConnect(w.bot)}>
+                  Connect
+                </Button>
+              </div>
+            ))}
             {[...byProject.entries()].map(([projectId, bots]) => (
               <div key={projectId} className="py-1.5">
                 <p className="px-3 pb-1 text-[12px] text-bb-subtle">{bots[0].project_name}</p>
-                {bots.map((b) => (
-                  <button key={b.id} type="button" className="block w-full text-left hover:bg-bb-hover" onClick={() => go({ view: "settings", projectId })} title="Edit in the Project's Settings">
-                    <Row>
-                      <Avatar member={b} size={24} />
-                      <span className="w-32 shrink-0 truncate font-medium">{b.display_name}</span>
+                {bots.map((b) => {
+                  const live = connected.get(b.id);
+                  const work = presence?.work?.[b.id];
+                  return (
+                    <Row key={b.id}>
+                      <span className={cx("h-2 w-2 shrink-0 rounded-full", live ? "bg-bb-success" : "bg-bb-border")} title={live ? "online" : "offline"} />
+                      <button type="button" className="w-32 shrink-0 truncate text-left font-medium hover:underline" onClick={() => go({ view: "settings", projectId })}>
+                        {b.display_name}
+                      </button>
                       <Pill tone="bot">{b.role}</Pill>
-                      <span className="ml-auto text-[12px] text-bb-subtle">{b.agent || "any agent"}</span>
+                      <span className="min-w-0 truncate text-[12px] text-bb-subtle">
+                        {live ? `${live.ai}${live.host ? ` on ${live.host}` : ""}` : `${b.agent || "no AI set"} · offline`}
+                      </span>
+                      <span className="ml-auto flex shrink-0 items-center gap-2 text-[12px] text-bb-subtle tabular-nums">
+                        {work && (work.running > 0 || work.queued > 0) && (
+                          <span>
+                            {work.running} running{work.queued > 0 ? ` · ${work.queued} queued` : ""}
+                          </span>
+                        )}
+                        {!live && (
+                          <Button size="sm" onClick={() => setConnect(b)}>
+                            Connect
+                          </Button>
+                        )}
+                      </span>
                     </Row>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             ))}
+            {unassigned > 0 && connected.size === 0 && (
+              <p className="bg-bb-danger-soft px-3 py-2 text-[13px] text-bb-danger">
+                {unassigned} Run{unassigned > 1 ? "s" : ""} waiting for any Bot's agent; none is connected.
+              </p>
+            )}
           </Group>
 
           <section>
@@ -144,6 +183,7 @@ export function Status({ me, projects, presence, header }: { me: Person; project
       </div>
       {dialog === "invite" && <Invite projects={projects} onClose={() => setDialog(null)} onDone={reload} />}
       {dialog === "bot" && <AddBot projects={projects} onClose={() => setDialog(null)} onDone={reload} />}
+      {connect && <ConnectSheet bot={connect} onClose={() => setConnect(null)} />}
     </section>
   );
 }
@@ -204,109 +244,6 @@ function ArchivedProjects() {
   );
 }
 
-/** Agents is which agents can work now, how busy they are, and what waits in vain. */
-function Agents({ presence, bots, onChanged }: { presence?: Presence; bots: Roster["bots"]; onChanged: () => void }) {
-  if (!presence) return null;
-  const { workers, local } = presence;
-  const offered = new Set(workers.flatMap((w) => w.agents));
-  const realOnline = [...offered].some((a) => a !== "fake");
-  const warnings: { text: string; fix?: { label: string; run: () => Promise<unknown> } }[] = [];
-  for (const a of presence.agents) {
-    if (a.agent === "any" && a.queued > 0 && !realOnline) {
-      warnings.push({ text: `${a.queued} Run${a.queued > 1 ? "s are" : " is"} waiting: no agent is running anywhere yet.` });
-    } else if (a.agent !== "any" && a.workers === 0 && a.queued > 0) {
-      warnings.push({ text: `${a.queued} Run${a.queued > 1 ? "s are" : " is"} waiting for ${a.agent}, which nothing here runs.` });
-    }
-  }
-  // A Bot asking for an agent nobody runs would wait for ever; it can take
-  // whichever agent is free instead.
-  for (const b of bots) {
-    if (!b.agent || offered.has(b.agent) || workers.length === 0) continue;
-    warnings.push({
-      text: `${b.display_name} in ${b.project_name} is set to ${b.agent}, which nothing here runs. Its work would wait.`,
-      fix: { label: "Use any agent", run: () => api.updateMember(b.id, { agent: "" }) },
-    });
-  }
-  const rows = presence.agents.filter((a) => a.agent !== "any" || a.running > 0 || a.queued > 0);
-  const note =
-    local.state === "running"
-      ? local.isolation === "host"
-        ? local.sandboxed
-          ? "This server runs agents on its machine, sandboxed: they see the system read-only and write only their checkout."
-          : "This server runs agents directly on its machine, unsandboxed: they can reach everything its user can. Install bubblewrap to sandbox them."
-        : "This server runs agents in containers."
-      : local.state === "starting"
-        ? "Checking which agents this server can run…"
-        : local.state === "unavailable"
-          ? `This server isn't running agents. ${local.reason ?? ""}`
-          : workers.length === 0
-            ? local.reason
-            : undefined;
-  return (
-    <Group title="Agents" count={rows.filter((a) => a.workers > 0).length} action={presence.slots > 0 && <span className="text-[12px] text-bb-subtle tabular-nums">{presence.running} of {presence.slots} busy</span>}>
-      {warnings.map((w) => (
-        <div key={w.text} className="flex items-center gap-3 bg-bb-danger-soft px-3 py-2 text-[13px] text-bb-danger">
-          <span className="min-w-0">{w.text}</span>
-          {w.fix && (
-            <Button
-              className="ml-auto shrink-0"
-              size="sm"
-              onClick={async () => {
-                await w.fix?.run();
-                onChanged();
-              }}
-            >
-              {w.fix.label}
-            </Button>
-          )}
-        </div>
-      ))}
-      {rows.length === 0 && <p className="px-3 py-2 text-[13px] text-bb-subtle">None online. Tasks wait until one is.</p>}
-      {rows.map((a) => (
-        <Row key={a.agent}>
-          <span className={cx("h-2 w-2 shrink-0 rounded-full", a.workers > 0 || a.agent === "any" ? "bg-bb-success" : "bg-bb-danger")} />
-          <span className="w-32 shrink-0 truncate font-medium">{a.agent === "any" ? "any agent" : a.agent}</span>
-          <span className="text-[12px] text-bb-subtle">
-            {a.agent === "any" ? "whichever is free" : a.workers === 0 ? "nothing runs it" : `on ${a.workers} computer${a.workers > 1 ? "s" : ""}`}
-          </span>
-          <span className="ml-auto text-[12px] text-bb-subtle tabular-nums">{load(a)}</span>
-        </Row>
-      ))}
-      {note && <p className="px-3 py-2 text-[12.5px] text-bb-subtle">{note}</p>}
-      {workers.length > 0 && (
-        <details className="px-3 py-2 text-[13px]">
-          <summary className="cursor-pointer text-[12.5px] text-bb-subtle hover:text-bb-fg">
-            Computers running agents ({workers.length})
-          </summary>
-          <div className="mt-1 divide-y divide-bb-border">
-            {workers.map((w) => (
-              <div key={w.name} className="flex items-center gap-3 py-1.5">
-                <span className="w-40 shrink-0 truncate">
-                  {w.name}
-                  {w.local && <span className="ml-1.5 text-[11.5px] text-bb-subtle">this server</span>}
-                </span>
-                <span className="flex min-w-0 flex-wrap gap-1">
-                  {w.agents.map((ag) => (
-                    <Pill key={ag}>{ag}</Pill>
-                  ))}
-                </span>
-                <span className="ml-auto shrink-0 text-[12px] text-bb-subtle tabular-nums">
-                  {w.running}
-                  {w.slots ? `/${w.slots}` : ""} busy · {ago(w.last_seen)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-    </Group>
-  );
-}
-
-function load(a: AgentLoad): string {
-  const bits = [a.running && `${a.running} running`, a.queued && `${a.queued} queued`].filter(Boolean);
-  return bits.length ? bits.join(" · ") : "idle";
-}
 
 const verb: Record<string, string> = { added: "was added to", removed: "was removed from", left: "left", joined: "joined", created: "created" };
 

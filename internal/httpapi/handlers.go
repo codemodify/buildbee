@@ -227,6 +227,11 @@ func (s *Server) closeDirect(w http.ResponseWriter, r *http.Request) {
 	respond(s, w, http.StatusOK, map[string]bool{"closed": true}, err)
 }
 
+func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
+	b, err := s.core.Bot(r.Context(), r.PathValue("id"))
+	respond(s, w, http.StatusOK, b, err)
+}
+
 func (s *Server) botTemplates(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": models.DefaultBots()})
 }
@@ -444,16 +449,14 @@ const maxClaimWait = 30 * time.Second
 // after waiting up to wait_seconds for one.
 func (s *Server) claimRun(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Agents      []string `json:"agents"`
-		WaitSeconds float64  `json:"wait_seconds"`
-		Slots       int      `json:"slots"`
+		core.Connect
+		WaitSeconds float64 `json:"wait_seconds"`
 	}
 	if !s.decode(w, r, &in) {
 		return
 	}
-	s.core.WorkerSlots(actorFrom(r.Context()).Worker, in.Slots)
 	wait := min(max(time.Duration(in.WaitSeconds*float64(time.Second)), 0), maxClaimWait)
-	c, err := s.core.ClaimRun(r.Context(), actorFrom(r.Context()), in.Agents, wait)
+	c, err := s.core.ClaimRun(r.Context(), actorFrom(r.Context()), in.Connect, wait)
 	if err == nil && c == nil {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -582,6 +585,18 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // getRunFile serves a Task's attachment to the worker running its Run.
+// agentGoodbye lets an agent say it is stopping, so its Bot shows offline
+// at once instead of after the lease.
+func (s *Server) agentGoodbye(w http.ResponseWriter, r *http.Request) {
+	a := actorFrom(r.Context())
+	if a.Agent == "" || a.BotID == "" {
+		s.fail(w, core.ErrNoActor)
+		return
+	}
+	s.core.SetAgentGone(a.BotID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) getRunFile(w http.ResponseWriter, r *http.Request) {
 	f, rc, err := s.core.OpenRunFile(r.Context(), actorFrom(r.Context()), r.PathValue("id"), r.PathValue("file"))
 	if err != nil {

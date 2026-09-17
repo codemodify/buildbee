@@ -1,0 +1,17 @@
+# buildbee-agent: runs one Bot's AI and takes that Bot's Runs from the
+# Server. Give it BUILDBEE_BOT and BUILDBEE_AI (see docs/agents.md).
+FROM golang:1.27-alpine AS build
+WORKDIR /src
+ENV GOTOOLCHAIN=local CGO_ENABLED=0
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ cmd/
+COPY internal/ internal/
+RUN go build -trimpath -o /out/buildbee-agent ./cmd/buildbee-agent
+
+FROM alpine:3.24
+RUN apk add --no-cache ca-certificates git \
+    && adduser -D -u 10001 buildbee
+COPY --from=build /out/buildbee-agent /usr/local/bin/buildbee-agent
+USER buildbee
+CMD ["buildbee-agent"]

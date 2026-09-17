@@ -1,4 +1,4 @@
-package worker
+package agent
 
 import (
 	"bytes"
@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/agent/acp"
 	"github.com/codemodify/buildbee/internal/blob"
 	"github.com/codemodify/buildbee/internal/core"
 	"github.com/codemodify/buildbee/internal/httpapi"
 	"github.com/codemodify/buildbee/internal/models"
 	"github.com/codemodify/buildbee/internal/store"
 	"github.com/codemodify/buildbee/internal/testdb"
-	"github.com/codemodify/buildbee/internal/worker/acp"
 	"github.com/codemodify/buildbee/internal/ws"
 )
 
@@ -32,6 +32,7 @@ type stack struct {
 	url     string
 	ada     core.Actor
 	project string
+	bot     string // the Bot whose agent the test starts
 }
 
 func newStack(t *testing.T) *stack {
@@ -53,7 +54,11 @@ func newStack(t *testing.T) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &stack{t: t, ctx: ctx, svc: svc, url: srv.URL, ada: ada, project: proj.ID}
+	builder := models.MemberByRole(proj.Members, models.RoleBuilder)
+	if builder == nil {
+		t.Fatal("no Builder Bot")
+	}
+	return &stack{t: t, ctx: ctx, svc: svc, url: srv.URL, ada: ada, project: proj.ID, bot: builder.ID}
 }
 
 func (s *stack) queue(title string) *models.Run {
@@ -67,22 +72,25 @@ func (s *stack) queueFor(title, agent string) *models.Run {
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	r, err := s.svc.CreateRun(s.ctx, s.ada, tc.ID, core.NewRun{Agent: agent})
+	r, err := s.svc.CreateRun(s.ctx, s.ada, tc.ID, core.NewRun{Agent: agent, BotMemberID: s.bot})
 	if err != nil {
 		s.t.Fatal(err)
 	}
 	return r
 }
 
-// start runs a worker until the test ends (or stop is called).
+// start runs the Bot's agent until the test ends (or stop is called).
 func (s *stack) start(cfg Config) (stop func()) {
 	s.t.Helper()
 	cfg.Server = s.url
-	if cfg.Agents == nil {
-		cfg.Agents = []string{"fake"}
+	if cfg.AI == "" {
+		cfg.AI = "fake"
+	}
+	if cfg.BotID == "" {
+		cfg.BotID = s.bot
 	}
 	if cfg.Name == "" {
-		cfg.Name = "w1"
+		cfg.Name = "Builder@w1"
 	}
 	if cfg.Slots == 0 {
 		cfg.Slots = 1
@@ -132,44 +140,55 @@ func blockingExec(started chan<- string) Exec {
 	}
 }
 
-func TestNewChecksIsolationAndAgents(t *testing.T) {
-	claude := []string{"claude"}
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude}); err == nil || !strings.Contains(err.Error(), "needs an image") {
+func TestNewChecksTheAIAndIsolation(t *testing.T) {
+	base := Config{Name: "Builder@w", BotID: "bot-1", Slots: 1, AI: "claude"}
+	with := func(f func(*Config)) Config {
+		c := base
+		f(&c)
+		return c
+	}
+	if _, err := New(base); err == nil || !strings.Contains(err.Error(), "needs an image") {
 		t.Fatalf("container isolation without an image: %v", err)
 	}
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude, Container: Container{Image: "agents"}}); err != nil {
+	if _, err := New(with(func(c *Config) { c.Container = Container{Image: "agents"} })); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: []string{"fake"}}); err != nil {
-		t.Fatalf("the fake agent needs no container: %v", err)
+	if _, err := New(with(func(c *Config) { c.AI = "fake" })); err != nil {
+		t.Fatalf("the fake AI needs no container: %v", err)
 	}
 	t.Setenv("PATH", t.TempDir())
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude, Isolation: IsolationHost}); !errors.Is(err, acp.ErrNoAgent) {
-		t.Fatalf("a host agent whose ACP command is missing: %v", err)
+	if _, err := New(with(func(c *Config) { c.Isolation = IsolationHost })); !errors.Is(err, acp.ErrNoAgent) {
+		t.Fatalf("an AI whose ACP command is missing here: %v", err)
 	}
-	if _, err := New(Config{Name: "w", Slots: 1, Agents: claude, Isolation: IsolationHost,
-		Commands: map[string][]string{"claude": {"/bin/sh"}}}); err != nil {
+	if _, err := New(with(func(c *Config) {
+		c.Isolation = IsolationHost
+		c.Commands = map[string][]string{"claude": {"/bin/sh"}}
+	})); err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []Config{
-		{Slots: 1, Agents: []string{"fake"}},
-		{Name: "w", Agents: []string{"fake"}},
-		{Name: "w", Slots: 1},
-		{Name: "w", Slots: 1, Agents: []string{"hal"}},
-		{Name: "w", Slots: 1, Agents: []string{"fake"}, Isolation: "vm"},
+	for what, bad := range map[string]Config{
+		"no name":    with(func(c *Config) { c.Name = "" }),
+		"no bot":     with(func(c *Config) { c.BotID = "" }),
+		"no slots":   with(func(c *Config) { c.Slots = 0 }),
+		"no AI":      with(func(c *Config) { c.AI = "" }),
+		"unknown AI": with(func(c *Config) { c.AI = "hal" }),
+		"bad isolation": with(func(c *Config) {
+			c.AI = "fake"
+			c.Isolation = "vm"
+		}),
 	} {
 		if _, err := New(bad); err == nil {
-			t.Fatalf("expected an error for %+v", bad)
+			t.Errorf("expected an error for %s", what)
 		}
 	}
 }
 
-func TestWorkerRunsTheFakeAgent(t *testing.T) {
+func TestAgentRunsTheFakeAI(t *testing.T) {
 	s := newStack(t)
 	r := s.queue("Ship it")
 	s.start(Config{})
 	got := s.wait(r.ID, finished)
-	if got.Status != models.RunSucceeded || got.Worker != "w1" {
+	if got.Status != models.RunSucceeded || got.Worker != "Builder@w1" {
 		t.Fatalf("run: %+v", got)
 	}
 	arts, err := s.svc.Artifacts(s.ctx, r.TaskID)
@@ -311,7 +330,7 @@ func TestSteeringReachesTheAgent(t *testing.T) {
 	if _, err := s.svc.SteerRun(s.ctx, s.ada, early.ID, "Prefer small commits.", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.svc.SteerRun(s.ctx, core.WorkerActor("w9"), early.ID, "hi", false); err == nil {
+	if _, err := s.svc.SteerRun(s.ctx, core.AgentActor("other@w9", s.bot), early.ID, "hi", false); err == nil {
 		t.Fatal("only people steer")
 	}
 	s.start(Config{})
@@ -412,7 +431,7 @@ func TestAgentsAskPeopleWhenTheProjectSaysSo(t *testing.T) {
 	// Answered: the agent goes ahead.
 	r := s.queue("asks first")
 	d := waitOpen()
-	if d.Action != "permission" || d.RunID != r.ID || d.Prompt != "The agent asks to: Read the Task" ||
+	if d.Action != "permission" || d.RunID != r.ID || d.Prompt != "Builder asks to: Read the Task" ||
 		!slices.Equal(d.Options, []string{"Reject", "Allow"}) || d.Recommendation != "Allow" {
 		t.Fatalf("decision: %+v", d)
 	}
@@ -434,10 +453,10 @@ func TestAgentsAskPeopleWhenTheProjectSaysSo(t *testing.T) {
 	if left := open(); len(left) != 0 {
 		t.Fatalf("questions outlive their run: %+v", left)
 	}
-	if _, err := s.svc.AskPermission(s.ctx, core.WorkerActor("w1"), r2.ID, core.PermissionAsk{Title: "x", Options: []core.PermissionChoice{{ID: "y", Name: "Allow"}}}); err == nil {
+	if _, err := s.svc.AskPermission(s.ctx, core.AgentActor("Builder@w1", s.bot), r2.ID, core.PermissionAsk{Title: "x", Options: []core.PermissionChoice{{ID: "y", Name: "Allow"}}}); err == nil {
 		t.Fatal("a finished run asks nothing")
 	}
-	if _, err := s.svc.AskPermission(s.ctx, core.WorkerActor("other"), r.ID, core.PermissionAsk{Title: "x", Options: []core.PermissionChoice{{ID: "y"}}}); err == nil {
+	if _, err := s.svc.AskPermission(s.ctx, core.AgentActor("other@w9", s.bot), r.ID, core.PermissionAsk{Title: "x", Options: []core.PermissionChoice{{ID: "y"}}}); err == nil {
 		t.Fatal("only the run's worker asks")
 	}
 }

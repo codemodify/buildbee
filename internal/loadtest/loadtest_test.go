@@ -25,7 +25,7 @@ func TestLoadTestDrivesRunsThroughWorkers(t *testing.T) {
 	srv := httptest.NewServer(httpapi.NewServer(svc, hub, httpapi.Options{}).Handler())
 	t.Cleanup(srv.Close)
 
-	rep, err := Run(context.Background(), Options{Server: srv.URL, Runs: 6, Workers: 2, Slots: 2,
+	rep, err := Run(context.Background(), Options{Server: srv.URL, Runs: 6, Bots: 2, Slots: 2,
 		Work: 150 * time.Millisecond, Events: 4, Deadline: 90 * time.Second})
 	if err != nil {
 		t.Fatal(err)

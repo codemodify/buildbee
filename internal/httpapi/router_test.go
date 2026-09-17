@@ -190,35 +190,45 @@ func TestRunSliceOverHTTP(t *testing.T) {
 		t.Fatalf("autorun: %v", run)
 	}
 
-	worker := func(method, path string, body any) *httptest.ResponseRecorder {
+	// The Bot's agent: one process, one Bot, one AI.
+	agent := func(method, path string, body any) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(mustJSON(t, body)))
-		req.Header.Set(workerHeader, "w1")
+		req.Header.Set(agentHeader, "Builder@w1")
+		req.Header.Set(botHeader, p.role("builder"))
 		rec := httptest.NewRecorder()
 		s.h.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := worker(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "token", "payload": obj{}}); rec.Code != http.StatusConflict {
+	other := func(method, path string, body any) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(mustJSON(t, body)))
+		req.Header.Set(agentHeader, "Sentry@w2")
+		req.Header.Set(botHeader, p.role("sentry"))
+		rec := httptest.NewRecorder()
+		s.h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := agent(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "token", "payload": obj{}}); rec.Code != http.StatusConflict {
 		t.Fatalf("writing to an unclaimed Run: %d", rec.Code)
 	}
-	if rec := worker(http.MethodPost, "/v1/worker/claim", obj{"agents": []string{"fake"}}); rec.Code != http.StatusNoContent {
-		t.Fatalf("a Run for any agent is not for the fake agent: %d %s", rec.Code, rec.Body)
+	if rec := other(http.MethodPost, "/v1/agent/claim", obj{"ai": "claude"}); rec.Code != http.StatusNoContent {
+		t.Fatalf("another Bot's agent takes no work of this one: %d %s", rec.Code, rec.Body)
 	}
-	claim := ok[obj](t, worker(http.MethodPost, "/v1/worker/claim", obj{"agents": []string{"claude"}, "wait_seconds": 1}), http.StatusOK)
-	if c := claim["run"].(obj); c["id"] != rid || c["status"] != "running" || c["worker"] != "w1" ||
+	claim := ok[obj](t, agent(http.MethodPost, "/v1/agent/claim", obj{"ai": "claude", "wait_seconds": 1}), http.StatusOK)
+	if c := claim["run"].(obj); c["id"] != rid || c["status"] != "running" || c["worker"] != "Builder@w1" ||
 		!strings.Contains(c["prompt"].(string), "Add caching") || claim["bot"].(obj)["id"] != p.role("builder") {
 		t.Fatalf("claim: %v", claim)
 	}
-	hb := ok[obj](t, worker(http.MethodPost, "/v1/runs/"+rid+"/heartbeat", nil), http.StatusOK)
+	hb := ok[obj](t, agent(http.MethodPost, "/v1/runs/"+rid+"/heartbeat", nil), http.StatusOK)
 	if hb["status"] != "running" {
 		t.Fatalf("heartbeat: %v", hb)
 	}
 	if rec := s.call(http.MethodPost, "/v1/runs/"+rid+"/heartbeat", "Ada", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("people do not heartbeat: %d", rec.Code)
 	}
-	ok[obj](t, worker(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "token", "payload": obj{"text": "working"}}), http.StatusCreated)
-	ok[obj](t, worker(http.MethodPatch, "/v1/runs/"+rid, obj{"status": "succeeded", "detail": "exit 0"}), http.StatusOK)
-	art := ok[obj](t, worker(http.MethodPost, "/v1/tasks/"+tid+"/artifacts", obj{"kind": "log", "name": "acp.log", "body": "full log", "run_id": rid}), http.StatusCreated)
-	if rec := worker(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "log", "payload": obj{}}); rec.Code != http.StatusConflict {
+	ok[obj](t, agent(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "token", "payload": obj{"text": "working"}}), http.StatusCreated)
+	ok[obj](t, agent(http.MethodPatch, "/v1/runs/"+rid, obj{"status": "succeeded", "detail": "exit 0"}), http.StatusOK)
+	art := ok[obj](t, agent(http.MethodPost, "/v1/tasks/"+tid+"/artifacts", obj{"kind": "log", "name": "acp.log", "body": "full log", "run_id": rid}), http.StatusCreated)
+	if rec := agent(http.MethodPost, "/v1/runs/"+rid+"/events", obj{"kind": "log", "payload": obj{}}); rec.Code != http.StatusConflict {
 		t.Fatalf("event after finish: %d", rec.Code)
 	}
 
@@ -394,9 +404,7 @@ func TestMetrics(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`buildbee_runs{status="pending"} 1`,
-		`buildbee_agent_runs{agent="claude",state="queued"} 1`,
-		`buildbee_agent_workers{agent="claude"} 0`,
-		"buildbee_workers_online 0",
+		"buildbee_bots_connected 0",
 		"buildbee_people_online 0",
 		`buildbee_http_requests_total{method="POST",code="201"} 3`,
 		`buildbee_http_requests_total{method="GET",code="404"} 1`,

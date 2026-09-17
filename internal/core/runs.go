@@ -192,7 +192,7 @@ func (s *Service) ReportRun(ctx context.Context, a Actor, id string, rep RunRepo
 	if !ok {
 		return nil, invalid("status must be pending, running, succeeded, failed or canceled")
 	}
-	if a.Worker == "" && (next != models.RunCanceled || rep.Summary != "" || rep.Branch != "" || rep.PRURL != "" || rep.Commit != "") {
+	if a.Agent == "" && (next != models.RunCanceled || rep.Summary != "" || rep.Branch != "" || rep.PRURL != "" || rep.Commit != "") {
 		return nil, invalid("a Run's progress is reported by the worker running it; people can only cancel it")
 	}
 	d, err := text("detail", rep.Detail, false, 2000)
@@ -289,7 +289,7 @@ func (s *Service) ReportRun(ctx context.Context, a Actor, id string, rep RunRepo
 
 // runActor attributes worker-side changes to the Run's Bot.
 func (w *work) runActor(ctx context.Context, a Actor, r *models.Run) who {
-	if a.Worker != "" && r.BotMemberID != "" {
+	if a.Agent != "" && r.BotMemberID != "" {
 		if bot, err := w.st.GetMember(ctx, r.BotMemberID); err == nil {
 			return whoOf(bot, a)
 		}

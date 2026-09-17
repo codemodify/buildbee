@@ -55,6 +55,18 @@ func newFixture(t *testing.T) *fixture {
 		pub: pub, blobs: blobs}
 }
 
+// agentOf is the actor for the agent process running bot.
+func (f *fixture) agentOf(botID string) Actor { return AgentActor("agent-"+botID[:4]+"@test", botID) }
+
+// claimFor claims one Run as the agent of bot, running ai.
+func (f *fixture) claimFor(botID, ai string) (*models.Claim, Actor) {
+	f.t.Helper()
+	a := f.agentOf(botID)
+	c, err := f.s.ClaimRun(f.ctx, a, Connect{AI: ai, Host: "test", Slots: 4}, 0)
+	f.must(err)
+	return c, a
+}
+
 func (f *fixture) person(name string) Actor {
 	f.t.Helper()
 	p, err := f.s.Hello(f.ctx, name)
@@ -453,13 +465,14 @@ func TestRunLifecycle(t *testing.T) {
 	if run.BotMemberID != bot(p, models.RoleBuilder).ID || run.Agent != "fake" || !strings.Contains(run.Prompt, "Task: x") {
 		t.Fatalf("run defaults to the assigned Bot and carries its prompt: %+v", run)
 	}
-	w1, w2 := WorkerActor("w1"), WorkerActor("w2")
+	w1 := f.agentOf(bot(p, models.RoleBuilder).ID)
+	w2 := AgentActor("other@test", bot(p, models.RoleSentry).ID)
 	if _, err := f.s.UpdateRun(f.ctx, w1, run.ID, "running", ""); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("a worker must claim before writing: %v", err)
 	}
-	c, err := f.s.ClaimRun(f.ctx, w1, []string{"fake"}, 0)
+	c, err := f.s.ClaimRun(f.ctx, w1, Connect{AI: "fake"}, 0)
 	f.must(err)
-	if c == nil || c.Run.ID != run.ID || c.Run.Status != models.RunRunning || c.Run.Worker != "w1" ||
+	if c == nil || c.Run.ID != run.ID || c.Run.Status != models.RunRunning || c.Run.Worker != w1.Agent ||
 		c.Run.StartedAt == nil || c.Run.LeaseUntil == nil || c.Bot == nil || c.Task.ID != tc.ID {
 		t.Fatalf("claim: %+v", c)
 	}

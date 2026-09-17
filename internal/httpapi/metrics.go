@@ -65,19 +65,16 @@ func (s *Server) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	for _, st := range sortedKeys(snap.RunsByStatus) {
 		p("buildbee_runs{status=%q} %d\n", st, snap.RunsByStatus[st])
 	}
-	help("buildbee_agent_runs", "gauge", "Runs running and queued, by requested agent (any = whichever a worker has).")
-	for _, a := range snap.Presence.Agents {
-		p("buildbee_agent_runs{agent=%s,state=\"running\"} %d\n", label(a.Agent), a.Running)
-		p("buildbee_agent_runs{agent=%s,state=\"queued\"} %d\n", label(a.Agent), a.Queued)
+	help("buildbee_bot_runs", "gauge", "Runs running and queued, by Bot.")
+	for _, b := range snap.Presence.Bots {
+		w := snap.Presence.Work[b.BotID]
+		p("buildbee_bot_runs{bot=%s,ai=%s,state=\"running\"} %d\n", label(b.Name), label(b.AI), w.Running)
+		p("buildbee_bot_runs{bot=%s,ai=%s,state=\"queued\"} %d\n", label(b.Name), label(b.AI), w.Queued)
 	}
-	help("buildbee_agent_workers", "gauge", "Workers online offering each agent.")
-	for _, a := range snap.Presence.Agents {
-		p("buildbee_agent_workers{agent=%s} %d\n", label(a.Agent), a.Workers)
-	}
-	help("buildbee_workers_online", "gauge", "Workers seen in the last 90 seconds.")
-	p("buildbee_workers_online %d\n", len(snap.Presence.Workers))
-	help("buildbee_worker_slots", "gauge", "Runs the online workers can execute at once.")
-	p("buildbee_worker_slots %d\n", snap.Presence.Slots)
+	help("buildbee_bots_connected", "gauge", "Bots whose agent has been seen in the last 90 seconds.")
+	p("buildbee_bots_connected %d\n", len(snap.Presence.Bots))
+	help("buildbee_bot_slots", "gauge", "Runs the connected Bots take at once.")
+	p("buildbee_bot_slots %d\n", snap.Presence.Slots)
 	help("buildbee_people_online", "gauge", "People with the app open.")
 	p("buildbee_people_online %d\n", len(snap.Presence.People))
 

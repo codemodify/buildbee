@@ -237,38 +237,29 @@ export type Unread = {
   last_seq: number;
 };
 
-export type WorkerSeen = {
+/** BotSeen is a Bot whose agent is connected: what it runs and where. */
+export type BotSeen = {
+  bot_id: string;
   name: string;
-  agents: string[];
+  project_id: string;
+  ai: string;
+  process: string;
+  host?: string;
   slots?: number;
   running: number;
-  local?: boolean;
   last_seen: string;
 };
 
-/** AgentLoad is one agent across the workers; "any" is Runs that take whichever. */
-export type AgentLoad = {
-  agent: string;
-  workers: number;
-  running: number;
-  queued: number;
-};
-
-export type LocalWorker = {
-  state: "off" | "starting" | "running" | "unavailable" | string;
-  reason?: string;
-  name?: string;
-  isolation?: "container" | "host" | string;
-  sandboxed?: boolean;
-};
+/** BotWork is how many Runs a Bot has going and waiting. */
+export type BotWork = { running: number; queued: number };
 
 export type Presence = {
   people: Person[];
-  workers: WorkerSeen[];
-  agents: AgentLoad[];
+  bots: BotSeen[];
+  /** Work per Bot ID; "" is work nobody is assigned, such as a merge. */
+  work: Record<string, BotWork>;
   slots: number;
   running: number;
-  local: LocalWorker;
 };
 
 export type UsageRow = {

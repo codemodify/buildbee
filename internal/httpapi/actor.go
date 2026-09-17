@@ -18,7 +18,8 @@ import (
 const (
 	personCookie = "buildbee_person"
 	asHeader     = "X-BuildBee-As"
-	workerHeader = "X-BuildBee-Worker"
+	agentHeader  = "X-BuildBee-Agent" // the buildbee-agent process
+	botHeader    = "X-BuildBee-Bot"   // the Bot it runs
 )
 
 type actorKey struct{}
@@ -40,8 +41,8 @@ func (s *Server) withActor(next http.Handler) http.Handler {
 				return
 			}
 			a = core.Actor{PersonID: p.ID, Name: p.Name}
-		case strings.TrimSpace(r.Header.Get(workerHeader)) != "":
-			a = core.WorkerActor(strings.TrimSpace(r.Header.Get(workerHeader)))
+		case strings.TrimSpace(r.Header.Get(agentHeader)) != "":
+			a = core.AgentActor(strings.TrimSpace(r.Header.Get(agentHeader)), strings.TrimSpace(r.Header.Get(botHeader)))
 		default:
 			if c, err := r.Cookie(personCookie); err == nil && c.Value != "" {
 				if p, err := s.core.Person(r.Context(), c.Value); err == nil {

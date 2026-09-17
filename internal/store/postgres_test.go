@@ -291,7 +291,7 @@ func TestProjectLoadSerializesClaims(t *testing.T) {
 	}
 	claim := func(tx pgx.Tx) (int, error) {
 		st := &Store{q: tx}
-		r, err := st.ClaimRun(ctx, "w", []string{"fake"}, now, now.Add(time.Minute))
+		r, err := st.ClaimRun(ctx, "agent@test", "", "fake", now, now.Add(time.Minute))
 		if err != nil {
 			return 0, err
 		}

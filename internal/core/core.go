@@ -42,15 +42,20 @@ func invalid(format string, args ...any) error {
 // process (the Routines scheduler) when both IDs are empty.
 type Actor struct {
 	PersonID string
-	Worker   string // set for requests from a buildbee-worker
-	Name     string
+	// Agent is the buildbee-agent process acting, and BotID the Bot it
+	// runs. A Bot's work goes only to its own agent.
+	Agent string
+	BotID string
+	Name  string
 }
 
 // System returns a non-Person actor such as "routines" or "github".
 func System(name string) Actor { return Actor{Name: name} }
 
-// WorkerActor returns the actor for a worker called name.
-func WorkerActor(name string) Actor { return Actor{Worker: name, Name: "worker " + name} }
+// AgentActor returns the actor for the agent process of one Bot.
+func AgentActor(process, botID string) Actor {
+	return Actor{Agent: process, BotID: botID, Name: "agent " + process}
+}
 
 // IsPerson reports whether a Person is acting.
 func (a Actor) IsPerson() bool { return a.PersonID != "" }

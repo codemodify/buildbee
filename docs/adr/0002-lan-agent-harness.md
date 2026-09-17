@@ -19,8 +19,8 @@ The owner's goal is different: a Slack/Discord-style workspace where people and 
 | **Browser safety** | With no login, cross-site state-changing requests are refused and WebSockets are same-origin only. |
 | **Store** | Postgres only. The in-memory store is deleted; tests run against Postgres. |
 | **Schema** | One baseline migration, edited in place until the first release. The runner refuses databases with unknown or edited migrations. |
-| **Code layout** | One Go module: `cmd/buildbee-server`, `cmd/buildbee-worker`, `cmd/buildbee`, shared `internal/` packages. |
-| **Agents** | Follow Block's Buzz: each agent is a chat member driven by an ACP harness with N parallel sessions, mid-turn steering, turn limits, thread context, heartbeats and memory. Agent credentials live on the worker machine, never in BuildBee. Unlike Buzz, every Run executes in a per-Run container. |
+| **Code layout** | One Go module: `cmd/buildbee-server`, `cmd/buildbee-agent`, `cmd/buildbee`, shared `internal/` packages. |
+| **Agents** | Follow Block's Buzz: each agent *is* a chat member (a Bot) driven by an ACP harness with N parallel sessions, mid-turn steering, turn limits, thread context, heartbeats and memory. One `buildbee-agent` process runs one Bot's AI on the machine where that CLI is logged in and takes only that Bot's Runs; credentials stay on that machine, never in BuildBee. Unlike Buzz, every Run executes in a per-Run container (or bubblewrap). (Updated 2026-09-17: agents are Bots, not a pool of machine workers.) |
 | **Agents first** | `claude-agent-acp`, `goose acp` and `codex-acp`; OpenCode after. |
 | **Repos** | GitHub, with a per-Project repo and token. |
 | **Autonomy** | Agents commit and, by default, merge when CI is green and the Sentry review agent approves. Each Project can require human approval instead. |
@@ -31,4 +31,4 @@ The owner's goal is different: a Slack/Discord-style workspace where people and 
 
 - Anyone on the LAN can read and change every Project. That is acceptable for the target deployment and must be revisited before BuildBee is exposed beyond a trusted network.
 - A pre-release database must be recreated when the baseline schema changes.
-- Workers pull Runs from a Postgres-backed queue with leases and heartbeats; they open no port (Phase 3a, [workers.md](../workers.md)).
+- Agents pull their Bot's Runs from a Postgres-backed queue with leases and heartbeats; they open no port (Phase 3a, [agents.md](../agents.md)).

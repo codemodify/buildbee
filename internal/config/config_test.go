@@ -1,10 +1,8 @@
 package config
 
 import (
-	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 func env(m map[string]string) Getenv { return func(k string) string { return m[k] } }
@@ -14,7 +12,7 @@ func TestLoadServerDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":8080" || c.MaxBodyBytes != 32<<20 || c.WebDir != "" || c.LocalWorker != LocalAuto {
+	if c.Addr != ":8080" || c.MaxBodyBytes != 32<<20 || c.WebDir != "" {
 		t.Fatalf("defaults: %+v", c)
 	}
 }
@@ -28,7 +26,6 @@ func TestLoadServerRejectsBadInput(t *testing.T) {
 		"not postgres":     {map[string]string{"DATABASE_URL": "mysql://x"}, "postgres:// URL"},
 		"bad body limit":   {map[string]string{"DATABASE_URL": "postgres://x/y", "BUILDBEE_MAX_BODY_BYTES": "12"}, "BUILDBEE_MAX_BODY_BYTES"},
 		"bad repo":         {map[string]string{"DATABASE_URL": "postgres://x/y", "GITHUB_REPO": "justname"}, "owner/name"},
-		"bad local worker": {map[string]string{"DATABASE_URL": "postgres://x/y", "BUILDBEE_LOCAL_WORKER": "yes"}, "auto, on or off"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := LoadServer(env(tc.env))
@@ -39,56 +36,37 @@ func TestLoadServerRejectsBadInput(t *testing.T) {
 	}
 }
 
-func TestLoadWorker(t *testing.T) {
-	c, err := LoadWorker(env(map[string]string{"BUILDBEE_URL": "http://buildbee.lan:8080/",
-		"BUILDBEE_WORKER_NAME": "gpu-box", "BUILDBEE_WORKER_AGENTS": " Claude, codex,claude ", "BUILDBEE_WORKER_SLOTS": "12",
-		"BUILDBEE_AGENT_CLAUDE": "npx -y @agentclientprotocol/claude-agent-acp", "BUILDBEE_WORKER_RUN_TIMEOUT": "45m"}))
+func TestLoadAgent(t *testing.T) {
+	_, err := LoadAgent(env(map[string]string{}))
+	if err == nil || !strings.Contains(err.Error(), "BUILDBEE_BOT") || !strings.Contains(err.Error(), "BUILDBEE_AI") {
+		t.Fatalf("a Bot and an AI are required: %v", err)
+	}
+	c, err := LoadAgent(env(map[string]string{
+		"BUILDBEE_URL": "http://buildbee.lan:8080/", "BUILDBEE_BOT": "bot-1", "BUILDBEE_AI": "Claude",
+		"BUILDBEE_AGENT_HOST": "nc-laptop", "BUILDBEE_SLOTS": "2", "BUILDBEE_AI_CODEX": "npx codex-acp --stdio",
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ServerURL != "http://buildbee.lan:8080" || c.Name != "gpu-box" || c.Slots != 12 ||
-		!slices.Equal(c.Agents, []string{"claude", "codex"}) || c.Isolation != "container" || c.Image != "buildbee-agents" || c.RunTimeout != 45*time.Minute ||
-		!slices.Equal(c.AgentCommands["claude"], []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp"}) {
-		t.Fatalf("worker: %+v", c)
+	if c.ServerURL != "http://buildbee.lan:8080" || c.BotID != "bot-1" || c.AI != "claude" || c.Slots != 2 {
+		t.Fatalf("agent: %+v", c)
+	}
+	if c.Name != "bot-1@nc-laptop" {
+		t.Fatalf("it names itself for people to recognise: %q", c.Name)
+	}
+	if got := strings.Join(c.AICommands["codex"], " "); got != "npx codex-acp --stdio" {
+		t.Fatalf("AI command override: %q", got)
+	}
+	if c.Isolation != "container" || c.Sandbox != "auto" || !c.OpenPRs {
+		t.Fatalf("defaults: %+v", c)
 	}
 	for _, bad := range []map[string]string{
-		{"BUILDBEE_URL": "buildbee.lan"},
-		{"BUILDBEE_WORKER_SLOTS": "0"},
-		{"BUILDBEE_WORKER_SLOTS": "many"},
-		{"BUILDBEE_WORKER_RUN_TIMEOUT": "5s"},
-		{"BUILDBEE_WORKER_ISOLATION": "vm"},
-		{"BUILDBEE_WORKER_ALLOW_HOST_AGENTS": "1"},
+		{"BUILDBEE_BOT": "b", "BUILDBEE_AI": "claude", "BUILDBEE_SLOTS": "0"},
+		{"BUILDBEE_BOT": "b", "BUILDBEE_AI": "claude", "BUILDBEE_ISOLATION": "vm"},
+		{"BUILDBEE_BOT": "b", "BUILDBEE_AI": "claude", "BUILDBEE_SANDBOX": "maybe"},
 	} {
-		if _, err := LoadWorker(env(bad)); err == nil {
-			t.Fatalf("expected an error for %v", bad)
+		if _, err := LoadAgent(env(bad)); err == nil {
+			t.Errorf("accepted %v", bad)
 		}
-	}
-	if c, err := LoadWorker(env(nil)); err != nil || c.Slots != 4 || c.Agents != nil || c.RunTimeout != 2*time.Hour {
-		t.Fatalf("defaults: %+v %v", c, err)
-	}
-}
-
-func TestLocalWorkerTalksOverLoopback(t *testing.T) {
-	for addr, want := range map[string]string{
-		":8080":          "http://127.0.0.1:8080",
-		"0.0.0.0:9000":   "http://127.0.0.1:9000",
-		"10.0.0.5:8080":  "http://10.0.0.5:8080",
-		"[::]:8080":      "http://127.0.0.1:8080",
-		"127.0.0.1:8084": "http://127.0.0.1:8084",
-	} {
-		c, err := LocalWorker(env(map[string]string{"BUILDBEE_URL": "http://elsewhere:1"}), addr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if c.ServerURL != want {
-			t.Errorf("%s: %s, want %s", addr, c.ServerURL, want)
-		}
-		if !strings.HasSuffix(c.Name, "-server") || !strings.Contains(c.Dir, "buildbee-server-worker") || c.Isolation != "container" {
-			t.Errorf("%s: %+v", addr, c)
-		}
-	}
-	c, err := LocalWorker(env(map[string]string{"BUILDBEE_WORKER_NAME": "box", "BUILDBEE_WORKER_DIR": "/w"}), ":1")
-	if err != nil || c.Name != "box" || c.Dir != "/w" {
-		t.Fatalf("overrides: %+v %v", c, err)
 	}
 }

@@ -24,7 +24,7 @@ A **Handoff** targets a Member or a Role (`to_role=builder`). Completing a Scout
 
 ## 5. Execute a Run
 
-A **Run** is queued on the Server with an agent (`claude`, `codex`, …, from the request or the Bot's setting) and a prompt built from the Bot's instructions, the Task and its Handoff notes. Any **Worker** offering that agent claims it, runs the agent, and streams tokens, tool calls and logs to the Server as RunEvents (`GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`). The transcript is stored as Artifact `<agent>.log`. The `fake` agent runs only when asked for, for tests and demos. See [workers.md](workers.md).
+A **Run** is queued on the Server for one Bot, with a prompt built from the Bot's instructions, the Task, its Handoff notes and the Task's attachments. That Bot's **agent** (`buildbee-agent`, running somewhere with its AI logged in) claims it, runs the AI, and streams tokens, tool calls and logs to the Server as RunEvents (`GET /v1/runs/{id}/events`, WebSocket `/v1/runs/{id}/ws`). The transcript is stored as Artifact `<ai>.log`. The `fake` AI is for tests and demos. See [agents.md](agents.md).
 
 A Run may produce Artifacts (patches, logs, reports). Those Artifacts stay attached to the Task.
 

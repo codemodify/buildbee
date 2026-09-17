@@ -1,6 +1,6 @@
 # Deploy on a LAN
 
-BuildBee runs as one Server on a trusted network, plus workers on the machines that execute Runs. There is no login: anyone who can reach the Server can use every Project.
+BuildBee runs as one Server on a trusted network, plus one `buildbee-agent` process per Bot, on the machines where those AIs are logged in. There is no login: anyone who can reach the Server can use every Project.
 
 ## Server
 
@@ -18,20 +18,20 @@ Compose reads these from the environment or an `.env` file next to the compose f
 | --- | --- | --- |
 | `BUILDBEE_PORT` | `8080` | port the Server is published on |
 | `BUILDBEE_DB_PASSWORD` | `buildbee` | Postgres password; set it before the first start |
-| `GITHUB_TOKEN`, `GITHUB_REPO` | unset | Issue sync (workers open PRs with their own `gh` login) |
+| `GITHUB_TOKEN`, `GITHUB_REPO` | unset | Issue sync (agents open PRs with their own `gh` login) |
 | `GITHUB_WEBHOOK_SECRET` | unset | require signed GitHub webhooks |
 
 `/healthz` returns 200 only when Postgres answers; compose uses it as the Server's health check.
 
 ## Workers
 
-Workers pull Runs from the Server and open no port. The compose `worker` profile starts one that offers only the fake agent, for demos:
+Agents connect out to the Server and open no port. Add a Bot in `# status`, then start its agent with the line that dialog shows. The compose `agent` profile starts one running the fake AI, for demos:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml --profile worker up -d --build
+BUILDBEE_BOT=<bot id> docker compose -f deploy/compose/docker-compose.yml --profile agent up -d --build
 ```
 
-Workers that run real agents run on machines where the agent CLIs are installed and logged in. See [docs/workers.md](../docs/workers.md).
+A Bot that runs a real AI needs its agent on a machine where that CLI is installed and logged in. See [docs/agents.md](../docs/agents.md).
 
 ## Backups
 
@@ -46,7 +46,7 @@ The backup is a `pg_dump` archive plus a tar of the files volume; restoring repl
 
 ## Monitoring
 
-`GET /metrics` is Prometheus text: Runs by status, Runs running and queued per agent, workers online and their slots, people online, and request counts and latency. `# status` shows the same at a glance: agents, what is running, and what failed today.
+`GET /metrics` is Prometheus text: Runs by status, Runs running and queued per Bot, Bots connected and their slots, people online, and request counts and latency. `# status` shows the same at a glance: which Bots are online, what is running, and what failed today.
 
 Finished Runs' event streams (the agents' token-by-token output) and read notifications are deleted after `BUILDBEE_RETENTION_DAYS` (90 by default; 0 keeps them). The Runs themselves, their summaries, Artifacts and messages are never swept.
 

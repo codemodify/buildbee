@@ -43,32 +43,36 @@ func (s *signal) notify() {
 // down server does not hold workers' long-polls open.
 func (s *Service) StopWaiting() { s.queue.stop.Do(func() { close(s.queue.stopped) }) }
 
-// ClaimRun gives the worker the oldest queued Run for one of its agents,
-// waiting up to wait for one to appear. It returns nil, nil when there is
-// none.
-func (s *Service) ClaimRun(ctx context.Context, a Actor, agents []string, wait time.Duration) (*models.Claim, error) {
-	if a.Worker == "" {
-		return nil, invalid("only a worker (X-BuildBee-Worker) can claim Runs")
+// Connect is what a Bot's agent says about itself when it asks for work.
+type Connect struct {
+	AI    string `json:"ai"`    // the AI it runs: claude, codex, grok, opencode, goose, fake
+	Host  string `json:"host"`  // the machine it runs on, for people to see
+	Slots int    `json:"slots"` // Runs it takes at once
+}
+
+// ClaimRun gives a Bot's agent the oldest Run waiting for that Bot (or a
+// Run nobody is assigned, such as a merge), waiting up to wait for one to
+// appear. It returns nil, nil when there is none.
+func (s *Service) ClaimRun(ctx context.Context, a Actor, in Connect, wait time.Duration) (*models.Claim, error) {
+	if a.Agent == "" || a.BotID == "" {
+		return nil, invalid("an agent identifies itself with X-BuildBee-Agent and the Bot it runs with X-BuildBee-Bot")
 	}
-	var clean []string
-	for _, ag := range agents {
-		ag = strings.ToLower(strings.TrimSpace(ag))
-		if ag == "" {
-			continue
-		}
-		if !models.ValidAgent(ag) {
-			return nil, invalid("unknown agent %q", ag)
-		}
-		clean = append(clean, ag)
+	ai := strings.ToLower(strings.TrimSpace(in.AI))
+	if !models.ValidAgent(ai) || ai == "" {
+		return nil, invalid("ai must be one of %s", strings.Join(models.Agents, ", "))
 	}
-	if len(clean) == 0 {
-		return nil, invalid("a worker must offer at least one agent")
+	bot, err := s.st.GetMember(ctx, a.BotID)
+	if err != nil {
+		return nil, err
 	}
-	s.sawWorker(a.Worker, clean)
+	if bot.Kind != models.KindBot || bot.LeftAt != nil {
+		return nil, invalid("%s is not a Bot of this Server", a.BotID)
+	}
+	s.sawAgent(*bot, a.Agent, ai, in.Host, in.Slots)
 	deadline := time.Now().Add(wait)
 	for {
 		ready := s.queue.wait() // before trying, so a Run queued meanwhile still wakes us
-		c, err := s.claimOnce(ctx, a, clean)
+		c, err := s.claimOnce(ctx, a, ai)
 		if c != nil || err != nil {
 			return c, err
 		}
@@ -95,10 +99,10 @@ func (s *Service) ClaimRun(ctx context.Context, a Actor, agents []string, wait t
 // errOverLimit rolls back a claim that would exceed its Project's max_runs.
 var errOverLimit = errors.New("project at max_runs")
 
-func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*models.Claim, error) {
+func (s *Service) claimOnce(ctx context.Context, a Actor, ai string) (*models.Claim, error) {
 	var out *models.Claim
 	err := s.tx(ctx, func(w *work) error {
-		r, err := w.st.ClaimRun(ctx, a.Worker, agents, w.now, w.now.Add(LeaseTTL))
+		r, err := w.st.ClaimRun(ctx, a.Agent, a.BotID, ai, w.now, w.now.Add(LeaseTTL))
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
 		}
@@ -138,7 +142,7 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 			}
 		}
 		ev, err := w.st.AppendRunEvent(ctx, r.ID, models.RunEventStatus,
-			map[string]any{"status": r.Status, "detail": "claimed by worker " + a.Worker}, w.now)
+			map[string]any{"status": r.Status, "detail": "claimed by " + a.Agent}, w.now)
 		if err != nil {
 			return err
 		}
@@ -146,7 +150,7 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 		c.Seq = ev.Seq
 		by := w.runActor(ctx, a, r)
 		if err := w.activity(ctx, r.ProjectID, by, models.TypeRun, "claimed", r.ID,
-			map[string]any{"task_id": r.TaskID, "worker": a.Worker, "attempt": r.Attempts}); err != nil {
+			map[string]any{"task_id": r.TaskID, "worker": a.Agent, "attempt": r.Attempts}); err != nil {
 			return err
 		}
 		out = c
@@ -158,16 +162,16 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, agents []string) (*mod
 	return out, err
 }
 
-// Heartbeat renews the worker's lease on a Run and returns the Run, so the
-// worker sees a cancellation (status canceled) and stops.
+// Heartbeat renews an agent's lease on a Run and returns the Run, so the
+// agent sees a cancellation (status canceled) and stops.
 func (s *Service) Heartbeat(ctx context.Context, a Actor, runID string) (*models.Run, error) {
-	if a.Worker == "" {
-		return nil, invalid("only a worker (X-BuildBee-Worker) can heartbeat Runs")
+	if a.Agent == "" {
+		return nil, invalid("only the agent running a Run can heartbeat it")
 	}
-	s.sawWorker(a.Worker, nil)
+	s.stillThere(a.BotID)
 	var out *models.Run
 	err := s.tx(ctx, func(w *work) error {
-		r, err := w.st.ExtendLease(ctx, runID, a.Worker, w.now.Add(LeaseTTL))
+		r, err := w.st.ExtendLease(ctx, runID, a.Agent, w.now.Add(LeaseTTL))
 		if errors.Is(err, store.ErrConflict) {
 			return fmt.Errorf("%w: run is claimed by another worker", store.ErrConflict)
 		}
@@ -189,7 +193,7 @@ func (s *Service) ReapRuns(ctx context.Context) (int, error) {
 		for i := range runs {
 			r := &runs[i]
 			r.Status = models.RunFailed
-			r.Detail = "worker " + r.Worker + " stopped heartbeating"
+			r.Detail = r.Worker + " stopped heartbeating"
 			r.UpdatedAt, r.LeaseUntil = w.now, nil
 			t := w.now
 			r.FinishedAt = &t
@@ -217,15 +221,15 @@ func (s *Service) ReapRuns(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// ownRun lets a worker write only to Runs it claimed. People may still
+// ownRun lets an agent write only to Runs it claimed. People may still
 // change any Run (for example, cancel it).
 func ownRun(a Actor, r *models.Run) error {
 	switch {
-	case a.Worker == "" || r.Worker == a.Worker:
+	case a.Agent == "" || r.Worker == a.Agent:
 		return nil
 	case r.Worker == "":
 		return fmt.Errorf("%w: claim the run before writing to it", store.ErrConflict)
 	default:
-		return fmt.Errorf("%w: run is claimed by worker %s", store.ErrConflict, r.Worker)
+		return fmt.Errorf("%w: run is claimed by %s", store.ErrConflict, r.Worker)
 	}
 }

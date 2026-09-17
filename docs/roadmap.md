@@ -1,5 +1,7 @@
 # Roadmap
 
+> Language note (2026-09-17): what earlier phases call a **worker** is now one **agent** per Bot (`buildbee-agent`, one Bot, one AI, no machine pool). The history below is kept as written; [agents.md](agents.md) describes what runs today.
+
 BuildBee is being rebuilt into a LAN harness where people and coding agents work on many Projects in parallel. Decisions are recorded in [ADR 0002](adr/0002-lan-agent-harness.md).
 
 ## Phase 0 — Cleanup (done)

@@ -1,4 +1,4 @@
-package worker
+package agent
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codemodify/buildbee/internal/worker/acp"
+	"github.com/codemodify/buildbee/internal/agent/acp"
 )
 
 // Sandbox modes for agents that run on the machine (host isolation).

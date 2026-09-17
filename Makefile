@@ -17,7 +17,7 @@ embed-web: web
 build: embed-web
 	mkdir -p $(BIN)
 	go build -trimpath -o $(BIN)/buildbee-server ./cmd/buildbee-server
-	go build -trimpath -o $(BIN)/buildbee-worker ./cmd/buildbee-worker
+	go build -trimpath -o $(BIN)/buildbee-agent ./cmd/buildbee-agent
 	go build -trimpath -o $(BIN)/buildbee ./cmd/buildbee
 	go build -trimpath -o $(BIN)/buildbee-loadtest ./cmd/buildbee-loadtest
 

@@ -25,14 +25,32 @@ func newAutopilot(t *testing.T, policy string) *autopilot {
 	on, repo := true, "/srv/git/app.git"
 	_, err := f.s.UpdateProject(f.ctx, ada, p.ID, ProjectPatch{AutoRun: &on, RepoURL: &repo, MergePolicy: &policy})
 	f.must(err)
-	return &autopilot{fixture: f, ada: ada, p: p, w: WorkerActor("w1")}
+	return &autopilot{fixture: f, ada: ada, p: p}
+}
+
+// claimAny asks each Bot's agent in turn for a Run and returns it with the
+// agent that took it, which is who reports on it.
+func (a *autopilot) claimAny() (*models.Claim, Actor) {
+	a.t.Helper()
+	for _, role := range []string{models.RoleScout, models.RoleBuilder, models.RoleSentry, models.RolePulse} {
+		b := bot(a.p, role)
+		if b == nil {
+			continue
+		}
+		who := a.agentOf(b.ID)
+		c, err := a.s.ClaimRun(a.ctx, who, Connect{AI: "claude", Slots: 4}, 0)
+		a.must(err)
+		if c != nil {
+			return c, who
+		}
+	}
+	return nil, Actor{}
 }
 
 // next claims the queued Run, checks its kind, and reports it succeeded.
 func (a *autopilot) next(kind models.RunKind, rep RunReport) *models.Run {
 	a.t.Helper()
-	c, err := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
-	a.must(err)
+	c, who := a.claimAny()
 	if c == nil {
 		a.t.Fatalf("no Run queued, want a %s Run", kind)
 	}
@@ -40,14 +58,14 @@ func (a *autopilot) next(kind models.RunKind, rep RunReport) *models.Run {
 		a.t.Fatalf("queued a %s Run, want %s", c.Run.Kind, kind)
 	}
 	rep.Status = "succeeded"
-	r, err := a.s.ReportRun(a.ctx, a.w, c.Run.ID, rep)
+	r, err := a.s.ReportRun(a.ctx, who, c.Run.ID, rep)
 	a.must(err)
 	return r
 }
 
 func (a *autopilot) idle() {
 	a.t.Helper()
-	if c, _ := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0); c != nil {
+	if c, _ := a.claimAny(); c != nil {
 		a.t.Fatalf("nothing should be queued, got a %s Run", c.Run.Kind)
 	}
 }
@@ -87,12 +105,13 @@ func TestAutopilotPlansBuildsReviewsAndMerges(t *testing.T) {
 		t.Fatalf("review: verdict %q, prompt:\n%s", review.Verdict, review.Prompt)
 	}
 	// No CI on this Task: an approved branch merges at once, on any worker.
-	c, err := a.s.ClaimRun(a.ctx, WorkerActor("fake-box"), []string{"fake"}, 0)
+	merger := a.agentOf(bot(a.p, models.RolePulse).ID)
+	c, err := a.s.ClaimRun(a.ctx, merger, Connect{AI: "fake"}, 0)
 	a.must(err)
 	if c == nil || c.Run.Kind != models.RunMerge || c.Task.Branch != "buildbee/add-caching-1" {
 		t.Fatalf("merge: %+v", c)
 	}
-	_, err = a.s.ReportRun(a.ctx, WorkerActor("fake-box"), c.Run.ID, RunReport{Status: "succeeded", Detail: "merged"})
+	_, err = a.s.ReportRun(a.ctx, merger, c.Run.ID, RunReport{Status: "succeeded", Detail: "merged"})
 	a.must(err)
 	task := a.refresh()
 	if task.Status != models.TaskDone || task.MergedAt == nil {
@@ -201,12 +220,12 @@ func TestWithoutAutopilotRunsStopAfterThemselves(t *testing.T) {
 	if r.Kind != models.RunBuild {
 		t.Fatalf("a Builder Run builds: %+v", r)
 	}
-	w := WorkerActor("w1")
-	_, err = f.s.ClaimRun(f.ctx, w, []string{"claude"}, 0)
+	w := f.agentOf(bot(p, models.RoleBuilder).ID)
+	_, err = f.s.ClaimRun(f.ctx, w, Connect{AI: "claude"}, 0)
 	f.must(err)
 	_, err = f.s.ReportRun(f.ctx, w, r.ID, RunReport{Status: "succeeded", Branch: "buildbee/by-hand-1"})
 	f.must(err)
-	if c, _ := f.s.ClaimRun(f.ctx, w, []string{"claude"}, 0); c != nil {
+	if c, _ := f.s.ClaimRun(f.ctx, w, Connect{AI: "claude"}, 0); c != nil {
 		t.Fatalf("nothing follows without autopilot: %+v", c.Run)
 	}
 	if task, _ := f.s.Task(f.ctx, tc.ID); task.Branch != "buildbee/by-hand-1" {
@@ -243,22 +262,24 @@ func TestOnlyTheApprovedCommitMerges(t *testing.T) {
 	a.next(models.RunPlan, RunReport{Summary: "plan"})
 	a.next(models.RunBuild, RunReport{Branch: "buildbee/exact-1", Commit: commitA})
 	// A person queues another build while Sentry reviews commit A.
-	review, err := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
-	a.must(err)
-	_, err = a.s.CreateRun(a.ctx, a.ada, a.task.ID, NewRun{BotMemberID: bot(a.p, models.RoleBuilder).ID})
+	review, reviewer := a.claimAny()
+	_, err := a.s.CreateRun(a.ctx, a.ada, a.task.ID, NewRun{BotMemberID: bot(a.p, models.RoleBuilder).ID})
 	a.must(err)
 	a.next(models.RunBuild, RunReport{Branch: "buildbee/exact-1", Commit: commitB})
-	_, err = a.s.ReportRun(a.ctx, a.w, review.Run.ID, RunReport{Status: "succeeded", Summary: "VERDICT: APPROVE", Commit: commitA})
+	_, err = a.s.ReportRun(a.ctx, reviewer, review.Run.ID, RunReport{Status: "succeeded", Summary: "VERDICT: APPROVE", Commit: commitA})
 	a.must(err)
 	for {
-		c, _ := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
+		c, taker := a.claimAny()
 		if c == nil {
 			break
 		}
 		if c.Run.Kind == models.RunMerge {
 			t.Fatal("approving commit A must not merge commit B")
 		}
-		a.must(func() error { _, err := a.s.ReportRun(a.ctx, a.w, c.Run.ID, RunReport{Status: "canceled"}); return err }())
+		a.must(func() error {
+			_, err := a.s.ReportRun(a.ctx, taker, c.Run.ID, RunReport{Status: "canceled"})
+			return err
+		}())
 	}
 }
 
@@ -296,13 +317,12 @@ func TestCIIsMatchedByCommit(t *testing.T) {
 	a.start("Fast CI")
 	a.next(models.RunPlan, RunReport{Summary: "plan"})
 	// A fast check reports before the build does.
-	build, err := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
-	a.must(err)
-	_, err = a.s.RecordPipeline(a.ctx, System("github"), a.task.ID, NewPipeline{Name: "lint", Status: "failure", Commit: commitA})
+	build, builder := a.claimAny()
+	_, err := a.s.RecordPipeline(a.ctx, System("github"), a.task.ID, NewPipeline{Name: "lint", Status: "failure", Commit: commitA})
 	a.must(err)
 	_, err = a.s.RecordPipeline(a.ctx, System("github"), a.task.ID, NewPipeline{Name: "old", Status: "failure", Commit: commitB})
 	a.must(err)
-	_, err = a.s.ReportRun(a.ctx, a.w, build.Run.ID, RunReport{Status: "succeeded", Branch: "buildbee/fast-1", Commit: commitA})
+	_, err = a.s.ReportRun(a.ctx, builder, build.Run.ID, RunReport{Status: "succeeded", Branch: "buildbee/fast-1", Commit: commitA})
 	a.must(err)
 	a.next(models.RunReview, RunReport{Summary: "VERDICT: APPROVE", Commit: commitA})
 	fix := a.next(models.RunBuild, RunReport{Branch: "buildbee/fast-1", Commit: commitB})
@@ -337,8 +357,7 @@ func TestReapedRunsTellPeople(t *testing.T) {
 	var mu sync.Mutex
 	a.s.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
 	a.start("Lost")
-	_, err := a.s.ClaimRun(a.ctx, a.w, []string{"claude"}, 0)
-	a.must(err)
+	_, _ = a.claimAny()
 	mu.Lock()
 	clock = clock.Add(2 * LeaseTTL)
 	mu.Unlock()
@@ -363,12 +382,13 @@ func TestMaxRunsHoldsUnderConcurrentClaims(t *testing.T) {
 	for i := range 6 {
 		f.queue(ada, p.ID, "t"+string(rune('a'+i)), NewRun{Agent: "fake"})
 	}
+	botID := bot(p, models.RoleBuilder).ID
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	claimed := 0
 	for i := range 6 {
 		wg.Go(func() {
-			c, err := f.s.ClaimRun(f.ctx, WorkerActor("w"+string(rune('0'+i))), []string{"fake"}, 0)
+			c, err := f.s.ClaimRun(f.ctx, AgentActor("w"+string(rune('0'+i)), botID), Connect{AI: "fake"}, 0)
 			if err != nil {
 				t.Error(err)
 			}

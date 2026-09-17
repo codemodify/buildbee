@@ -1,4 +1,4 @@
-package worker
+package agent
 
 import (
 	"context"
@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/agent/acp"
 	"github.com/codemodify/buildbee/internal/core"
 	"github.com/codemodify/buildbee/internal/models"
-	"github.com/codemodify/buildbee/internal/worker/acp"
 )
 
 // origin creates a bare repo with one commit on main and returns its path.
@@ -86,7 +86,7 @@ func TestRunOnARepoPushesItsBranch(t *testing.T) {
 	if body := gitOut(t, bare, "show", branch+":hello.txt"); body != "hi" {
 		t.Fatalf("pushed file: %q", body)
 	}
-	if subject := gitOut(t, bare, "log", "-1", "--format=%s%n%an", branch); subject != "Add a greeting\nBuildBee" {
+	if subject := gitOut(t, bare, "log", "-1", "--format=%s%n%an", branch); subject != "Add a greeting\nBuilder (BuildBee)" {
 		t.Fatalf("commit: %q", subject)
 	}
 	arts, _ := s.svc.Artifacts(s.ctx, r.TaskID)
@@ -303,7 +303,17 @@ func TestAutopilotEndToEnd(t *testing.T) {
 		}
 		return "", fmt.Errorf("unexpected prompt: %s", job.Prompt)
 	}
-	s.start(Config{Agents: []string{"claude"}, Isolation: IsolationHost, Dir: t.TempDir(), Exec: agent})
+	// Autopilot moves the Task between Bots, so each Bot brings its own
+	// agent: Scout plans, Builder builds, Sentry reviews.
+	proj, err := s.svc.Project(s.ctx, s.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{models.RoleScout, models.RoleBuilder, models.RoleSentry} {
+		b := models.MemberByRole(proj.Members, role)
+		s.start(Config{Name: b.DisplayName + "@test", BotID: b.ID, AI: "claude", Isolation: IsolationHost,
+			Dir: t.TempDir(), Exec: agent})
+	}
 
 	tc, err := s.svc.CreateTask(s.ctx, s.ada, s.project, core.NewTask{Title: "Greet people"})
 	if err != nil {

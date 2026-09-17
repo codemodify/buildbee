@@ -2,7 +2,7 @@
 
 BuildBee is a chat workspace where people and coding agents work on **Projects** together. People and **Bots** share Channels, hand Tasks to each other, record Decisions, and Bots execute **Runs** that stream their work back into the Project.
 
-It runs as one Server on a trusted LAN. There is no login: open the Server in a browser and start working. Many Projects share one Server, and Runs execute on any number of worker machines that pull them from the Server.
+It runs as one Server on a trusted LAN. There is no login: open the Server in a browser and start working. Many Projects share one Server. Each Bot is a `buildbee-agent` process on whichever machine has its AI logged in; it takes that Bot's work from the Server.
 
 The rebuild toward massively parallel, autonomous agent work is in progress. See the [roadmap](docs/roadmap.md) for what exists today and what comes next, and [ADR 0002](docs/adr/0002-lan-agent-harness.md) for the decisions behind it. Product nouns are fixed in the [glossary](docs/glossary.md); the [API reference](docs/api.md) covers identity, endpoints, paging and live events.
 
@@ -15,13 +15,13 @@ docker compose -f deploy/compose/docker-compose.yml up --build
 # http://<this-host>:8080
 ```
 
-That starts Postgres and the Server with the web UI. Add a demo worker (fake agent only):
+That starts Postgres and the Server with the web UI. Add a Bot in `# status`, and it shows the line to run where its AI lives:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml --profile worker up --build
+buildbee-agent --server http://buildbee.lan:8080 --bot <bot id> --ai claude
 ```
 
-Real agents run on machines where their CLIs are logged in; see [docs/workers.md](docs/workers.md). Turn on [autopilot](docs/autopilot.md) and a Project's Bots take Tasks from plan to merged code by themselves. In the web app, ask for work by mentioning a Bot (`@Builder add rate limiting`) and follow it in the Task's thread, live. [deploy/README.md](deploy/README.md) covers configuration, backups and upgrades.
+A Bot is online while its agent runs; see [docs/agents.md](docs/agents.md). Turn on [autopilot](docs/autopilot.md) and a Project's Bots take Tasks from plan to merged code by themselves. In the web app, ask for work by mentioning a Bot (`@Builder add rate limiting`) and follow it in the Task's thread, live. [deploy/README.md](deploy/README.md) covers configuration, backups and upgrades.
 
 ## Develop
 
@@ -30,7 +30,7 @@ Requirements: Go 1.27, Node 24, Docker (for Postgres in tests and the compose st
 ```bash
 make test        # gofmt check, go vet, Go tests on Postgres, web build
 make run         # Server with the web UI served from web/dist (needs DATABASE_URL)
-make build       # bin/buildbee-server (UI embedded), bin/buildbee-worker, bin/buildbee
+make build       # bin/buildbee-server (UI embedded), bin/buildbee-agent, bin/buildbee
 make smoke       # build both images and exercise the compose stack
 ```
 
@@ -44,19 +44,19 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 
 | Path | What it is |
 | --- | --- |
-| [`cmd/buildbee-server`](cmd/buildbee-server) | Server: REST `/v1`, WebSockets, Routines worker, embedded web UI |
-| [`cmd/buildbee-worker`](cmd/buildbee-worker) | Worker: claims queued Runs and executes them with agent CLIs |
+| [`cmd/buildbee-server`](cmd/buildbee-server) | Server: REST `/v1`, WebSockets, Routines, embedded web UI |
+| [`cmd/buildbee-agent`](cmd/buildbee-agent) | one Bot's agent: runs its AI's CLI and takes that Bot's Runs |
 | [`cmd/buildbee`](cmd/buildbee) | CLI for Projects, Tasks, Handoffs, Runs and Routines |
 | [`cmd/buildbee-loadtest`](cmd/buildbee-loadtest) | drives a Server with many Runs at once and reports how it kept up |
 | [`internal/core`](internal/core) | Business rules: one transaction per operation with its Activity and notifications |
 | [`internal/httpapi`](internal/httpapi) | Thin HTTP handlers, identity resolution, middleware |
 | [`internal/ws`](internal/ws) | WebSocket hub with cursor replay |
 | [`internal/store`](internal/store) | Postgres persistence; [`internal/migrate`](internal/migrate) holds the schema |
-| [`internal/worker`](internal/worker) | claim loop, heartbeats and reporting; [`acp`](internal/worker/acp) Agent Client Protocol client |
+| [`internal/agent`](internal/agent) | claim loop, heartbeats and reporting; [`acp`](internal/agent/acp) Agent Client Protocol client |
 | [`internal/config`](internal/config) | Validated configuration for each binary |
 | [`internal/testdb`](internal/testdb) | Per-test Postgres databases |
 | [`web/`](web/) | Vite + React + TypeScript + Tailwind UI |
-| [`deploy/compose`](deploy/compose) | Postgres + Server (+ worker) for one LAN host |
+| [`deploy/compose`](deploy/compose) | Postgres + Server (+ an agent for one Bot) for one LAN host |
 | [`desktop/`](desktop/) | Tauri shell; becomes the desktop and mobile apps ([roadmap](docs/roadmap.md) Phase 6) |
 | [`docs/`](docs/) | Glossary, workflow, roadmap, ADRs |
 
@@ -72,21 +72,19 @@ For UI work, run the Server and then `cd web && npm run dev`. Vite proxies `/v1`
 | `BUILDBEE_S3_ENDPOINT`, `_BUCKET`, `_REGION`, `_ACCESS_KEY`, `_SECRET_KEY` | server | unset | keep them in an S3-compatible bucket instead |
 | `BUILDBEE_MAX_UPLOAD_BYTES` | server | 25 MiB | one attachment |
 | `BUILDBEE_RETENTION_DAYS` | server | `90` | keep finished Runs' event streams and read notifications this long (0 = forever) |
-| `BUILDBEE_LOCAL_WORKER` | server | `auto` | run agents on the Server's machine: `auto`, `on` or `off` ([workers.md](docs/workers.md)) |
-| `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | Issue sync; without them it answers 503. Workers open PRs with their own `gh` login |
+| `GITHUB_TOKEN`, `GITHUB_REPO` | server | unset | Issue sync; without them it answers 503. Agents open PRs with their own `gh` login |
 | `GITHUB_WEBHOOK_SECRET` | server | unset | require `X-Hub-Signature-256` on webhooks |
-| `BUILDBEE_URL` | worker, CLI | `http://127.0.0.1:8080` | the Server |
+| `BUILDBEE_URL` | agent, CLI | `http://127.0.0.1:8080` | the Server |
 | `BUILDBEE_AS` | CLI | your login name | the Person the CLI acts as |
-| `BUILDBEE_WORKER_NAME` | worker | hostname | unique worker name; Runs are owned by it |
-| `BUILDBEE_WORKER_AGENTS` | worker | detected | agents to offer, comma-separated ([workers.md](docs/workers.md)) |
-| `BUILDBEE_WORKER_SLOTS` | worker | `4` | Runs executed at once |
-| `BUILDBEE_WORKER_ISOLATION` | worker | `container` | `host` runs agents directly on the worker machine (see below) |
-| `BUILDBEE_WORKER_SANDBOX` | worker | `auto` | host agents under bubblewrap: `auto`, `require` or `off` |
-| `BUILDBEE_WORKER_IMAGE` | worker | `buildbee-agents` | agents image, built from `Dockerfile.agents` |
-| `BUILDBEE_WORKER_RUN_TIMEOUT` | worker | `2h` | Run time limit |
-| `BUILDBEE_WORKER_DIR` | worker | `~/.cache/buildbee-worker` | repo mirrors and Run checkouts |
-| `BUILDBEE_WORKER_OPEN_PRS` | worker | `1` | open a PR with `gh` after pushing |
-| `BUILDBEE_AGENT_<NAME>` | worker | built in | command that starts an agent over ACP |
+| `BUILDBEE_BOT` | agent | required | the Bot this agent runs (`--bot`) |
+| `BUILDBEE_AI` | agent | required | its AI: `claude`, `codex`, `grok`, `opencode`, `goose`, `fake` (`--ai`) |
+| `BUILDBEE_SLOTS` | agent | `4` | Runs this Bot takes at once |
+| `BUILDBEE_ISOLATION` | agent | `container` | `host` runs the AI directly on the machine (see below) |
+| `BUILDBEE_SANDBOX` | agent | `auto` | host AIs under bubblewrap: `auto`, `require` or `off` |
+| `BUILDBEE_IMAGE` | agent | `buildbee-agents` | image with the AIs, built from `Dockerfile.agents` |
+| `BUILDBEE_DIR` | agent | `~/.cache/buildbee-agent` | repo mirrors and Run checkouts |
+| `BUILDBEE_AI_<NAME>` | agent | built in | command that starts an AI over ACP |
+| the rest | agent | | `BUILDBEE_AGENT_NAME`, `_HOST`, `_MEMORY`, `_CPUS`, `_NETWORK`, `_RUN_TIMEOUT`, `_OPEN_PRS`: see [agents.md](docs/agents.md) |
 | `BUILDBEE_TEST_DATABASE_URL` | tests | throwaway container | Postgres for `go test` |
 
 Each binary validates its configuration at startup and refuses to start on bad input.
@@ -96,8 +94,8 @@ Each binary validates its configuration at startup and refuses to start on bad i
 BuildBee is for secure LANs only, and trusts the network it runs on. Do not expose it to the internet: there is no authentication and no TLS, by decision ([ADR 0002](docs/adr/0002-lan-agent-harness.md)). Anyone who can reach the Server can read and change every Project, and a Person is whoever claims their name: names attribute work, they do not prove identity. Protections that remain:
 
 - State-changing requests from another site's page are refused, and WebSockets only accept same-origin pages, so a website a LAN user visits cannot drive the Server through their browser.
-- Only the Server port is published by compose. Postgres stays on the compose network, and workers open no port.
-- Only the worker that claimed a Run can write to it.
-- By default each Run's agent runs in its own container that sees only the Run's checkout and that agent's login, with no Docker socket. `BUILDBEE_WORKER_ISOLATION=host` runs agents directly on the worker machine instead: sandboxed by bubblewrap where it is installed (the home hidden, only the checkout writable), otherwise with the worker user's files and logins.
+- Only the Server port is published by compose. Postgres stays on the compose network, and agents open no port: they connect out.
+- Only the agent that claimed a Run can write to it, and an agent gets only its own Bot's work.
+- By default each Run's AI runs in its own container that sees only the Run's checkout and that AI's login, with no Docker socket. `BUILDBEE_ISOLATION=host` runs the AI directly on the machine instead: sandboxed by bubblewrap where it is installed (the home hidden, only the checkout writable), otherwise with that user's files and logins.
 - A Project can make agents ask before acting (`agent_permissions: ask`): each request waits for a person's answer in `# decisions`.
 - Attachments are served so they cannot run as pages of the Server: only raster images inline, everything else as a sandboxed download.

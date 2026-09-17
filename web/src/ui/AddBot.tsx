@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useLoad } from "../store";
-import type { BotTemplate, Project } from "../types";
+import type { BotTemplate, Member, Project } from "../types";
 import { Button, ErrorNote, Field, Sheet, cx, inputBase, inputClass } from "./kit";
-import { agents } from "./Settings";
+import { ConnectSheet } from "./Connect";
+import { ais } from "./Settings";
 
 const hint: Record<string, string> = {
   scout: "plans",
@@ -22,11 +23,10 @@ export function AddBot({ projects, onClose, onDone }: { projects: Project[]; onC
   const [kind, setKind] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
-  const [agent, setAgent] = useState("");
+  const [agent, setAgent] = useState("claude");
   const [instructions, setInstructions] = useState("");
   const [err, setErr] = useState("");
-  const { data: presence } = useLoad(() => api.presence(), []);
-  const running = new Set((presence?.workers ?? []).flatMap((w) => w.agents));
+  const [added, setAdded] = useState<Member | null>(null);
   const pick = (t: BotTemplate | null) => {
     setKind(t?.role ?? "other");
     setName(t?.name ?? "");
@@ -37,12 +37,15 @@ export function AddBot({ projects, onClose, onDone }: { projects: Project[]; onC
     e.preventDefault();
     setErr("");
     try {
-      await api.addMember(projectId, { kind: "bot", display_name: name.trim(), role: role.trim(), agent, instructions: instructions.trim() });
+      const bot = await api.addMember(projectId, { kind: "bot", display_name: name.trim(), role: role.trim(), agent, instructions: instructions.trim() });
       onDone();
-      onClose();
+      setAdded(bot); // now show how to bring it to life
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : String(e2));
     }
+  }
+  if (added) {
+    return <ConnectSheet bot={added} onClose={onClose} />;
   }
   return (
     <Sheet title="Add bot" onClose={onClose}>
@@ -76,11 +79,11 @@ export function AddBot({ projects, onClose, onDone }: { projects: Project[]; onC
                 <input id="bot-role" className={inputClass} value={role} onChange={(e) => setRole(e.target.value)} placeholder="writer" />
               </Field>
             </div>
-            <Field label="Agent" hint="Which program does the work. Any agent takes whichever is free; naming one makes this Bot wait for a computer that runs it.">
+            <Field label="AI" hint="What this Bot runs. Next you get one line to run where that AI is logged in; the Bot is online while it runs.">
               <select id="bot-agent" className={cx(inputBase, "w-full")} value={agent} onChange={(e) => setAgent(e.target.value)}>
-                {agents.map((a) => (
+                {ais.map((a) => (
                   <option key={a} value={a}>
-                    {a ? `${a}${running.size === 0 || running.has(a) ? "" : " — nothing runs it here"}` : "Any agent"}
+                    {a}
                   </option>
                 ))}
               </select>

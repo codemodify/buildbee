@@ -21,45 +21,44 @@ func (f *fixture) queue(a Actor, projectID, title string, in NewRun) *models.Run
 	return r
 }
 
-func TestClaimMatchesAgents(t *testing.T) {
+func TestRunsGoToTheirBotsAgent(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
 	p := f.project(ada, "Q")
-	anyAgent := f.queue(ada, p.ID, "any", NewRun{})
-	claude := f.queue(ada, p.ID, "claude", NewRun{Agent: "claude"})
-	fake := f.queue(ada, p.ID, "fake", NewRun{Agent: "fake"})
+	builder, sentry := bot(p, models.RoleBuilder), bot(p, models.RoleSentry)
+	forBuilder := f.queue(ada, p.ID, "build it", NewRun{BotMemberID: builder.ID})
+	forSentry := f.queue(ada, p.ID, "review it", NewRun{BotMemberID: sentry.ID})
+	nobody := f.queue(ada, p.ID, "merge it", NewRun{})
 
-	fakeWorker := WorkerActor("fake-only")
-	c, err := f.s.ClaimRun(f.ctx, fakeWorker, []string{"fake"}, 0)
-	f.must(err)
-	if c == nil || c.Run.ID != fake.ID {
-		t.Fatalf("the fake agent takes only Runs asking for it, got %+v", c)
+	c, _ := f.claimFor(sentry.ID, "codex")
+	if c == nil || c.Run.ID != forSentry.ID {
+		t.Fatalf("an agent takes its own Bot's Run: %+v", c)
 	}
-	if c, _ := f.s.ClaimRun(f.ctx, fakeWorker, []string{"fake"}, 0); c != nil {
-		t.Fatalf("nothing else is for a fake-only worker: %+v", c.Run)
+	if c.Run.Agent != "codex" {
+		t.Fatalf("the Run records the AI that ran it: %q", c.Run.Agent)
 	}
-	codex := WorkerActor("codex-box")
-	c, err = f.s.ClaimRun(f.ctx, codex, []string{"codex"}, 0)
-	f.must(err)
-	if c == nil || c.Run.ID != anyAgent.ID {
-		t.Fatalf("a Run for any agent goes to the first real worker: %+v", c)
+	c, _ = f.claimFor(sentry.ID, "codex")
+	if c == nil || c.Run.ID != nobody.ID {
+		t.Fatalf("a Run for nobody goes to any agent: %+v", c)
 	}
-	if c, _ := f.s.ClaimRun(f.ctx, codex, []string{"codex"}, 0); c != nil {
-		t.Fatalf("a claude Run is not for codex: %+v", c.Run)
+	if c, _ := f.claimFor(sentry.ID, "codex"); c != nil {
+		t.Fatalf("another Bot's Run is not for this agent: %+v", c.Run)
 	}
-	c, err = f.s.ClaimRun(f.ctx, WorkerActor("claude-box"), []string{"claude"}, 0)
-	f.must(err)
-	if c == nil || c.Run.ID != claude.ID {
-		t.Fatalf("claude: %+v", c)
+	c, _ = f.claimFor(builder.ID, "claude")
+	if c == nil || c.Run.ID != forBuilder.ID {
+		t.Fatalf("builder: %+v", c)
 	}
 
-	if _, err := f.s.ClaimRun(f.ctx, ada, []string{"fake"}, 0); !errors.Is(err, store.ErrInvalid) {
+	if _, err := f.s.ClaimRun(f.ctx, ada, Connect{AI: "fake"}, 0); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("people cannot claim: %v", err)
 	}
-	if _, err := f.s.ClaimRun(f.ctx, codex, []string{"hal9000"}, 0); !errors.Is(err, store.ErrInvalid) {
-		t.Fatalf("unknown agent: %v", err)
+	if _, err := f.s.ClaimRun(f.ctx, f.agentOf(builder.ID), Connect{AI: "hal9000"}, 0); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("unknown AI: %v", err)
 	}
-	if _, err := f.s.CreateRun(f.ctx, ada, anyAgent.TaskID, NewRun{Agent: "hal9000"}); !errors.Is(err, store.ErrInvalid) {
+	if _, err := f.s.ClaimRun(f.ctx, AgentActor("x@test", p.Members[0].ID), Connect{AI: "claude"}, 0); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("an agent runs a Bot, not a person: %v", err)
+	}
+	if _, err := f.s.CreateRun(f.ctx, ada, forBuilder.TaskID, NewRun{Agent: "hal9000"}); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("runs need a known agent: %v", err)
 	}
 }
@@ -100,9 +99,10 @@ func TestClaimLongPollWakesOnNewRun(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
 	p := f.project(ada, "Q")
+	w1 := f.agentOf(bot(p, models.RoleBuilder).ID)
 	got := make(chan *models.Claim, 1)
 	go func() {
-		c, err := f.s.ClaimRun(f.ctx, WorkerActor("w1"), []string{"fake"}, 10*time.Second)
+		c, err := f.s.ClaimRun(f.ctx, w1, Connect{AI: "fake"}, 10*time.Second)
 		if err != nil {
 			t.Error(err)
 		}
@@ -126,7 +126,7 @@ func TestClaimLongPollWakesOnNewRun(t *testing.T) {
 	// An empty queue answers nil after the wait, and StopWaiting ends it early.
 	done := make(chan *models.Claim, 1)
 	go func() {
-		c, _ := f.s.ClaimRun(f.ctx, WorkerActor("w1"), []string{"fake"}, time.Minute)
+		c, _ := f.s.ClaimRun(f.ctx, w1, Connect{AI: "fake"}, time.Minute)
 		done <- c
 	}()
 	time.Sleep(50 * time.Millisecond)
@@ -149,6 +149,7 @@ func TestConcurrentClaimsTakeEachRunOnce(t *testing.T) {
 	for i := range runs {
 		f.queue(ada, p.ID, "t"+string(rune('a'+i%26)), NewRun{Agent: "fake"})
 	}
+	botID := bot(p, models.RoleBuilder).ID
 	var mu sync.Mutex
 	seen := map[string]string{}
 	var wg sync.WaitGroup
@@ -156,7 +157,7 @@ func TestConcurrentClaimsTakeEachRunOnce(t *testing.T) {
 		name := "w" + string(rune('0'+w))
 		wg.Go(func() {
 			for {
-				c, err := f.s.ClaimRun(f.ctx, WorkerActor(name), []string{"fake"}, 0)
+				c, err := f.s.ClaimRun(f.ctx, AgentActor(name, botID), Connect{AI: "fake"}, 0)
 				if err != nil {
 					t.Error(err)
 					return
@@ -188,11 +189,11 @@ func TestHeartbeatSeesCancelAndReaperFailsSilentWorkers(t *testing.T) {
 
 	ada := f.person("Ada")
 	p := f.project(ada, "Q")
-	w1 := WorkerActor("w1")
+	w1 := f.agentOf(bot(p, models.RoleBuilder).ID)
 	canceled := f.queue(ada, p.ID, "cancel me", NewRun{Agent: "fake"})
 	silent := f.queue(ada, p.ID, "silent", NewRun{Agent: "fake"})
 	for range 2 {
-		c, err := f.s.ClaimRun(f.ctx, w1, []string{"fake"}, 0)
+		c, err := f.s.ClaimRun(f.ctx, w1, Connect{AI: "fake"}, 0)
 		f.must(err)
 		if c == nil {
 			t.Fatal("expected a claim")
@@ -207,7 +208,7 @@ func TestHeartbeatSeesCancelAndReaperFailsSilentWorkers(t *testing.T) {
 	if r.Status != models.RunCanceled {
 		t.Fatalf("heartbeat must report the cancel: %+v", r)
 	}
-	if _, err := f.s.Heartbeat(f.ctx, WorkerActor("w2"), silent.ID); !errors.Is(err, store.ErrConflict) {
+	if _, err := f.s.Heartbeat(f.ctx, AgentActor("w2@test", bot(p, models.RoleSentry).ID), silent.ID); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("only the owner heartbeats: %v", err)
 	}
 
@@ -229,7 +230,7 @@ func TestHeartbeatSeesCancelAndReaperFailsSilentWorkers(t *testing.T) {
 	}
 	got, err := f.s.Run(f.ctx, silent.ID)
 	f.must(err)
-	if got.Status != models.RunFailed || !strings.Contains(got.Detail, "w1 stopped heartbeating") || got.LeaseUntil != nil {
+	if got.Status != models.RunFailed || !strings.Contains(got.Detail, w1.Agent+" stopped heartbeating") || got.LeaseUntil != nil {
 		t.Fatalf("reaped run: %+v", got)
 	}
 	if _, err := f.s.UpdateRun(f.ctx, w1, silent.ID, "succeeded", "late"); !errors.Is(err, store.ErrConflict) {
@@ -269,23 +270,23 @@ func TestClaimsShareWorkersAcrossProjects(t *testing.T) {
 	}
 	late := f.queue(ada, quiet.ID, "quiet", NewRun{Agent: "fake"})
 
-	w := WorkerActor("w1")
-	first, err := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0)
+	w := f.agentOf(bot(busy, models.RoleBuilder).ID)
+	first, err := f.s.ClaimRun(f.ctx, w, Connect{AI: "fake"}, 0)
 	f.must(err)
 	if first == nil || first.Run.ProjectID != busy.ID {
 		t.Fatalf("the oldest Run goes first: %+v", first)
 	}
-	second, err := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0)
+	second, err := f.s.ClaimRun(f.ctx, w, Connect{AI: "fake"}, 0)
 	f.must(err)
 	if second == nil || second.Run.ID != late.ID {
 		t.Fatalf("a Project at its max_runs waits, so the other Project's Run goes next: %+v", second)
 	}
-	if c, _ := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0); c != nil {
+	if c, _ := f.s.ClaimRun(f.ctx, w, Connect{AI: "fake"}, 0); c != nil {
 		t.Fatalf("Busy is at max_runs=1: %+v", c.Run)
 	}
 	_, err = f.s.ReportRun(f.ctx, w, first.Run.ID, RunReport{Status: "succeeded"})
 	f.must(err)
-	if c, _ := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0); c == nil || c.Run.ProjectID != busy.ID {
+	if c, _ := f.s.ClaimRun(f.ctx, w, Connect{AI: "fake"}, 0); c == nil || c.Run.ProjectID != busy.ID {
 		t.Fatalf("a finished Run frees Busy's slot: %+v", c)
 	}
 	bad := -1
@@ -298,7 +299,7 @@ func TestUsageIsTrackedPerRunAndSummed(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
 	p := f.project(ada, "Spend")
-	w := WorkerActor("w1")
+	w := f.agentOf(bot(p, models.RoleBuilder).ID)
 	for i, reports := range [][]map[string]any{
 		{{"used": 5000.0, "size": 200000.0, "cost": map[string]any{"amount": 0.10, "currency": "usd"}},
 			{"used": 30000.0, "size": 200000.0, "cost": map[string]any{"amount": 0.42, "currency": "usd"}},
@@ -306,7 +307,7 @@ func TestUsageIsTrackedPerRunAndSummed(t *testing.T) {
 		{{"used": 1000.0, "cost": map[string]any{"amount": 0.08, "currency": "USD"}}},
 	} {
 		r := f.queue(ada, p.ID, "spend "+string(rune('a'+i)), NewRun{Agent: "fake"})
-		_, err := f.s.ClaimRun(f.ctx, w, []string{"fake"}, 0)
+		_, err := f.s.ClaimRun(f.ctx, w, Connect{AI: "fake"}, 0)
 		f.must(err)
 		for _, u := range reports {
 			_, err := f.s.AppendRunEvent(f.ctx, w, r.ID, "usage", u)
@@ -331,51 +332,37 @@ func TestUsageIsTrackedPerRunAndSummed(t *testing.T) {
 	}
 }
 
-func TestPresenceShowsEachAgentsLoad(t *testing.T) {
+func TestPresenceShowsWhichBotsAreConnected(t *testing.T) {
 	f := newFixture(t)
 	ada := f.person("Ada")
 	p := f.project(ada, "Load")
-	f.queue(ada, p.ID, "one", NewRun{Agent: "claude"})
-	f.queue(ada, p.ID, "two", NewRun{Agent: "claude"})
-	f.queue(ada, p.ID, "three", NewRun{Agent: "codex"})
-	f.queue(ada, p.ID, "four", NewRun{})
-	f.s.WorkerSlots("box", 3)
+	builder, sentry := bot(p, models.RoleBuilder), bot(p, models.RoleSentry)
+	f.queue(ada, p.ID, "one", NewRun{BotMemberID: builder.ID})
+	f.queue(ada, p.ID, "two", NewRun{BotMemberID: builder.ID})
+	f.queue(ada, p.ID, "three", NewRun{BotMemberID: sentry.ID})
 	before := len(f.pub.topic("presence:server"))
-	c, err := f.s.ClaimRun(f.ctx, WorkerActor("box"), []string{"claude"}, 0)
-	f.must(err)
-	if c == nil || c.Run.Agent != "claude" {
-		t.Fatalf("claimed %+v", c)
+	c, who := f.claimFor(builder.ID, "claude")
+	if c == nil {
+		t.Fatal("no claim")
 	}
 	if len(f.pub.topic("presence:server")) <= before {
 		t.Fatal("a claim changes the load; subscribers are told")
 	}
-	f.s.SetLocalWorker(LocalWorker{State: "running", Name: "box", Isolation: "host"})
 	pr, err := f.s.Presence(f.ctx)
 	f.must(err)
-	got := map[string]AgentLoad{}
-	for _, a := range pr.Agents {
-		got[a.Agent] = a
+	if len(pr.Bots) != 1 || pr.Bots[0].BotID != builder.ID || pr.Bots[0].AI != "claude" || pr.Bots[0].Slots != 4 {
+		t.Fatalf("connected: %+v", pr.Bots)
 	}
-	want := map[string]AgentLoad{
-		"claude": {Agent: "claude", Workers: 1, Running: 1, Queued: 1},
-		"codex":  {Agent: "codex", Queued: 1}, // nobody offers it
-		"any":    {Agent: "any", Queued: 1},
+	if got := pr.Work[builder.ID]; got.Running != 1 || got.Queued != 1 {
+		t.Fatalf("builder's work: %+v", got)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("agents: %+v", pr.Agents)
+	if got := pr.Work[sentry.ID]; got.Queued != 1 || got.Running != 0 {
+		t.Fatalf("sentry waits for its own agent: %+v", got)
 	}
-	for k, w := range want {
-		if got[k] != w {
-			t.Fatalf("%s: %+v want %+v", k, got[k], w)
-		}
+	if pr.Slots != 4 || pr.Running != 1 {
+		t.Fatalf("slots %d running %d", pr.Slots, pr.Running)
 	}
-	if len(pr.Workers) != 1 || pr.Workers[0].Slots != 3 || pr.Workers[0].Running != 1 || !pr.Workers[0].Local || pr.Slots != 3 || pr.Running != 1 {
-		t.Fatalf("workers: %+v slots %d running %d", pr.Workers, pr.Slots, pr.Running)
-	}
-	if pr.Local.Isolation != "host" {
-		t.Fatalf("local: %+v", pr.Local)
-	}
-	_, err = f.s.ReportRun(f.ctx, WorkerActor("box"), c.Run.ID, RunReport{Status: "succeeded"})
+	_, err = f.s.ReportRun(f.ctx, who, c.Run.ID, RunReport{Status: "succeeded"})
 	f.must(err)
 	if pr, _ = f.s.Presence(f.ctx); pr.Running != 0 {
 		t.Fatalf("finished Runs free the slot: %+v", pr)

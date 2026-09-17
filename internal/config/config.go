@@ -6,7 +6,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -39,10 +38,6 @@ type Server struct {
 	S3             S3
 	MaxUploadBytes int64 // BUILDBEE_MAX_UPLOAD_BYTES: one attachment (default 25 MiB)
 	RetentionDays  int   // BUILDBEE_RETENTION_DAYS: keep Run event streams and read notifications this long (0 = forever)
-	// LocalWorker is whether the Server runs agents itself
-	// (BUILDBEE_LOCAL_WORKER): auto (default) when this machine can,
-	// on (refuse to start if it cannot) or off.
-	LocalWorker string
 }
 
 // S3 is an S3-compatible bucket for blobs.
@@ -53,13 +48,6 @@ type S3 struct {
 	AccessKey string // BUILDBEE_S3_ACCESS_KEY
 	SecretKey string // BUILDBEE_S3_SECRET_KEY
 }
-
-// Local worker modes.
-const (
-	LocalAuto = "auto"
-	LocalOn   = "on"
-	LocalOff  = "off"
-)
 
 const (
 	defaultServerAddr   = ":8080"
@@ -73,7 +61,6 @@ func LoadServer(getenv Getenv) (Server, error) {
 		DatabaseURL:  value(getenv, "DATABASE_URL", ""),
 		WebDir:       value(getenv, "BUILDBEE_WEB_DIR", ""),
 		MaxBodyBytes: defaultMaxBodyBytes,
-		LocalWorker:  strings.ToLower(value(getenv, "BUILDBEE_LOCAL_WORKER", LocalAuto)),
 		BlobDir:      value(getenv, "BUILDBEE_BLOB_DIR", defaultBlobDir()),
 		S3: S3{
 			Endpoint:  strings.TrimRight(value(getenv, "BUILDBEE_S3_ENDPOINT", ""), "/"),
@@ -136,9 +123,6 @@ func LoadServer(getenv Getenv) (Server, error) {
 	} else if c.BlobDir == "" {
 		errs = append(errs, errors.New("BUILDBEE_BLOB_DIR is required (no home directory to default to)"))
 	}
-	if !slices.Contains([]string{LocalAuto, LocalOn, LocalOff}, c.LocalWorker) {
-		errs = append(errs, fmt.Errorf("BUILDBEE_LOCAL_WORKER must be auto, on or off, got %q", c.LocalWorker))
-	}
 	return c, errors.Join(errs...)
 }
 
@@ -153,125 +137,94 @@ func defaultBlobDir() string {
 	return ""
 }
 
-// LocalWorker is the configuration of the Server's own worker: the
-// BUILDBEE_WORKER_* settings, talking to the Server over loopback, named
-// after the host with a "-server" suffix, with its own directory.
-func LocalWorker(getenv Getenv, addr string) (Worker, error) {
-	c, err := LoadWorker(func(k string) string {
-		switch k {
-		case "BUILDBEE_URL":
-			return loopback(addr)
-		case "BUILDBEE_WORKER_NAME":
-			if v := getenv(k); v != "" {
-				return v
-			}
-			host, _ := os.Hostname()
-			return host + "-server"
-		case "BUILDBEE_WORKER_DIR":
-			if v := getenv(k); v != "" {
-				return v
-			}
-			if cache, err := os.UserCacheDir(); err == nil {
-				return filepath.Join(cache, "buildbee-server-worker")
-			}
-		}
-		return getenv(k)
-	})
-	return c, err
+// Agent is the buildbee-agent configuration: the process that plugs one
+// Bot's AI into a Server.
+type Agent struct {
+	ServerURL    string // BUILDBEE_URL
+	BotID        string // BUILDBEE_BOT: the Bot this agent runs
+	AI           string // BUILDBEE_AI: claude, codex, grok, opencode, goose or fake
+	Name         string // BUILDBEE_AGENT_NAME: how this process names itself (default <bot>@<host>)
+	Host         string // BUILDBEE_AGENT_HOST: the machine, for people to see (default the hostname)
+	Slots        int    // BUILDBEE_SLOTS: Runs this Bot takes at once (default 4)
+	Isolation    string // BUILDBEE_ISOLATION: container (default) or host
+	Sandbox      string // BUILDBEE_SANDBOX: auto (default), require or off; host isolation only
+	Image        string // BUILDBEE_IMAGE: the image container isolation starts
+	Memory, CPUs string // BUILDBEE_MEMORY, BUILDBEE_CPUS: per-Run container limits
+	Network      string // BUILDBEE_NETWORK: per-Run container network
+	// AICommands overrides how an AI is started, from BUILDBEE_AI_<NAME>,
+	// e.g. BUILDBEE_AI_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp".
+	AICommands map[string][]string
+	RunTimeout time.Duration // BUILDBEE_RUN_TIMEOUT (default 2h)
+	Dir        string        // BUILDBEE_DIR: repo mirrors and Run checkouts
+	OpenPRs    bool          // BUILDBEE_OPEN_PRS=0 pushes branches without opening pull requests
 }
 
-// loopback is the URL a process on this machine reaches addr at.
-func loopback(addr string) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "http://" + addr
-	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	return "http://" + net.JoinHostPort(host, port)
-}
+// aiNames are the AIs a BUILDBEE_AI_<NAME> override may name.
+var aiNames = []string{"claude", "codex", "grok", "opencode", "goose"}
 
-// Worker is the buildbee-worker configuration.
-type Worker struct {
-	ServerURL    string   // BUILDBEE_URL
-	Name         string   // BUILDBEE_WORKER_NAME, default the hostname; unique per worker
-	Agents       []string // BUILDBEE_WORKER_AGENTS, comma-separated; empty = decided by the worker
-	Slots        int      // BUILDBEE_WORKER_SLOTS: Runs executed at once (default 4)
-	Isolation    string   // BUILDBEE_WORKER_ISOLATION: container (default) or host
-	Sandbox      string   // BUILDBEE_WORKER_SANDBOX: auto (default), require or off; host isolation only
-	Image        string   // BUILDBEE_WORKER_IMAGE: agent image for container isolation
-	Memory, CPUs string   // BUILDBEE_WORKER_MEMORY, BUILDBEE_WORKER_CPUS: per-Run container limits
-	Network      string   // BUILDBEE_WORKER_NETWORK: per-Run container network
-	// AgentCommands overrides how an agent is started, from
-	// BUILDBEE_AGENT_<NAME>, e.g. BUILDBEE_AGENT_CLAUDE="npx -y @agentclientprotocol/claude-agent-acp".
-	AgentCommands map[string][]string
-	RunTimeout    time.Duration // BUILDBEE_WORKER_RUN_TIMEOUT (default 2h)
-	Dir           string        // BUILDBEE_WORKER_DIR: repo mirrors and Run checkouts
-	OpenPRs       bool          // BUILDBEE_WORKER_OPEN_PRS=0 pushes branches without opening PRs
-}
-
-// agentNames are the agents a BUILDBEE_AGENT_<NAME> override may name.
-var agentNames = []string{"claude", "codex", "grok", "opencode", "goose"}
-
-// LoadWorker reads the worker configuration.
-func LoadWorker(getenv Getenv) (Worker, error) {
+// LoadAgent reads the agent configuration. BotID and AI are required: an
+// agent is one Bot running one AI.
+func LoadAgent(getenv Getenv) (Agent, error) {
 	host, _ := os.Hostname()
-	c := Worker{
+	c := Agent{
 		ServerURL:  strings.TrimRight(value(getenv, "BUILDBEE_URL", "http://127.0.0.1:8080"), "/"),
-		Name:       value(getenv, "BUILDBEE_WORKER_NAME", host),
+		BotID:      value(getenv, "BUILDBEE_BOT", ""),
+		AI:         strings.ToLower(value(getenv, "BUILDBEE_AI", "")),
+		Name:       value(getenv, "BUILDBEE_AGENT_NAME", ""),
+		Host:       value(getenv, "BUILDBEE_AGENT_HOST", host),
 		Slots:      4,
-		Isolation:  value(getenv, "BUILDBEE_WORKER_ISOLATION", "container"),
-		Sandbox:    strings.ToLower(value(getenv, "BUILDBEE_WORKER_SANDBOX", "auto")),
-		Image:      value(getenv, "BUILDBEE_WORKER_IMAGE", "buildbee-agents"),
-		Memory:     value(getenv, "BUILDBEE_WORKER_MEMORY", "8g"),
-		CPUs:       value(getenv, "BUILDBEE_WORKER_CPUS", "4"),
-		Network:    value(getenv, "BUILDBEE_WORKER_NETWORK", ""),
+		Isolation:  value(getenv, "BUILDBEE_ISOLATION", "container"),
+		Sandbox:    strings.ToLower(value(getenv, "BUILDBEE_SANDBOX", "auto")),
+		Image:      value(getenv, "BUILDBEE_IMAGE", "buildbee-agents"),
+		Memory:     value(getenv, "BUILDBEE_MEMORY", "8g"),
+		CPUs:       value(getenv, "BUILDBEE_CPUS", "4"),
+		Network:    value(getenv, "BUILDBEE_NETWORK", ""),
 		RunTimeout: 2 * time.Hour,
-		Dir:        value(getenv, "BUILDBEE_WORKER_DIR", ""),
-		OpenPRs:    value(getenv, "BUILDBEE_WORKER_OPEN_PRS", "1") != "0",
+		Dir:        value(getenv, "BUILDBEE_DIR", ""),
+		OpenPRs:    value(getenv, "BUILDBEE_OPEN_PRS", "1") != "0",
 	}
-	for _, a := range agentNames {
-		if argv := strings.Fields(getenv("BUILDBEE_AGENT_" + strings.ToUpper(a))); len(argv) > 0 {
-			if c.AgentCommands == nil {
-				c.AgentCommands = map[string][]string{}
+	for _, a := range aiNames {
+		if argv := strings.Fields(getenv("BUILDBEE_AI_" + strings.ToUpper(a))); len(argv) > 0 {
+			if c.AICommands == nil {
+				c.AICommands = map[string][]string{}
 			}
-			c.AgentCommands[a] = argv
+			c.AICommands[a] = argv
 		}
 	}
 	var errs []error
 	if u, err := url.Parse(c.ServerURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		errs = append(errs, fmt.Errorf("BUILDBEE_URL must be an http(s) URL, got %q", c.ServerURL))
 	}
+	if c.BotID == "" {
+		errs = append(errs, errors.New("BUILDBEE_BOT (or --bot) is required: the Bot this agent runs, from Add bot in # status"))
+	}
+	if c.AI == "" {
+		errs = append(errs, errors.New("BUILDBEE_AI (or --ai) is required: claude, codex, grok, opencode, goose or fake"))
+	}
 	if c.Isolation != "container" && c.Isolation != "host" {
-		errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_ISOLATION must be container or host, got %q", c.Isolation))
+		errs = append(errs, fmt.Errorf("BUILDBEE_ISOLATION must be container or host, got %q", c.Isolation))
 	}
 	if !slices.Contains([]string{"auto", "require", "off"}, c.Sandbox) {
-		errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_SANDBOX must be auto, require or off, got %q", c.Sandbox))
+		errs = append(errs, fmt.Errorf("BUILDBEE_SANDBOX must be auto, require or off, got %q", c.Sandbox))
 	}
-	if getenv("BUILDBEE_WORKER_ALLOW_HOST_AGENTS") != "" {
-		errs = append(errs, errors.New("BUILDBEE_WORKER_ALLOW_HOST_AGENTS is gone; set BUILDBEE_WORKER_ISOLATION=host to run agents on this machine"))
-	}
-	if c.Name == "" {
-		errs = append(errs, errors.New("BUILDBEE_WORKER_NAME is required (the hostname is unknown)"))
-	}
-	for _, a := range strings.Split(getenv("BUILDBEE_WORKER_AGENTS"), ",") {
-		if a = strings.ToLower(strings.TrimSpace(a)); a != "" && !slices.Contains(c.Agents, a) {
-			c.Agents = append(c.Agents, a)
-		}
-	}
-	if v := value(getenv, "BUILDBEE_WORKER_SLOTS", ""); v != "" {
+	if v := value(getenv, "BUILDBEE_SLOTS", ""); v != "" {
 		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 256 {
-			errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_SLOTS must be 1-256, got %q", v))
+			errs = append(errs, fmt.Errorf("BUILDBEE_SLOTS must be 1-256, got %q", v))
 		} else {
 			c.Slots = n
 		}
 	}
-	if v := value(getenv, "BUILDBEE_WORKER_RUN_TIMEOUT", ""); v != "" {
+	if v := value(getenv, "BUILDBEE_RUN_TIMEOUT", ""); v != "" {
 		if d, err := time.ParseDuration(v); err != nil || d < time.Minute {
-			errs = append(errs, fmt.Errorf("BUILDBEE_WORKER_RUN_TIMEOUT must be a duration of at least 1m, got %q", v))
+			errs = append(errs, fmt.Errorf("BUILDBEE_RUN_TIMEOUT must be a duration of at least 1m, got %q", v))
 		} else {
 			c.RunTimeout = d
+		}
+	}
+	if c.Name == "" && c.BotID != "" {
+		c.Name = c.BotID
+		if c.Host != "" {
+			c.Name += "@" + c.Host
 		}
 	}
 	return c, errors.Join(errs...)

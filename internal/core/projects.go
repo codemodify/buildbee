@@ -351,6 +351,18 @@ func (s *Service) AddMember(ctx context.Context, a Actor, projectID string, in N
 	return out, err
 }
 
+// Bot returns one Bot, for its agent to check itself against.
+func (s *Service) Bot(ctx context.Context, id string) (*models.Member, error) {
+	m, err := s.st.GetMember(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if m.Kind != models.KindBot {
+		return nil, store.ErrNotFound
+	}
+	return m, nil
+}
+
 // RemoveMember takes a person or Bot out of a Project. Their messages keep
 // their name. A removed Bot's queued and running Runs stop and it takes no
 // more work; a removed person comes back by writing to the Project, as

@@ -185,7 +185,7 @@ type PermissionChoice struct {
 // Task, for a Project whose agents ask (agent_permissions "ask"). The
 // worker running the Run polls the Decision and relays the answer.
 func (s *Service) AskPermission(ctx context.Context, a Actor, runID string, in PermissionAsk) (*models.Decision, error) {
-	if a.Worker == "" {
+	if a.Agent == "" {
 		return nil, invalid("only the worker running the Run asks for permission")
 	}
 	title, err := text("title", in.Title, true, 500)
@@ -216,8 +216,8 @@ func (s *Service) AskPermission(ctx context.Context, a Actor, runID string, in P
 		if err != nil {
 			return err
 		}
-		if r.Worker != a.Worker || r.Status != models.RunRunning {
-			return fmt.Errorf("%w: run is not running on worker %s", store.ErrConflict, a.Worker)
+		if r.Worker != a.Agent || r.Status != models.RunRunning {
+			return fmt.Errorf("%w: run is not running on worker %s", store.ErrConflict, a.Agent)
 		}
 		var bot *models.Member // the Run's own Bot; not the Project's voice
 		who := "The agent"

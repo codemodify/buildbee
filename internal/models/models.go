@@ -751,8 +751,7 @@ type UsageRow struct {
 type RunLoad struct {
 	Status RunStatus
 	Kind   RunKind
-	Agent  string
-	Worker string
+	Bot    string // the Bot the Run is for ("" = nobody, such as a merge)
 	Runs   int
 }
 

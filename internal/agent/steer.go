@@ -1,4 +1,4 @@
-package worker
+package agent
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/agent/acp"
 	"github.com/codemodify/buildbee/internal/models"
-	"github.com/codemodify/buildbee/internal/worker/acp"
 	"github.com/gorilla/websocket"
 )
 
@@ -16,11 +16,11 @@ import (
 // messages for the agent to out until ctx ends, reconnecting as needed.
 // after is the Run's last event when it was claimed: earlier messages were
 // already folded into the prompt.
-func (w *Worker) listen(ctx context.Context, runID string, after int, out chan<- acp.Steer) {
+func (w *Agent) listen(ctx context.Context, runID string, after int, out chan<- acp.Steer) {
 	u := strings.Replace(w.api.base, "http", "ws", 1) + "/v1/runs/" + runID + "/ws"
 	backoff := time.Second
 	for ctx.Err() == nil {
-		hdr := http.Header{"X-BuildBee-Worker": {w.cfg.Name}}
+		hdr := http.Header{"X-BuildBee-Agent": {w.cfg.Name}, "X-BuildBee-Bot": {w.cfg.BotID}}
 		conn, _, err := websocket.DefaultDialer.DialContext(ctx, u+"?after="+strconv.Itoa(after), hdr)
 		if err != nil {
 			sleep(ctx, backoff)

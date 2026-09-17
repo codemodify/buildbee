@@ -1,4 +1,4 @@
-package worker
+package agent
 
 import (
 	"context"
@@ -115,15 +115,15 @@ func dockerImage(t *testing.T) string {
 	return ""
 }
 
-// workerBinary builds a static buildbee-worker, whose fake-agent mode
+// agentBinary builds a static buildbee-agent, whose fake-agent mode
 // speaks ACP inside the container.
-func workerBinary(t *testing.T) string {
+func agentBinary(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "buildbee-worker")
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/codemodify/buildbee/cmd/buildbee-worker")
+	bin := filepath.Join(t.TempDir(), "buildbee-agent")
+	cmd := exec.Command("go", "build", "-o", bin, "github.com/codemodify/buildbee/cmd/buildbee-agent")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building the worker: %v\n%s", err, out)
+		t.Fatalf("building buildbee-agent: %v\n%s", err, out)
 	}
 	return bin
 }
@@ -139,13 +139,13 @@ func leftovers(t *testing.T, runID string) []string {
 
 func TestRunsInAContainer(t *testing.T) {
 	image := dockerImage(t)
-	bin := workerBinary(t)
+	bin := agentBinary(t)
 	bare := origin(t)
 	s := newStack(t)
 	s.useRepo(bare)
-	box := Container{Image: image, Home: t.TempDir(), Mounts: []string{bin + ":/usr/local/bin/buildbee-worker:ro"}, Network: "none"}
-	s.start(Config{Name: "box", Agents: []string{"claude"}, Slots: 2, Dir: t.TempDir(), Container: box,
-		Commands: map[string][]string{"claude": {"buildbee-worker", "fake-agent"}}})
+	box := Container{Image: image, Home: t.TempDir(), Mounts: []string{bin + ":/usr/local/bin/buildbee-agent:ro"}, Network: "none"}
+	s.start(Config{Name: "Builder@box", AI: "claude", Slots: 2, Dir: t.TempDir(), Container: box,
+		Commands: map[string][]string{"claude": {"buildbee-agent", "fake-agent"}}})
 
 	done := s.queueFor("In a box", "claude")
 	got := s.wait(done.ID, finished)

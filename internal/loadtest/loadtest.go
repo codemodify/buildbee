@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codemodify/buildbee/internal/agent"
+	"github.com/codemodify/buildbee/internal/agent/acp"
 	"github.com/codemodify/buildbee/internal/models"
-	"github.com/codemodify/buildbee/internal/worker"
-	"github.com/codemodify/buildbee/internal/worker/acp"
 )
 
 // Options is one load test.
@@ -26,8 +26,8 @@ type Options struct {
 	Server   string        // Server base URL
 	As       string        // the Person queueing the work
 	Runs     int           // Runs to queue
-	Workers  int           // workers to start
-	Slots    int           // Runs each worker executes at once
+	Bots     int           // Bots to create, each with its own agent
+	Slots    int           // Runs each Bot takes at once
 	Work     time.Duration // how long one simulated agent turn takes
 	Events   int           // events one Run streams
 	Deadline time.Duration // give up after this
@@ -79,6 +79,9 @@ func Run(ctx context.Context, o Options) (Report, error) {
 	if o.Deadline <= 0 {
 		o.Deadline = 10 * time.Minute
 	}
+	if o.Bots <= 0 {
+		o.Bots = 1
+	}
 	c := &client{base: o.Server, as: o.As, http: &http.Client{Timeout: 60 * time.Second}}
 	var rep Report
 	rep.Runs = o.Runs
@@ -90,6 +93,17 @@ func Run(ctx context.Context, o Options) (Report, error) {
 	if err := c.do(ctx, http.MethodPost, "/v1/projects", map[string]any{"name": name}, &project); err != nil {
 		return rep, err
 	}
+	bots := make([]string, 0, o.Bots)
+	for i := range o.Bots {
+		var bot struct {
+			ID string `json:"id"`
+		}
+		if err := c.do(ctx, http.MethodPost, "/v1/projects/"+project.ID+"/members",
+			map[string]any{"kind": "bot", "display_name": fmt.Sprintf("Load %d", i+1), "role": "builder", "agent": "fake"}, &bot); err != nil {
+			return rep, err
+		}
+		bots = append(bots, bot.ID)
+	}
 	runIDs := make([]string, 0, o.Runs)
 	for i := range o.Runs {
 		var task, run struct {
@@ -99,7 +113,8 @@ func Run(ctx context.Context, o Options) (Report, error) {
 			map[string]any{"title": fmt.Sprintf("load %d", i+1), "handoff_role": "none"}, &task); err != nil {
 			return rep, err
 		}
-		if err := c.do(ctx, http.MethodPost, "/v1/tasks/"+task.ID+"/runs", map[string]any{"agent": "fake"}, &run); err != nil {
+		if err := c.do(ctx, http.MethodPost, "/v1/tasks/"+task.ID+"/runs",
+			map[string]any{"agent": "fake", "bot_member_id": bots[i%len(bots)]}, &run); err != nil {
 			return rep, err
 		}
 		runIDs = append(runIDs, run.ID)
@@ -109,9 +124,9 @@ func Run(ctx context.Context, o Options) (Report, error) {
 	defer cancel()
 	start := time.Now()
 	var wg sync.WaitGroup
-	for i := range o.Workers {
-		w, err := worker.New(worker.Config{Server: o.Server, Name: fmt.Sprintf("loadtest-%d", i+1), Agents: []string{"fake"},
-			Slots: o.Slots, Exec: simulate(o.Work, o.Events), Log: o.Log})
+	for i, bot := range bots {
+		w, err := agent.New(agent.Config{Server: o.Server, Name: fmt.Sprintf("load-%d@loadtest", i+1), BotID: bot, AI: "fake",
+			Host: "loadtest", Slots: o.Slots, Exec: simulate(o.Work, o.Events), Log: o.Log})
 		if err != nil {
 			return rep, err
 		}
@@ -181,8 +196,8 @@ func Run(ctx context.Context, o Options) (Report, error) {
 }
 
 // simulate is an agent that streams Events pieces over Work and stops.
-func simulate(work time.Duration, events int) worker.Exec {
-	return func(ctx context.Context, job worker.Job, emit acp.Handler) (string, error) {
+func simulate(work time.Duration, events int) agent.Exec {
+	return func(ctx context.Context, job agent.Job, emit acp.Handler) (string, error) {
 		gap := work / time.Duration(max(events, 1))
 		if err := emit(acp.Event{Kind: "plan", Payload: map[string]any{"entries": []map[string]string{{"content": "work", "status": "in_progress"}}}}); err != nil {
 			return "", err
