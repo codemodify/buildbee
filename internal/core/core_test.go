@@ -251,12 +251,14 @@ func TestMentioningABotCreatesATaskHandedToIt(t *testing.T) {
 		t.Fatalf("asking a Bot starts its Run: %+v", runs)
 	}
 	evs := f.pub.topic("channel:" + p.Channels[0].ID)[before:]
-	if len(evs) != 2 || evs[0].Cursor != posted.Seq || evs[1].Cursor <= posted.Seq {
-		t.Fatalf("the message, then the Builder's note in its thread, in order: %+v", evs)
+	if len(evs) != 1 || evs[0].Cursor != posted.Seq {
+		t.Fatalf("the message alone: asking a Bot posts nothing else: %+v", evs)
 	}
+	// The Builder's Run is queued; the thread fills with its answer, not
+	// with progress.
 	th, err := f.s.Thread(f.ctx, ada, posted.ID, store.Page{})
 	f.must(err)
-	if len(th.Replies) != 1 || th.Replies[0].MemberID != builder.ID || th.Root.ReplyCount != 1 {
+	if len(th.Replies) != 0 || th.Root.ReplyCount != 0 {
 		t.Fatalf("thread: %+v", th)
 	}
 }

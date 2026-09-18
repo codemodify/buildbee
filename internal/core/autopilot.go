@@ -350,9 +350,11 @@ func (w *work) onDecision(ctx context.Context, d *models.Decision, by who) error
 }
 
 // runPrompt is what the agent is asked to do: the Project's guidance, the
-// Bot's standing instructions, what this kind of Run is for, the Task, and
-// the latest notes handed to the Bot.
-func runPrompt(p *models.Project, bot *models.Member, task *models.Task, notes []models.Handoff, kind models.RunKind) string {
+// Bot's standing instructions, what this kind of Run is for, the thread it
+// was asked in (convo, which carries the ask and what everyone including
+// the other Bots has said), and the latest notes handed to the Bot.
+func runPrompt(p *models.Project, bot *models.Member, task *models.Task, notes []models.Handoff, convo string,
+	bw botWork, kind models.RunKind) string {
 	var b strings.Builder
 	if p != nil && p.Instructions != "" {
 		b.WriteString("Project guidance:\n" + p.Instructions + "\n\n")
@@ -373,22 +375,26 @@ func runPrompt(p *models.Project, bot *models.Member, task *models.Task, notes [
 		b.WriteString("Implement the Task in the repository in your working directory. Keep the change focused and " +
 			"run the project's tests or checks if it has any. You may commit; anything left uncommitted is committed " +
 			"for you. Do not push: BuildBee pushes the branch. End with a short summary of what you changed and how you checked it.\n\n")
-		if task.Branch != "" {
-			b.WriteString("You are continuing branch " + task.Branch + "; the earlier work is already checked out.\n\n")
+		if bw.mine != "" {
+			b.WriteString("You are continuing your branch " + bw.mine + "; your earlier work is already checked out.\n\n")
 		}
 	case models.RunReview:
-		b.WriteString("You are reviewing the Builder's work on branch " + task.Branch + ", which is checked out in your " +
+		b.WriteString("You are reviewing the Builder's work on branch " + bw.mine + ", which is checked out in your " +
 			"working directory. Compare it with " + base + " (for example `git diff " + base + "...HEAD`). Check correctness, " +
 			"tests and security. Do not modify any file. End your reply with one line that is exactly " +
 			"`VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES`, after your reasons.\n\n")
 	}
-	b.WriteString("Task: " + task.Title + "\n")
-	if task.Body != "" {
-		b.WriteString("\n" + task.Body + "\n")
+	b.WriteString("Asked: " + task.Title + "\n\n")
+	// Say nothing twice: when a person asked in chat, the thread below
+	// already carries the words they used.
+	if task.Body != "" && !strings.Contains(convo, task.Body) {
+		b.WriteString(task.Body + "\n\n")
 	}
+	b.WriteString(convo)
 	var mine []models.Handoff
 	for _, h := range notes {
-		if h.Note != "" && (bot == nil || h.ToMemberID == bot.ID) {
+		// A note that is already in the thread is not worth saying twice.
+		if h.Note != "" && (bot == nil || h.ToMemberID == bot.ID) && !strings.Contains(convo, h.Note) {
 			mine = append(mine, h)
 		}
 	}
@@ -398,17 +404,30 @@ func runPrompt(p *models.Project, bot *models.Member, task *models.Task, notes [
 	for _, h := range mine {
 		b.WriteString("\nHandoff note: " + h.Note + "\n")
 	}
+	// Other Bots asked the same thing work on branches of their own. Naming
+	// them lets a Bot read their work (`git diff origin/<branch>`) and say
+	// what it thinks of it: they share the repo, so nothing needs fetching.
+	if len(bw.others) > 0 && kind != models.RunMerge {
+		b.WriteString("\nOther Bots are on this too, each on its own branch:\n")
+		for _, o := range bw.others {
+			b.WriteString("- " + o + "\n")
+		}
+		b.WriteString("Read their work with `git diff " + base + "...origin/<branch>` before you finish, " +
+			"and say plainly where you agree, where you differ and why yours is better.\n")
+	}
 	return b.String()
 }
 
 func shortSHA(c string) string { return c[:min(12, len(c))] }
 
-// resultNote is what the Bot says in the Task's thread when its Run succeeds.
+// resultNote is what the Bot says in the thread when its Run succeeds: the
+// answer, and what it pushed when it changed the repo. A Run that changed
+// nothing says only its answer — there is nothing to report.
 func resultNote(r *models.Run) string {
 	switch r.Kind {
 	case models.RunBuild:
 		if r.Branch == "" {
-			return "No changes.\n\n" + r.Summary
+			return r.Summary
 		}
 		head := "Pushed " + r.Branch
 		if r.Commit != "" {

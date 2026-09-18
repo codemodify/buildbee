@@ -335,6 +335,71 @@ func (w *work) note(ctx context.Context, task *models.Task, author *models.Membe
 	return nil
 }
 
+// How much of a thread a Bot is given: enough to answer what the others
+// said, not so much that it crowds out the work. The oldest replies go
+// first; the ask itself always stays.
+const (
+	convoReplies = 60
+	convoBytes   = 24000
+)
+
+// conversation is the thread a Run was asked in, as the Bot should read it:
+// the ask, then who said what since. A Bot sees the other Bots' answers
+// here, which is what makes "consolidate these into one answer" and
+// cross-checking each other's work possible at all. The Bot's own replies
+// are marked "You", so a second round knows what it said the first time.
+func (w *work) conversation(ctx context.Context, task *models.Task, bot *models.Member) (string, error) {
+	if task.ThreadID == "" {
+		return "", nil
+	}
+	root, err := w.st.GetMessage(ctx, task.ThreadID)
+	if err != nil {
+		return "", err
+	}
+	replies, _, err := w.st.ListReplies(ctx, root.ID, store.Page{Limit: convoReplies})
+	if err != nil {
+		return "", err
+	}
+	members, err := w.st.ListMembers(ctx, task.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	name := func(id string) string {
+		if bot != nil && id == bot.ID {
+			return "You"
+		}
+		for i := range members {
+			if members[i].ID == id {
+				return members[i].DisplayName
+			}
+		}
+		return "Someone"
+	}
+	said := make([]string, 0, len(replies)+1)
+	for _, m := range append([]models.Message{*root}, replies...) {
+		if m.DeletedAt != nil || strings.TrimSpace(m.Body) == "" {
+			continue
+		}
+		said = append(said, name(m.MemberID)+": "+m.Body)
+	}
+	if len(said) == 0 {
+		return "", nil
+	}
+	// Trim the middle, oldest first: the ask and the latest answers matter most.
+	for size(said) > convoBytes && len(said) > 1 {
+		said = append(said[:1], said[2:]...)
+	}
+	return "The conversation so far:\n\n" + strings.Join(said, "\n\n") + "\n", nil
+}
+
+func size(xs []string) int {
+	n := 0
+	for _, x := range xs {
+		n += len(x) + 2
+	}
+	return n
+}
+
 // voice is the Member that speaks for BuildBee itself in a Project: Pulse.
 func (w *work) voice(ctx context.Context, projectID string) *models.Member {
 	members, err := w.st.ListMembers(ctx, projectID)

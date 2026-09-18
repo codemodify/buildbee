@@ -135,12 +135,17 @@ func (s *Service) claimOnce(ctx context.Context, a Actor, ai string) (*models.Cl
 		if err != nil {
 			return err
 		}
-		c := &models.Claim{Run: *r, Task: *task, Project: *proj, Notes: notes, Files: files}
+		var bot *models.Member
 		if r.BotMemberID != "" {
-			if c.Bot, err = w.st.GetMember(ctx, r.BotMemberID); err != nil {
+			if bot, err = w.st.GetMember(ctx, r.BotMemberID); err != nil {
 				return err
 			}
 		}
+		bw, err := w.branchesFor(ctx, task, bot, r.Kind)
+		if err != nil {
+			return err
+		}
+		c := &models.Claim{Run: *r, Task: *task, Project: *proj, Bot: bot, Notes: notes, Files: files, Branch: bw.mine}
 		ev, err := w.st.AppendRunEvent(ctx, r.ID, models.RunEventStatus,
 			map[string]any{"status": r.Status, "detail": "claimed by " + a.Agent}, w.now)
 		if err != nil {

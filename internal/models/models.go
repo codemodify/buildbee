@@ -275,22 +275,34 @@ func MentionedBots(body string, members []Member) []Member {
 	return mentioned(body, members, KindBot)
 }
 
-// MentionedPeople returns human Members referenced as @Name in text
-// (a name's spaces may be written as underscores or dashes: @Ada_Lovelace).
+// MentionedPeople returns human Members referenced as @Name in text.
 func MentionedPeople(body string, members []Member) []Member {
 	return mentioned(body, members, KindHuman)
 }
 
+// mentioned finds the Members an @mention names. A name is matched as it
+// was set — @dev-grok-nc-laptop is the Bot named dev-grok-nc-laptop, case
+// aside and nothing rewritten. A name with spaces is written the way it
+// reads, "@Ada Lovelace", so it too is spelled as it was set.
 func mentioned(body string, members []Member, kind string) []Member {
-	found := mentionToken.FindAllStringSubmatch(body, -1)
-	if len(found) == 0 {
+	if !strings.Contains(body, "@") {
 		return nil
 	}
+	low := strings.ToLower(body)
 	want := map[string]bool{}
-	for _, m := range found {
-		// "@Scout." ends a sentence; "@Ada-Lovelace" and "@Ada_Lovelace" match.
-		key := strings.ToLower(strings.TrimRight(m[1], ".-_"))
-		want[strings.ReplaceAll(key, "-", "_")] = true
+	for _, m := range mentionToken.FindAllStringSubmatch(body, -1) {
+		want[strings.ToLower(m[1])] = true          // @dev-grok-nc-laptop
+		want[strings.ToLower(strings.TrimRight(m[1], "."))] = true // "@Scout." ends a sentence
+	}
+	named := func(name string) bool {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			return false
+		}
+		if strings.ContainsAny(name, " \t") { // a name with spaces: "@Ada Lovelace"
+			return strings.Contains(low, "@"+name)
+		}
+		return want[name]
 	}
 	var out []Member
 	seen := map[string]bool{}
@@ -298,21 +310,12 @@ func mentioned(body string, members []Member, kind string) []Member {
 		if mem.Kind != kind || seen[mem.ID] || (kind == KindBot && mem.LeftAt != nil) { // removed Bots do nothing
 			continue
 		}
-		hit := want[handle(mem.DisplayName)]
-		if kind == KindBot {
-			hit = hit || want[strings.ToLower(mem.Role)]
-		}
-		if hit {
+		if named(mem.DisplayName) || (kind == KindBot && named(mem.Role)) {
 			out = append(out, mem)
 			seen[mem.ID] = true
 		}
 	}
 	return out
-}
-
-// handle is how a display name is written after @: lowercase, spaces as _.
-func handle(name string) string {
-	return strings.ToLower(strings.Join(strings.Fields(name), "_"))
 }
 
 // TaskLooksAmbiguous is the thin Scout heuristic for opening a Decision.
@@ -719,6 +722,11 @@ type Claim struct {
 	Project Project   `json:"project"`
 	Bot     *Member   `json:"bot,omitempty"`
 	Notes   []Handoff `json:"handoffs"`
+	// Branch is what this Run starts from: the Bot's own earlier work when
+	// it is carrying on, the branch under review for a review, empty for a
+	// fresh start. Several Bots asked the same thing each get their own,
+	// so they never share a branch.
+	Branch string `json:"branch,omitempty"`
 	// Files are what people attached to the Task: screenshots, logs,
 	// designs. The worker fetches them and puts them where the agent can
 	// read them.

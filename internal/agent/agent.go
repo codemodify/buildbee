@@ -327,7 +327,7 @@ func (w *Agent) work(ctx context.Context, c *models.Claim, agent string, emit ac
 	workDir := ""
 	switch {
 	case c.Project.RepoURL != "":
-		from := c.Task.Branch // continue the Task's branch
+		from := c.Branch // carry on this Bot's own branch, if it has one
 		if run.Kind == models.RunReview && from == "" {
 			return "", rep, errors.New("the Task has no branch to review")
 		}
@@ -402,7 +402,9 @@ func (w *Agent) deliver(ctx context.Context, c *models.Claim, ws *workspace, age
 			say("uploading the diff failed: %v", err)
 		}
 	}
-	target := c.Task.Branch
+	// Push back to the branch this Run started from, or open a new one of
+	// this Bot's own: two Bots on one ask never push to the same branch.
+	target := c.Branch
 	if target == "" {
 		target = branchName(c.Task.Title, c.Run.ID)
 	}

@@ -23,18 +23,18 @@ export function ThreadPanel({ rootId, onClose }: { rootId: string; onClose: () =
   return (
     <aside className="flex h-full min-w-0 flex-col border-l border-bb-border bg-bb-surface">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-bb-border px-4">
-        <p className="text-[14px] font-semibold">{taskId ? "Task" : "Thread"}</p>
+        <p className="text-[14px] font-semibold">Thread</p>
         <Button tone="ghost" size="sm" onClick={onClose} aria-label="Close thread">
           ✕
         </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <ErrorNote>{error}</ErrorNote>
-        {taskId && <TaskHeader taskId={taskId} />}
+        {taskId && <WorkStrip taskId={taskId} />}
         {thread && (
           <>
             <div className="py-2">
-              <MessageItem message={thread.root} compactThread hideTask={!!taskId} />
+              <MessageItem message={thread.root} compactThread />
             </div>
             {count > 0 && (
               <div className="flex items-center gap-3 px-4 text-[11.5px] text-bb-subtle">
@@ -74,15 +74,24 @@ export function useTaskDetail(taskId: string) {
   return detail;
 }
 
-function TaskHeader({ taskId }: { taskId: string }) {
+/**
+ * WorkStrip is what a thread shows besides the answers: who is working on
+ * it, and a way into each Bot's reasoning, tools and log. The answers are
+ * the replies themselves, so nothing here repeats them — a finished Run is
+ * one collapsed line. Branch, pull request and the work buttons appear only
+ * once a Bot has actually changed the repo.
+ */
+function WorkStrip({ taskId }: { taskId: string }) {
   const { data: detail, error, reload } = useTaskDetail(taskId);
-  const { data, members } = useCtx();
+  const { data } = useCtx();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   if (!detail) return error ? <ErrorNote>{error}</ErrorNote> : null;
-  const active = detail.runs.find((r) => r.status === "running" || r.status === "pending");
-  const latest = active ?? detail.runs[0];
-  const assignee = detail.assignee_member_id ? members.get(detail.assignee_member_id) : undefined;
+  const working = detail.runs.filter((r) => r.status === "running" || r.status === "pending");
+  // Every Bot asked shows once: its live Run, or its last one.
+  const runs = [...working, ...detail.runs.filter((r) => !working.includes(r)).slice(0, 4)];
+  const repo = !!detail.branch || !!detail.pr_url;
+  if (!runs.length && !repo) return null;
   async function act(fn: () => Promise<unknown>) {
     setBusy(true);
     setErr("");
@@ -95,54 +104,46 @@ function TaskHeader({ taskId }: { taskId: string }) {
       setBusy(false);
     }
   }
-  const handTo = (role: string) => act(() => api.handOff(taskId, { to_role: role, autorun: true, note: "" }));
   return (
-    <section className="space-y-3 border-b border-bb-border bg-bb-inset/50 px-4 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <button type="button" className="min-w-0 text-left" onClick={() => go({ view: "task", projectId: data.project.id, taskId })}>
-          <h3 className="text-[15px] leading-snug font-semibold hover:underline">{detail.title}</h3>
-          <p className="mt-0.5 text-[12px] text-bb-subtle">
-            {assignee?.display_name ?? "Unassigned"}
-            {detail.branch && <span className="font-mono"> · {detail.branch}</span>}
-          </p>
-        </button>
-        <Pill tone={detail.merged_at ? "success" : taskTone(detail.status)}>
-          {detail.merged_at ? "Merged" : taskLabel[detail.status] ?? detail.status}
-        </Pill>
-      </div>
-      {detail.pr_url && (
-        <a href={detail.pr_url} target="_blank" rel="noreferrer noopener" className="block text-[12.5px] text-bb-accent hover:underline">
-          {detail.pr_url}
-        </a>
+    <section className="space-y-2 border-b border-bb-border bg-bb-inset/50 px-4 py-3">
+      {working.length > 0 && (
+        <p className="text-[12px] text-bb-subtle">
+          {working.length === 1 ? "1 bot working" : `${working.length} bots working`}
+        </p>
       )}
-      {latest && <RunPanel key={latest.id} runId={latest.id} defaultOpen={!!active} />}
-      <div className="flex flex-wrap gap-1.5">
-        {!active && detail.status !== "done" && (
-          <>
-            <Button size="sm" disabled={busy} onClick={() => void handTo("scout")}>
-              Plan
+      {runs.map((r) => (
+        <RunPanel key={r.id} runId={r.id} defaultOpen={false} />
+      ))}
+      {repo && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1 text-[12.5px]">
+          {detail.branch && <span className="font-mono text-bb-muted">{detail.branch}</span>}
+          <Pill tone={detail.merged_at ? "success" : taskTone(detail.status)}>
+            {detail.merged_at ? "Merged" : taskLabel[detail.status] ?? detail.status}
+          </Pill>
+          {detail.pr_url && (
+            <a href={detail.pr_url} target="_blank" rel="noreferrer noopener" className="text-bb-accent hover:underline">
+              Pull request
+            </a>
+          )}
+          <button
+            type="button"
+            className="text-bb-muted hover:text-bb-fg"
+            onClick={() => go({ view: "task", projectId: data.project.id, taskId })}
+          >
+            Open
+          </button>
+          {!working.length && detail.status !== "done" && (
+            <Button size="sm" disabled={busy} onClick={() => void act(() => api.handOff(taskId, { to_role: "sentry", autorun: true, note: "" }))}>
+              Review
             </Button>
-            <Button size="sm" disabled={busy} onClick={() => void handTo("builder")}>
-              Build
+          )}
+          {detail.status !== "done" && detail.status !== "canceled" && (
+            <Button size="sm" tone="ghost" disabled={busy} onClick={() => void act(() => api.updateTask(taskId, { status: "done" }))}>
+              Done
             </Button>
-            {detail.branch && (
-              <Button size="sm" disabled={busy} onClick={() => void handTo("sentry")}>
-                Review
-              </Button>
-            )}
-          </>
-        )}
-        {detail.status !== "done" && detail.status !== "canceled" && (
-          <Button size="sm" tone="ghost" disabled={busy} onClick={() => void act(() => api.updateTask(taskId, { status: "done" }))}>
-            Done
-          </Button>
-        )}
-        {detail.status !== "canceled" && detail.status !== "done" && (
-          <Button size="sm" tone="ghost" disabled={busy} onClick={() => void act(() => api.updateTask(taskId, { status: "canceled" }))}>
-            Cancel
-          </Button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
       <ErrorNote>{err}</ErrorNote>
     </section>
   );

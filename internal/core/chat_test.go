@@ -85,9 +85,15 @@ func TestTaskThreadsCarryTheWork(t *testing.T) {
 		said = append(said, m.Body)
 	}
 	all := strings.Join(said, "\n")
-	for _, want := range []string{"Building.", "Pushed buildbee/cache-1.", "Added a Redis cache", "Reviewing."} {
+	for _, want := range []string{"Pushed buildbee/cache-1.", "Added a Redis cache"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("thread lacks %q:\n%s", want, all)
+		}
+	}
+	// A Bot working says nothing: only its answer is a reply.
+	for _, not := range []string{"Building.", "Reviewing.", "Planning."} {
+		if strings.Contains(all, not) {
+			t.Fatalf("thread carries the progress note %q:\n%s", not, all)
 		}
 	}
 }
@@ -281,8 +287,14 @@ func TestAskingElsewhereOpensTheTaskThreadInTasks(t *testing.T) {
 	if th.Root.ChannelID != p.Channels[0].ID || th.Root.TaskID != task.ID || posted.TaskID != task.ID || posted.ReplyCount != 0 {
 		t.Fatalf("thread root %+v, message %+v", th.Root, posted.Message)
 	}
-	if len(th.Replies) != 1 || th.Replies[0].Body != "Planning." {
-		t.Fatalf("Scout reports in the Task's thread: %+v", th.Replies)
+	// Scout's Run is queued, but the thread stays empty until it answers.
+	if len(th.Replies) != 0 {
+		t.Fatalf("a queued Run says nothing in the thread: %+v", th.Replies)
+	}
+	runs, err := f.s.Runs(f.ctx, task.ID)
+	f.must(err)
+	if len(runs) != 1 || runs[0].Status != models.RunPending {
+		t.Fatalf("Scout's Run: %+v", runs)
 	}
 }
 

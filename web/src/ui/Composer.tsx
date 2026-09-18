@@ -72,7 +72,8 @@ export function Composer({
   function complete(m: Member) {
     const el = ref.current;
     const at = el?.selectionStart ?? text.length;
-    const before = text.slice(0, at).replace(/@([\p{L}\p{N}_.-]*)$/u, `@${m.display_name.replace(/\s+/g, "_")} `);
+    // Complete to the name as it was set, so it reads and matches the same.
+    const before = text.slice(0, at).replace(/@([\p{L}\p{N}_.-]*)$/u, `@${m.display_name.trim()} `);
     caret.current = before.length;
     setText(before + text.slice(at));
     setPick(0);

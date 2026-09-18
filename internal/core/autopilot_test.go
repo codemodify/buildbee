@@ -139,7 +139,7 @@ func TestReviewChangesGoBackToTheBuilderThenToAPerson(t *testing.T) {
 	a.next(models.RunPlan, RunReport{Summary: "plan"})
 	for round := 1; round <= maxRounds; round++ {
 		b := a.next(models.RunBuild, RunReport{Summary: "try", Branch: "buildbee/tricky-1"})
-		if round > 1 && !strings.Contains(b.Prompt, "Sentry asked for changes") || round > 1 && !strings.Contains(b.Prompt, "continuing branch buildbee/tricky-1") {
+		if round > 1 && !strings.Contains(b.Prompt, "Sentry asked for changes") || round > 1 && !strings.Contains(b.Prompt, "continuing your branch buildbee/tricky-1") {
 			t.Fatalf("round %d: the Builder gets the review and its branch:\n%s", round, b.Prompt)
 		}
 		a.next(models.RunReview, RunReport{Summary: "Missing tests.\nVERDICT: REQUEST_CHANGES"})

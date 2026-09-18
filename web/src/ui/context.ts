@@ -21,12 +21,17 @@ export function useCtx(): Ctx {
   return c;
 }
 
-/** mentionNames are the lower-case names @mentions may use. */
+/**
+ * mentionNames are the names @mentions may use: each Member's name as it
+ * was set, and a Bot's role, lower-cased for comparison and nothing else
+ * rewritten. This is the Server's rule (models.mentioned), so what reads
+ * as a mention here is one there too.
+ */
 export function mentionNames(members: Map<string, Member>): Set<string> {
   const out = new Set<string>();
   for (const m of members.values()) {
-    out.add(m.display_name.toLowerCase().replace(/\s+/g, "_"));
-    if (m.kind === "bot") out.add(m.role.toLowerCase());
+    out.add(m.display_name.trim().toLowerCase());
+    if (m.kind === "bot") out.add(m.role.trim().toLowerCase());
   }
   return out;
 }

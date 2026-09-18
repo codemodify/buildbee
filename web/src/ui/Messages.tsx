@@ -1,11 +1,10 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { api } from "../api";
-import { go, parse } from "../route";
 import { Markdown, ago, clock } from "../text";
 import type { FileRef, Message } from "../types";
 import { bytes } from "./Composer";
 import { mentionNames, useCtx } from "./context";
-import { Avatar, Button, Confirm, Pill, cx, inputClass, taskLabel, taskTone } from "./kit";
+import { Avatar, Button, Confirm, Pill, cx, inputClass } from "./kit";
 
 /** MessageList renders messages with day dividers, grouping consecutive posts by one author. */
 export function MessageList({
@@ -59,21 +58,26 @@ export function MessageItem({
   grouped,
   onOpenThread,
   compactThread,
-  hideTask,
 }: {
   message: Message;
   grouped?: boolean;
   onOpenThread?: (m: Message) => void;
   compactThread?: boolean;
-  hideTask?: boolean;
 }) {
-  const { members, tasks, online, myMember } = useCtx();
+  const { members, online, myMember } = useCtx();
   const author = members.get(m.member_id);
   const names = useMemo(() => mentionNames(members), [members]);
-  const task = m.task_id && !hideTask ? tasks.get(m.task_id) : undefined;
   const mine = !!myMember && m.member_id === myMember.id && !m.deleted_at;
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // A message with replies opens them when clicked: the question is the
+  // way in, so nothing has to be said under it. Links, buttons and
+  // selecting text keep their own behaviour.
+  const opens = !!onOpenThread && !compactThread && !editing && !m.deleted_at && (!!m.task_id || (m.reply_count ?? 0) > 0);
+  const open = (e: MouseEvent<HTMLElement>) => {
+    if (!opens || (e.target as HTMLElement).closest("a,button,input,textarea,img") || window.getSelection()?.toString()) return;
+    onOpenThread?.(m);
+  };
   return (
     <div className={cx("group relative flex gap-3 px-4 hover:bg-bb-hover/60", grouped ? "py-0.5" : "pt-2 pb-1")}>
       <div className="w-8 shrink-0">
@@ -97,7 +101,11 @@ export function MessageItem({
         ) : m.deleted_at ? (
           <p className="text-[13.5px] text-bb-subtle italic">Message deleted</p>
         ) : (
-          <div className={cx("text-[14px] leading-relaxed text-bb-fg", m.edited_at && "[&_p:last-child]:inline")}>
+          <div
+            className={cx("text-[14px] leading-relaxed text-bb-fg", m.edited_at && "[&_p:last-child]:inline", opens && "cursor-pointer")}
+            onClick={open}
+            title={opens ? "Open the replies" : undefined}
+          >
             <Markdown text={m.body} mentions={names} />
             {m.edited_at && (
               <span className="ml-1 text-[11px] text-bb-subtle" title={`Edited ${new Date(m.edited_at).toLocaleString()}`}>
@@ -107,7 +115,6 @@ export function MessageItem({
           </div>
         )}
         {!m.deleted_at && m.files && m.files.length > 0 && <Attachments files={m.files} />}
-        {task && <TaskCard taskId={task.id} />}
         {!compactThread && (m.reply_count ?? 0) > 0 && onOpenThread && (
           <button
             type="button"
@@ -216,51 +223,3 @@ function EditBox({ message, onDone }: { message: Message; onDone: () => void }) 
   );
 }
 
-/** TaskCard shows a Task's state; it opens the Task's thread beside the channel. */
-export function TaskCard({ taskId }: { taskId: string }) {
-  const { tasks, members, data } = useCtx();
-  const task = tasks.get(taskId);
-  if (!task) return null;
-  const onOpen = () => {
-    if (!task.thread_id) return;
-    const here = parse(window.location.hash);
-    go(here.view === "channel" ? { ...here, threadId: task.thread_id } : { view: "channel", projectId: data.project.id, threadId: task.thread_id });
-  };
-  const assignee = task.assignee_member_id ? members.get(task.assignee_member_id) : undefined;
-  return (
-    <div className="mt-1.5 max-w-xl rounded-lg border border-bb-border bg-bb-surface p-3">
-      <div className="flex items-start justify-between gap-3">
-        <button type="button" onClick={onOpen} className="min-w-0 text-left">
-          <p className="truncate text-[13.5px] font-semibold hover:underline">{task.title}</p>
-          <p className="mt-0.5 text-[12px] text-bb-subtle">
-            {assignee?.display_name ?? "Unassigned"}
-            {task.branch && (
-              <>
-                {" · "}
-                <span className="font-mono">{task.branch}</span>
-              </>
-            )}
-          </p>
-        </button>
-        <Pill tone={task.merged_at ? "success" : taskTone(task.status)}>{task.merged_at ? "Merged" : taskLabel[task.status] ?? task.status}</Pill>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
-        <a
-          href={`#/p/${data.project.id}/tasks/${task.id}`}
-          onClick={(e) => {
-            e.preventDefault();
-            go({ view: "task", projectId: data.project.id, taskId: task.id });
-          }}
-          className="text-bb-muted hover:text-bb-fg"
-        >
-          Open
-        </a>
-        {task.pr_url && (
-          <a href={task.pr_url} target="_blank" rel="noreferrer noopener" className="text-bb-accent hover:underline">
-            Pull request
-          </a>
-        )}
-      </div>
-    </div>
-  );
-}

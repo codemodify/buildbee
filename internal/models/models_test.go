@@ -68,17 +68,44 @@ func TestMentionedBots(t *testing.T) {
 	}
 }
 
+// A Bot is mentioned by the name it was configured with, dashes and all.
+func TestMentionedBotsUseTheNameAsSet(t *testing.T) {
+	members := []Member{{ID: "g", Kind: KindBot, DisplayName: "dev-grok-nc-laptop", Role: RoleBuilder}}
+	for _, body := range []string{
+		"@dev-grok-nc-laptop tell me about your harness",
+		"@DEV-Grok-NC-Laptop tell me about your harness",
+		"ask @dev-grok-nc-laptop.",
+	} {
+		if got := MentionedBots(body, members); len(got) != 1 || got[0].ID != "g" {
+			t.Fatalf("%q reached %+v", body, got)
+		}
+	}
+	for _, body := range []string{
+		"@dev-grok tell me about your harness",       // half a name
+		"@dev_grok_nc_laptop about your harness",     // not how it was set
+		"@dev-grok-nc-laptop-two whose bot is this?", // a longer name
+	} {
+		if got := MentionedBots(body, members); got != nil {
+			t.Fatalf("%q must not reach it: %+v", body, got)
+		}
+	}
+}
+
 func TestMentionedPeople(t *testing.T) {
 	members := []Member{
 		{ID: "a", Kind: KindHuman, DisplayName: "Ada Lovelace"},
 		{ID: "g", Kind: KindHuman, DisplayName: "Grace"},
 		{ID: "s", Kind: KindBot, DisplayName: "Scout", Role: RoleScout},
 	}
-	got := MentionedPeople("@ada-lovelace and @Grace, not @Scout", members)
+	got := MentionedPeople("@Ada Lovelace and @Grace, not @Scout", members)
 	if len(got) != 2 || got[0].ID != "a" || got[1].ID != "g" {
 		t.Fatalf("got %+v", got)
 	}
-	if got := MentionedPeople("@Ada_Lovelace!", members); len(got) != 1 {
-		t.Fatalf("underscore handle: %+v", got)
+	// A name with spaces is written the way it reads.
+	if got := MentionedPeople("@ada lovelace!", members); len(got) != 1 || got[0].ID != "a" {
+		t.Fatalf("name as set: %+v", got)
+	}
+	if got := MentionedPeople("@Ada_Lovelace", members); got != nil {
+		t.Fatalf("underscores are not that name: %+v", got)
 	}
 }

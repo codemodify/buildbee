@@ -174,7 +174,8 @@ function inline(text: string, mentions?: Set<string>): ReactNode {
     } else if (t.startsWith("http")) {
       out.push(<Link key={at} url={t} label={t} />);
     } else {
-      const name = t.slice(1).replace(/[.\-_]+$/, "");
+      // "@Scout." ends a sentence; a name's own dashes stay part of it.
+      const name = t.slice(1).replace(/\.+$/, "");
       const known = !mentions || mentions.has(name.toLowerCase());
       out.push(
         <Fragment key={at}>

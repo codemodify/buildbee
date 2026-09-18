@@ -112,6 +112,61 @@ func (s *Service) CreateRun(ctx context.Context, a Actor, taskID string, in NewR
 	return out, err
 }
 
+// work is what a Bot has to go on in a Task: the branch it starts from,
+// and what the other Bots have pushed. Each Bot carries on its own branch,
+// so several Bots asked the same thing never write to one another's work.
+type botWork struct {
+	mine   string   // this Bot's own branch, "" when it starts fresh
+	others []string // "Builder on buildbee/cache-abc", for cross-checking
+}
+
+// branchesFor reads who pushed what from the Runs themselves. A Task has no
+// one branch: with several Bots there are several, one per Bot.
+func (w *work) branchesFor(ctx context.Context, task *models.Task, bot *models.Member, kind models.RunKind) (botWork, error) {
+	var out botWork
+	runs, err := w.st.ListRuns(ctx, task.ID) // newest first
+	if err != nil {
+		return out, err
+	}
+	members, err := w.st.ListMembers(ctx, task.ProjectID)
+	if err != nil {
+		return out, err
+	}
+	name := func(id string) string {
+		for i := range members {
+			if members[i].ID == id {
+				return members[i].DisplayName
+			}
+		}
+		return "another Bot"
+	}
+	seen := map[string]bool{}
+	for _, r := range runs {
+		if r.Branch == "" || r.Kind == models.RunMerge || r.BotMemberID == "" || seen[r.BotMemberID] {
+			continue
+		}
+		seen[r.BotMemberID] = true
+		if bot != nil && r.BotMemberID == bot.ID {
+			out.mine = r.Branch
+			continue
+		}
+		out.others = append(out.others, name(r.BotMemberID)+" on "+r.Branch)
+	}
+	// A review works on what it is reviewing, not on a branch of its own.
+	if kind == models.RunReview && out.mine == "" {
+		for _, r := range runs {
+			if r.Kind == models.RunBuild && r.Status == models.RunSucceeded && r.Branch != "" {
+				out.mine = r.Branch
+				break
+			}
+		}
+		if out.mine == "" {
+			out.mine = task.Branch
+		}
+	}
+	return out, nil
+}
+
 // createRun queues a Run executed by bot (optional) with agent ("" = the
 // Bot's agent, else any) and kind ("" = what the Bot's role does),
 // prompted with the Project's guidance, the Task and its handoff notes.
@@ -121,14 +176,22 @@ func (w *work) createRun(ctx context.Context, proj *models.Project, task *models
 	if err != nil {
 		return nil, err
 	}
+	convo, err := w.conversation(ctx, task, bot)
+	if err != nil {
+		return nil, err
+	}
 	if kind == "" {
 		kind = models.RunBuild
 		if bot != nil {
 			kind = models.RunKindForRole(bot.Role)
 		}
 	}
+	bw, err := w.branchesFor(ctx, task, bot, kind)
+	if err != nil {
+		return nil, err
+	}
 	r := models.Run{ID: uuid.NewString(), TaskID: task.ID, ProjectID: task.ProjectID, Kind: kind,
-		Status: models.RunPending, Detail: "queued", Agent: agent, Prompt: runPrompt(proj, bot, task, notes, kind),
+		Status: models.RunPending, Detail: "queued", Agent: agent, Prompt: runPrompt(proj, bot, task, notes, convo, bw, kind),
 		CreatedAt: w.now, UpdatedAt: w.now}
 	if bot != nil {
 		r.BotMemberID = bot.ID
@@ -143,27 +206,10 @@ func (w *work) createRun(ctx context.Context, proj *models.Project, task *models
 	if err := w.runEvent(ctx, r.ID, models.RunEventStatus, map[string]any{"status": r.Status, "detail": r.Detail}); err != nil {
 		return nil, err
 	}
-	if err := w.note(ctx, task, bot, startNote(r)); err != nil {
-		return nil, err
-	}
+	// A Bot says nothing when it starts: that it is working is state, shown
+	// live on the question it was asked. Its answer is its only reply.
 	return &r, w.activity(ctx, task.ProjectID, by, models.TypeRun, "created", r.ID,
 		map[string]any{"task_id": task.ID, "bot_member_id": r.BotMemberID, "agent": r.Agent, "kind": r.Kind})
-}
-
-// startNote is what a Bot says in the Task's thread when its Run is queued.
-func startNote(r models.Run) string {
-	with := ""
-	if r.Agent != "" {
-		with = " (" + r.Agent + ")"
-	}
-	switch r.Kind {
-	case models.RunPlan:
-		return "Planning" + with + "."
-	case models.RunReview:
-		return "Reviewing" + with + "."
-	default:
-		return "Building" + with + "."
-	}
 }
 
 // RunReport is a worker's report on a Run. Summary, Branch and PRURL are
